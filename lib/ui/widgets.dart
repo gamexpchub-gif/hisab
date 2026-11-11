@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 
 import '../core/books.dart';
 import '../core/money.dart';
-import 'art.dart';
 import 'theme.dart';
 
 /// Loads data and reloads automatically whenever the books change.
@@ -547,7 +546,7 @@ class TotalLine extends StatelessWidget {
   }
 }
 
-/// Logo tile used in header and splash.
+/// GameX logo tile (from the reference design).
 class LogoTile extends StatelessWidget {
   final double size;
   const LogoTile({super.key, this.size = 62});
@@ -558,19 +557,10 @@ class LogoTile extends StatelessWidget {
       width: size,
       height: size,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(size * 0.26),
-        gradient: const LinearGradient(
-            colors: [Color(0xFF1B1F4B), Color(0xFF0B0D24)], begin: Alignment.topLeft, end: Alignment.bottomRight),
-        boxShadow: const [BoxShadow(color: Color(0xB31B1F4B), blurRadius: 22, offset: Offset(0, 10), spreadRadius: -8)],
+        borderRadius: BorderRadius.circular(size * 0.2),
+        boxShadow: const [BoxShadow(color: Color(0x661B1F4B), blurRadius: 16, offset: Offset(0, 6), spreadRadius: -6)],
       ),
-      child: Stack(alignment: Alignment.center, children: [
-        Positioned(top: size * 0.06, child: Art(ArtKind.logo, width: size * 0.7)),
-        Positioned(
-          bottom: size * 0.06,
-          child: Text('GameX',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: size * 0.15)),
-        ),
-      ]),
+      child: Image.asset('assets/home/logo.png', width: size, height: size, fit: BoxFit.fill),
     );
   }
 }

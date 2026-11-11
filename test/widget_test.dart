@@ -17,7 +17,7 @@ void main() {
         ),
       ),
     ));
-    expect(find.text('GameX'), findsOneWidget);
+    expect(find.byType(LogoTile), findsOneWidget);
     expect(find.text('₹1,234.56'), findsOneWidget);
   });
 }
