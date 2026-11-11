@@ -166,6 +166,37 @@ void main() {
     expect(x.months.length, 6);
   });
 
+  test('khata: cash given / got, goods on credit, due dates and feed', () async {
+    final c = await Books.saveParty('customer', {'name': 'Khata Test', 'phone': '9800000099', 'aadhaar': '123412341234'});
+    final p = await Books.saveProduct({'name': 'Charger', 'gst_bp': 0, 'price': 50000}, openingQty: 5, openingCost: 30000);
+    final cash = asInt((await Books.moneyAccounts()).first['id']);
+    await Books.createSale(items: [ItemIn(p, 2, 50000)], customerId: c, paid: 20000, accountId: cash); // ₹800 on credit
+    await Books.createLend(kind: 'gave', partyType: 'customer', partyId: c, amount: 300000, accountId: cash, reason: 'Cash loan');
+    await Books.createLend(kind: 'got', partyType: 'customer', partyId: c, amount: 100000, accountId: cash, reason: 'Loan returned');
+    expect(await Books.partyBalance('customer', c), 80000 + 300000 - 100000);
+
+    final split = await Books.creditSplit('customer', c);
+    expect(split.goods, 80000);
+    expect(split.cashGave, 300000);
+    expect(split.cashGot, 100000);
+
+    final t = await Books.khataTotals();
+    expect(t.youGet, 280000);
+    expect(t.cashLent, 300000);
+
+    final feed = await Books.khataFeed();
+    expect(feed.map((e) => e['kind']).toSet(), containsAll(['goods', 'cash_gave', 'cash_got']));
+    expect(feed.firstWhere((e) => e['kind'] == 'goods')['reason'], 'Charger ×2');
+
+    final due = await Books.addDue('customer', c, 280000, ymd(DateTime.now().add(const Duration(days: 7))), 'After salary');
+    expect((await Books.dues()).single['party'], 'Khata Test');
+    await Books.setDueStatus(due, 'paid');
+    expect(await Books.dues(), isEmpty);
+    expect((await Books.dues(partyType: 'customer', partyId: c, openOnly: false)).single['status'], 'paid');
+    expect((await Books.boughtBy(c)).single['qty'], 2);
+    await expectBalanced();
+  });
+
   test('demo data loads and balances', () async {
     await Books.loadDemo();
     await expectBalanced();

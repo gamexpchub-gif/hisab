@@ -21,7 +21,7 @@ class AppDb {
     );
   }
 
-  static const schemaVersion = 5;
+  static const schemaVersion = 6;
 
   static Future<void> upgrade(Database db, int from, int to) async {
     if (from < 2) {
@@ -41,6 +41,15 @@ class AppDb {
       await db.execute('INSERT INTO sale_payments (sale_id, account_id, amount) '
           'SELECT id, account_id, paid FROM sales WHERE paid > 0 AND account_id IS NOT NULL');
     }
+    if (from < 6) {
+      for (final t in ['customers', 'suppliers']) {
+        for (final c in _partyColumns) {
+          await db.execute('ALTER TABLE $t ADD COLUMN $c TEXT');
+        }
+      }
+      await db.execute(_cashLends);
+      await db.execute(_partyDues);
+    }
   }
 
   static Future<void> configure(Database db) async {
@@ -59,6 +68,18 @@ class AppDb {
   static const _salePayments = '''CREATE TABLE sale_payments (
       id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id INTEGER NOT NULL REFERENCES sales(id),
       account_id INTEGER NOT NULL REFERENCES accounts(id), amount INTEGER NOT NULL)''';
+
+  static const _cashLends = '''CREATE TABLE cash_lends (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, number TEXT NOT NULL UNIQUE, kind TEXT NOT NULL,
+      party_type TEXT NOT NULL, party_id INTEGER NOT NULL, account_id INTEGER NOT NULL REFERENCES accounts(id),
+      amount INTEGER NOT NULL, date TEXT NOT NULL, reason TEXT, created_at TEXT NOT NULL)''';
+
+  static const _partyDues = '''CREATE TABLE party_dues (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, party_type TEXT NOT NULL, party_id INTEGER NOT NULL,
+      amount INTEGER NOT NULL, due_date TEXT NOT NULL, note TEXT, status TEXT NOT NULL DEFAULT 'open',
+      created_at TEXT NOT NULL)''';
+
+  static const _partyColumns = ['photo', 'alt_phone', 'aadhaar', 'pan', 'aadhaar_img', 'pan_img', 'notes'];
 
   static const schema = <String>[
     'CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)',
@@ -90,11 +111,11 @@ class AppDb {
     '''CREATE TABLE customers (
       id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, phone TEXT, email TEXT,
       address TEXT, gstin TEXT, opening INTEGER NOT NULL DEFAULT 0,
-      credit_limit INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)''',
+      credit_limit INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, photo TEXT, alt_phone TEXT, aadhaar TEXT, pan TEXT, aadhaar_img TEXT, pan_img TEXT, notes TEXT)''',
     '''CREATE TABLE suppliers (
       id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, phone TEXT, email TEXT,
       address TEXT, gstin TEXT, opening INTEGER NOT NULL DEFAULT 0,
-      credit_limit INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)''',
+      credit_limit INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, photo TEXT, alt_phone TEXT, aadhaar TEXT, pan TEXT, aadhaar_img TEXT, pan_img TEXT, notes TEXT)''',
     '''CREATE TABLE sales (
       id INTEGER PRIMARY KEY AUTOINCREMENT, number TEXT NOT NULL UNIQUE, date TEXT NOT NULL,
       customer_id INTEGER REFERENCES customers(id), subtotal INTEGER NOT NULL, discount INTEGER NOT NULL,
@@ -127,6 +148,8 @@ class AppDb {
       head_id INTEGER NOT NULL REFERENCES accounts(id), account_id INTEGER NOT NULL REFERENCES accounts(id),
       amount INTEGER NOT NULL, note TEXT, created_at TEXT NOT NULL, image TEXT)''',
     _salePayments,
+    _cashLends,
+    _partyDues,
     '''CREATE TABLE transfers (
       id INTEGER PRIMARY KEY AUTOINCREMENT, number TEXT NOT NULL UNIQUE, date TEXT NOT NULL,
       from_id INTEGER NOT NULL REFERENCES accounts(id), to_id INTEGER NOT NULL REFERENCES accounts(id),

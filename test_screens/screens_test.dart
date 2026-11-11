@@ -50,7 +50,7 @@ void main() {
     await Books.loadDemo();
   });
 
-  for (final (name, index) in [('home', 0), ('dashboard', 1), ('products', 2), ('menu', 3), ('add_product', -1), ('new_sale', -2), ('new_purchase', -3), ('ledgers', -4), ('customer_profile', -5), ('expenses', -6)]) {
+  for (final (name, index) in [('home', 0), ('dashboard', 1), ('products', 2), ('menu', 3), ('add_product', -1), ('new_sale', -2), ('new_purchase', -3), ('ledgers', -4), ('customer_profile', -5), ('expenses', -6), ('customers', -7)]) {
     testWidgets(name, (t) async {
       t.view.physicalSize = const Size(1080, 2340);
       t.view.devicePixelRatio = 2.75;
@@ -73,7 +73,9 @@ void main() {
                               ? const LedgersScreen()
                               : index == -5
                                   ? const PartyView(type: 'customer', id: 1)
-                                  : const ExpensesScreen(),
+                                  : index == -6
+                                      ? const ExpensesScreen()
+                                      : const PartiesScreen(),
         ),
       ));
       if (index == -1) {

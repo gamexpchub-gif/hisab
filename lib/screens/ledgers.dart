@@ -1,17 +1,27 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../core/alarms.dart';
 import '../core/books.dart';
 import '../core/money.dart';
 import '../ui/contact.dart';
+import '../ui/photo.dart';
 import '../ui/widgets.dart';
 import 'forms.dart';
+import 'lend_sheet.dart';
 import 'parties.dart';
+import 'sales.dart';
 
 // =============================================================================
-// Ledgers — customers (receivable), suppliers (payable) and accounts.
-// Summary card, sliding tabs, search, filters (due / overdue / settled),
-// sorting, party cards with ageing, call & WhatsApp, and bulk reminders.
+// Ledgers — the Khata book.
+//   Khata    : who you will get from / give to, goods-on-credit vs cash lent
+//              vs received, upcoming payment dates (with phone reminders),
+//              and a feed of every credit entry: whom, when, how much, why.
+//              "You gave" / "You got" buttons for cash udhar.
+//   Balances : everyone you will get from and give to, ranked.
+//   Accounts : chart of accounts with balances.
 // =============================================================================
 
 const _bg = Color(0xFFF6F7FC);
@@ -43,19 +53,34 @@ BoxDecoration _card({double r = 22}) => BoxDecoration(
       ],
     );
 
-class _LedgerData {
-  final List<Rec> customers, suppliers;
+/// Presentation of each khata entry kind.
+class _Kind {
+  final String label;
+  final IconData icon;
+  final Color color;
+  final bool raises; // true = raises what they owe you (or what you owe a supplier)
+  const _Kind(this.label, this.icon, this.color, this.raises);
+}
+
+const _kinds = {
+  'goods': _Kind('Goods on credit', Icons.shopping_bag_rounded, Color(0xFF7B3FF2), true),
+  'cash_gave': _Kind('Cash given', Icons.north_east_rounded, _red, true),
+  'receipt': _Kind('Payment received', Icons.south_west_rounded, _green, false),
+  'cash_got': _Kind('Cash received', Icons.south_west_rounded, _green, false),
+  'bill': _Kind('Goods taken on credit', Icons.inventory_2_rounded, _amber, true),
+  'payment': _Kind('Paid to supplier', Icons.north_east_rounded, Color(0xFF2F6BFF), false),
+};
+
+class _KhataData {
+  final KhataTotals totals;
+  final List<Rec> feed, dues, customers, suppliers;
   final Map<int, int> cBal, sBal;
-  final Map<int, Ageing> cAge, sAge;
   final List<(Rec, int)> accounts;
-  final Map<String, String> settings;
-  _LedgerData(this.customers, this.suppliers, this.cBal, this.sBal, this.cAge, this.sAge, this.accounts, this.settings);
-  int get receivable => cBal.values.where((v) => v > 0).fold(0, (a, b) => a + b);
-  int get payable => sBal.values.where((v) => v > 0).fold(0, (a, b) => a + b);
+  _KhataData(this.totals, this.feed, this.dues, this.customers, this.suppliers, this.cBal, this.sBal, this.accounts);
 }
 
 class LedgersScreen extends StatefulWidget {
-  final int initialTab; // 0 customers · 1 suppliers · 2 accounts
+  final int initialTab; // 0 khata · 1 balances · 2 accounts
   const LedgersScreen({super.key, this.initialTab = 0});
   @override
   State<LedgersScreen> createState() => _LedgersScreenState();
@@ -63,146 +88,214 @@ class LedgersScreen extends StatefulWidget {
 
 class _LedgersScreenState extends State<LedgersScreen> {
   late int tab = widget.initialTab;
+  String filter = 'all'; // all | goods | cash | received | suppliers
   String q = '';
-  String filter = 'all'; // all | due | overdue | settled
-  String sort = 'due'; // due | name | recent
 
-  Future<_LedgerData> _load() async {
+  Future<_KhataData> _load() async {
     final accts = <(Rec, int)>[];
     for (final a in await Books.accounts()) {
       accts.add((a, await Books.balance(asInt(a['id']), a['type'] as String)));
     }
-    return _LedgerData(
+    return _KhataData(
+      await Books.khataTotals(),
+      await Books.khataFeed(),
+      await Books.dues(),
       await Books.query('SELECT * FROM customers ORDER BY name COLLATE NOCASE'),
       await Books.query('SELECT * FROM suppliers ORDER BY name COLLATE NOCASE'),
       await Books.partyBalances('customer'),
       await Books.partyBalances('supplier'),
-      await Books.ageing('customer'),
-      await Books.ageing('supplier'),
       accts,
-      await Books.settings(),
     );
   }
 
-  String get _type => tab == 0 ? 'customer' : 'supplier';
+  void _lend(String kind) => showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => LendSheet(kind: kind),
+      );
 
   @override
   Widget build(BuildContext context) {
+    final safe = MediaQuery.of(context).padding.bottom;
     final canPop = Navigator.of(context).canPop();
     return Scaffold(
       backgroundColor: _bg,
-      body: SafeArea(
-        child: Live<_LedgerData>(
-          load: _load,
-          builder: (context, d) => ListView(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
-            children: [
-              Row(children: [
-                if (canPop) ...[
-                  _round(Icons.arrow_back_rounded, () => Navigator.of(context).pop()),
-                  const SizedBox(width: 12),
-                ],
-                Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('Ledgers', style: _j(22, FontWeight.w800, _navy)),
-                    Text('Khata · dues · payments · reminders', style: _j(12, FontWeight.w600, const Color(0xFF323B60))),
-                  ]),
-                ),
-                if (tab < 2)
-                  GestureDetector(
-                    onTap: () => open(context, PartyForm(type: _type)),
-                    child: Container(
-                      height: 42,
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(21),
-                        gradient: const LinearGradient(colors: [Color(0xFF6B35EE), Color(0xFF4318D2)]),
-                        boxShadow: const [BoxShadow(color: Color(0x664A17C9), blurRadius: 12, offset: Offset(0, 4), spreadRadius: -4)],
+      body: Stack(children: [
+        SafeArea(
+          bottom: false,
+          child: Live<_KhataData>(
+            load: _load,
+            builder: (context, d) => ListView(
+              padding: EdgeInsets.fromLTRB(16, 8, 16, (tab == 0 ? 100 : 30) + safe),
+              children: [
+                Row(children: [
+                  if (canPop) ...[
+                    GestureDetector(
+                      onTap: () => Navigator.of(context).pop(),
+                      child: Container(
+                        width: 44,
+                        height: 44,
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.white,
+                          boxShadow: [BoxShadow(color: Color(0x262A2F7A), blurRadius: 14, offset: Offset(0, 5), spreadRadius: -4)],
+                        ),
+                        child: const Icon(Icons.arrow_back_rounded, color: _ink),
                       ),
-                      child: Row(children: [
-                        const Icon(Icons.person_add_alt_1_rounded, color: Colors.white, size: 18),
-                        const SizedBox(width: 6),
-                        Text('Add', style: _j(13, FontWeight.w800, Colors.white)),
-                      ]),
                     ),
+                    const SizedBox(width: 12),
+                  ],
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('Ledger · Khata', style: _j(22, FontWeight.w800, _navy)),
+                      Text('Udhar given & taken — who, when, why', style: _j(12, FontWeight.w600, const Color(0xFF323B60))),
+                    ]),
                   ),
-              ]),
-              const SizedBox(height: 14),
-              _summary(d),
-              const SizedBox(height: 14),
-              _tabs(),
-              const SizedBox(height: 14),
-              if (tab < 2) ..._partyList(d) else _accounts(d),
-            ],
+                ]),
+                const SizedBox(height: 14),
+                _hero(d.totals),
+                const SizedBox(height: 14),
+                _tabs(),
+                const SizedBox(height: 14),
+                if (tab == 0) ..._khata(d),
+                if (tab == 1) ..._balances(d),
+                if (tab == 2) _accounts(d),
+              ],
+            ),
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _round(IconData icon, VoidCallback onTap) => GestureDetector(
-        onTap: onTap,
-        child: Container(
-          width: 44,
-          height: 44,
-          decoration: const BoxDecoration(
-            shape: BoxShape.circle,
-            color: Colors.white,
-            boxShadow: [BoxShadow(color: Color(0x262A2F7A), blurRadius: 14, offset: Offset(0, 5), spreadRadius: -4)],
-          ),
-          child: Icon(icon, color: _ink, size: 21),
-        ),
-      );
-
-  // ---------------------------------------------------------------- summary
-  Widget _summary(_LedgerData d) {
-    final overdue = d.cAge.entries.where((e) => (d.cBal[e.key] ?? 0) > 0 && e.value.oldestDays > 30).toList();
-    final overdueAmt = overdue.fold<int>(0, (a, e) => a + e.value.buckets[1] + e.value.buckets[2] + e.value.buckets[3]);
-    final net = d.receivable - d.payable;
-    Widget cell(String l, int v, Color c) => Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(l, style: _j(11, FontWeight.w600, const Color(0xCCFFFFFF))),
-            const SizedBox(height: 3),
-            FittedBox(fit: BoxFit.scaleDown, child: Text(Money.rs(v), style: _j(17, FontWeight.w800, c))),
-          ]),
-        );
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(26),
-        gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF6A2FF0), Color(0xFF4B22D8), Color(0xFF2F55E8)]),
-        boxShadow: const [BoxShadow(color: Color(0x664A17C9), blurRadius: 26, offset: Offset(0, 12), spreadRadius: -10)],
-      ),
-      child: Column(children: [
-        Row(children: [
-          cell('To receive', d.receivable, Colors.white),
-          Container(width: 1, height: 36, color: const Color(0x40FFFFFF), margin: const EdgeInsets.symmetric(horizontal: 12)),
-          cell('To pay', d.payable, Colors.white),
-          Container(width: 1, height: 36, color: const Color(0x40FFFFFF), margin: const EdgeInsets.symmetric(horizontal: 12)),
-          cell('Net', net, net >= 0 ? const Color(0xFF9CF5C4) : const Color(0xFFFFB4B4)),
-        ]),
-        if (overdue.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-            decoration: BoxDecoration(color: const Color(0x26FFFFFF), borderRadius: BorderRadius.circular(14)),
+        if (tab == 0)
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: 14 + safe,
             child: Row(children: [
-              const Icon(Icons.warning_amber_rounded, color: Color(0xFFFFD66B), size: 18),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text('${Money.rs(overdueAmt)} overdue 30+ days from ${overdue.length} customer${overdue.length == 1 ? '' : 's'}',
-                    style: _j(12, FontWeight.w700, Colors.white)),
-              ),
+              Expanded(child: _bigButton('You gave ₹', Icons.north_east_rounded, const [Color(0xFFF43F5E), Color(0xFFDC2626)], () => _lend('gave'))),
+              const SizedBox(width: 10),
+              Expanded(child: _bigButton('You got ₹', Icons.south_west_rounded, const [Color(0xFF1BB574), Color(0xFF0F8C58)], () => _lend('got'))),
             ]),
           ),
-        ],
       ]),
     );
   }
 
-  // ---------------------------------------------------------------- tabs
+  Widget _bigButton(String label, IconData icon, List<Color> colors, VoidCallback onTap) => GestureDetector(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onTap();
+        },
+        child: Container(
+          height: 56,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(28),
+            gradient: LinearGradient(colors: colors),
+            boxShadow: [BoxShadow(color: colors.last.withAlpha(0x80), blurRadius: 18, offset: const Offset(0, 8), spreadRadius: -6)],
+          ),
+          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Icon(icon, color: Colors.white),
+            const SizedBox(width: 8),
+            Text(label, style: _j(15, FontWeight.w800, Colors.white)),
+          ]),
+        ),
+      );
+
+  // ---------------------------------------------------------------- hero (liquid glass)
+  Widget _hero(KhataTotals t) {
+    Widget glass(Widget child) => ClipRRect(
+          borderRadius: BorderRadius.circular(18),
+          child: BackdropFilter(
+            filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(18),
+                gradient: const LinearGradient(colors: [Color(0x40FFFFFF), Color(0x14FFFFFF)]),
+                border: Border.all(color: const Color(0x55FFFFFF)),
+              ),
+              child: child,
+            ),
+          ),
+        );
+    Widget big(String l, int v, Color c, IconData i) => Expanded(
+          child: glass(Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Icon(i, size: 15, color: c),
+              const SizedBox(width: 4),
+              Flexible(child: Text(l, maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(11.5, FontWeight.w700, const Color(0xE6FFFFFF)))),
+            ]),
+            const SizedBox(height: 4),
+            FittedBox(fit: BoxFit.scaleDown, child: Text(Money.rs(v), style: _j(20, FontWeight.w800, Colors.white))),
+          ])),
+        );
+    Widget small(String l, int v) => Expanded(
+          child: Column(children: [
+            Text(l, maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(10.5, FontWeight.w500, const Color(0xB3FFFFFF))),
+            const SizedBox(height: 2),
+            Text(Money.compact(v), style: _j(14, FontWeight.w800, Colors.white)),
+          ]),
+        );
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(28),
+        boxShadow: const [BoxShadow(color: Color(0x664A17C9), blurRadius: 28, offset: Offset(0, 12), spreadRadius: -10)],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(28),
+        child: Stack(children: [
+          Positioned.fill(
+            child: Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF1E1B4B), Color(0xFF4B22D8), Color(0xFF2F55E8)]),
+              ),
+            ),
+          ),
+          Positioned(right: -60, top: -70, child: _blob(210, 0x2E)),
+          Positioned(left: -50, bottom: -80, child: _blob(190, 0x1F)),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(children: [
+              Row(children: [
+                big('You will get', t.youGet, const Color(0xFF9CF5C4), Icons.south_west_rounded),
+                const SizedBox(width: 10),
+                big('You will give', t.youGive, const Color(0xFFFFB4B4), Icons.north_east_rounded),
+              ]),
+              const SizedBox(height: 12),
+              glass(Row(children: [
+                small('Goods on credit', t.goodsCredit),
+                small('Cash lent', t.cashLent),
+                small('Received back', t.received),
+                small('Net', t.net),
+              ])),
+              const SizedBox(height: 10),
+              Row(children: [
+                const Icon(Icons.people_alt_rounded, size: 14, color: Color(0xCCFFFFFF)),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    '${t.customersWithDue} customer${t.customersWithDue == 1 ? '' : 's'} owe you · you owe ${t.suppliersToPay} supplier${t.suppliersToPay == 1 ? '' : 's'}',
+                    style: _j(11.5, FontWeight.w600, const Color(0xCCFFFFFF)),
+                  ),
+                ),
+              ]),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _blob(double s, int a) => Container(
+        width: s,
+        height: s,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: RadialGradient(colors: [Color.fromARGB(a, 255, 255, 255), const Color(0x00FFFFFF)]),
+        ),
+      );
+
   Widget _tabs() {
-    const labels = ['Customers', 'Suppliers', 'Accounts'];
+    const labels = ['Khata', 'Balances', 'Accounts'];
     return Container(
       height: 48,
       padding: const EdgeInsets.all(4),
@@ -231,10 +324,7 @@ class _LedgersScreenState extends State<LedgersScreen> {
                   behavior: HitTestBehavior.opaque,
                   onTap: () {
                     HapticFeedback.selectionClick();
-                    setState(() {
-                      tab = i;
-                      filter = 'all';
-                    });
+                    setState(() => tab = i);
                   },
                   child: Center(child: Text(labels[i], style: _j(13, FontWeight.w700, i == tab ? Colors.white : const Color(0xFF3A4155)))),
                 ),
@@ -245,85 +335,62 @@ class _LedgersScreenState extends State<LedgersScreen> {
     );
   }
 
-  // ---------------------------------------------------------------- party list
-  List<Widget> _partyList(_LedgerData d) {
-    final isC = tab == 0;
-    final all = isC ? d.customers : d.suppliers;
-    final bal = isC ? d.cBal : d.sBal;
-    final age = isC ? d.cAge : d.sAge;
-    int b(Rec r) => bal[asInt(r['id'])] ?? 0;
-    int old(Rec r) => b(r) > 0 ? (age[asInt(r['id'])]?.oldestDays ?? 0) : 0;
-    final counts = {
-      'all': all.length,
-      'due': all.where((r) => b(r) > 0).length,
-      'overdue': all.where((r) => old(r) > 30).length,
-      'settled': all.where((r) => b(r) <= 0).length,
-    };
-    var rows = all.where((r) {
-      if (q.isNotEmpty && !'${r['name']} ${r['phone'] ?? ''}'.toLowerCase().contains(q.toLowerCase())) return false;
-      return switch (filter) { 'due' => b(r) > 0, 'overdue' => old(r) > 30, 'settled' => b(r) <= 0, _ => true };
+  // ---------------------------------------------------------------- khata tab
+  List<Widget> _khata(_KhataData d) {
+    final feed = d.feed.where((e) {
+      final k = e['kind'] as String;
+      final ok = switch (filter) {
+        'goods' => k == 'goods',
+        'cash' => k == 'cash_gave' || k == 'cash_got',
+        'received' => k == 'receipt' || (k == 'cash_got' && e['party_type'] == 'customer'),
+        'suppliers' => e['party_type'] == 'supplier',
+        _ => true,
+      };
+      if (!ok) return false;
+      if (q.isEmpty) return true;
+      return '${e['party']} ${e['reason'] ?? ''} ${e['ref']}'.toLowerCase().contains(q.toLowerCase());
     }).toList();
-    rows.sort((x, y) => switch (sort) {
-          'name' => '${x['name']}'.toLowerCase().compareTo('${y['name']}'.toLowerCase()),
-          'recent' => (age[asInt(y['id'])]?.lastActivity ?? '').compareTo(age[asInt(x['id'])]?.lastActivity ?? ''),
-          _ => b(y).compareTo(b(x)),
-        });
-    final dueCustomers = isC ? d.customers.where((r) => b(r) > 0).toList() : <Rec>[];
+    final groups = <String, List<Rec>>{};
+    for (final e in feed) {
+      final dt = DateTime.parse(e['date'] as String);
+      groups.putIfAbsent('${monthName(dt.month)} ${dt.year}', () => []).add(e);
+    }
     return [
-      Row(children: [
-        Expanded(
-          child: Container(
-            height: 48,
-            decoration: _card(r: 24),
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            child: Row(children: [
-              const Icon(Icons.search_rounded, color: Color(0xFF2C3B8F)),
-              const SizedBox(width: 10),
-              Expanded(
-                child: TextField(
-                  onChanged: (v) => setState(() => q = v.trim()),
-                  style: _j(14, FontWeight.w600, _ink),
-                  decoration: InputDecoration(
-                    isCollapsed: true,
-                    filled: false,
-                    border: InputBorder.none,
-                    enabledBorder: InputBorder.none,
-                    focusedBorder: InputBorder.none,
-                    hintText: 'Search ${isC ? 'customers' : 'suppliers'}',
-                    hintStyle: _j(13.5, FontWeight.w400, const Color(0xFF8A8FAD)),
-                  ),
-                ),
+      if (d.dues.isNotEmpty) ...[_duesStrip(d.dues), const SizedBox(height: 14)],
+      Container(
+        height: 48,
+        decoration: _card(r: 24),
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        child: Row(children: [
+          const Icon(Icons.search_rounded, color: Color(0xFF2C3B8F)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: TextField(
+              onChanged: (v) => setState(() => q = v.trim()),
+              style: _j(14, FontWeight.w600, _ink),
+              decoration: InputDecoration(
+                isCollapsed: true,
+                filled: false,
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                hintText: 'Search name, reason, product, invoice',
+                hintStyle: _j(13.5, FontWeight.w400, const Color(0xFF8A8FAD)),
               ),
-            ]),
+            ),
           ),
-        ),
-        const SizedBox(width: 10),
-        PopupMenuButton<String>(
-          initialValue: sort,
-          onSelected: (v) => setState(() => sort = v),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          itemBuilder: (_) => const [
-            PopupMenuItem(value: 'due', child: Text('Highest balance')),
-            PopupMenuItem(value: 'recent', child: Text('Recent activity')),
-            PopupMenuItem(value: 'name', child: Text('Name A–Z')),
-          ],
-          child: Container(
-            width: 48,
-            height: 48,
-            decoration: _card(r: 24),
-            child: const Icon(Icons.sort_rounded, color: _purple),
-          ),
-        ),
-      ]),
+        ]),
+      ),
       const SizedBox(height: 10),
       SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(children: [
-          for (final f in [
-            ('all', 'All'),
-            ('due', isC ? 'With due' : 'To pay'),
-            ('overdue', '30+ days'),
-            ('settled', 'Settled'),
+          for (final f in const [
+            ('all', 'All entries'),
+            ('goods', 'Goods udhar'),
+            ('cash', 'Cash udhar'),
+            ('received', 'Received'),
+            ('suppliers', 'Suppliers'),
           ]) ...[
             GestureDetector(
               onTap: () => setState(() => filter = f.$1),
@@ -336,50 +403,282 @@ class _LedgersScreenState extends State<LedgersScreen> {
                   borderRadius: BorderRadius.circular(14),
                   border: filter == f.$1 ? null : Border.all(color: _line),
                 ),
-                child: Text('${f.$2} (${counts[f.$1]})', style: _j(12, FontWeight.w700, filter == f.$1 ? Colors.white : _ink)),
+                child: Text(f.$2, style: _j(12, FontWeight.w700, filter == f.$1 ? Colors.white : _ink)),
               ),
             ),
             const SizedBox(width: 8),
           ],
         ]),
       ),
-      if (dueCustomers.isNotEmpty) ...[
-        const SizedBox(height: 12),
-        GestureDetector(
-          onTap: () => showModalBottomSheet(
-            context: context,
-            isScrollControlled: true,
-            backgroundColor: Colors.transparent,
-            builder: (_) => _BulkReminderSheet(customers: dueCustomers, balances: d.cBal, ageing: d.cAge, settings: d.settings),
-          ),
-          child: Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(18),
-              gradient: const LinearGradient(colors: [Color(0xFF25D366), Color(0xFF128C7E)]),
-              boxShadow: const [BoxShadow(color: Color(0x5525D366), blurRadius: 14, offset: Offset(0, 5), spreadRadius: -5)],
-            ),
-            child: Row(children: [
-              const Icon(Icons.campaign_rounded, color: Colors.white),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text('Send WhatsApp reminders to ${dueCustomers.length} customer${dueCustomers.length == 1 ? '' : 's'}',
-                    style: _j(13, FontWeight.w800, Colors.white)),
-              ),
-              const Icon(Icons.chevron_right_rounded, color: Colors.white),
-            ]),
-          ),
-        ),
-      ],
       const SizedBox(height: 12),
-      if (rows.isEmpty)
-        Container(decoration: _card(), padding: const EdgeInsets.all(20), child: EmptyState(isC ? 'No customers here' : 'No suppliers here')),
-      for (final r in rows) _PartyCard(type: _type, r: r, balance: b(r), ageing: age[asInt(r['id'])]),
+      if (feed.isEmpty)
+        Container(
+          decoration: _card(),
+          padding: const EdgeInsets.all(20),
+          child: const EmptyState('No entries yet — tap “You gave” or make a credit sale'),
+        ),
+      for (final g in groups.entries) ...[
+        Padding(
+          padding: const EdgeInsets.fromLTRB(6, 4, 6, 8),
+          child: Row(children: [
+            Text(g.key.toUpperCase(), style: _j(11, FontWeight.w800, _muted).copyWith(letterSpacing: 1)),
+            const Spacer(),
+            Text('${g.value.length} entr${g.value.length == 1 ? 'y' : 'ies'}', style: _j(11, FontWeight.w600, _muted)),
+          ]),
+        ),
+        for (final e in g.value) _entry(e),
+      ],
     ];
   }
 
-  // ---------------------------------------------------------------- accounts
-  Widget _accounts(_LedgerData d) {
+  Widget _duesStrip(List<Rec> dues) {
+    final today = ymd(DateTime.now());
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        const Icon(Icons.alarm_rounded, size: 17, color: _purple),
+        const SizedBox(width: 6),
+        Text('Payment dates', style: _j(13, FontWeight.w800, _ink)),
+        const Spacer(),
+        Text('${dues.length} open', style: _j(11.5, FontWeight.w700, _muted)),
+      ]),
+      const SizedBox(height: 8),
+      SizedBox(
+        height: 118,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: dues.length,
+          separatorBuilder: (_, __) => const SizedBox(width: 10),
+          itemBuilder: (context, i) {
+            final d = dues[i];
+            final date = d['due_date'] as String;
+            final overdue = date.compareTo(today) < 0;
+            final isToday = date == today;
+            final c = overdue ? _red : isToday ? _amber : _purple;
+            final isC = d['party_type'] == 'customer';
+            return GestureDetector(
+              onTap: () => open(context, PartyView(type: d['party_type'] as String, id: asInt(d['party_id']))),
+              child: Container(
+                width: 168,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: c.withAlpha(0x66), width: 1.4),
+                  boxShadow: [BoxShadow(color: c.withAlpha(0x26), blurRadius: 14, offset: const Offset(0, 5), spreadRadius: -6)],
+                ),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(color: c.withAlpha(0x1F), borderRadius: BorderRadius.circular(8)),
+                      child: Text(overdue ? 'Overdue' : isToday ? 'Today' : timeUntil(date), style: _j(10.5, FontWeight.w800, c)),
+                    ),
+                    const Spacer(),
+                    Icon(isC ? Icons.south_west_rounded : Icons.north_east_rounded, size: 16, color: isC ? _green : _red),
+                  ]),
+                  const SizedBox(height: 8),
+                  Text('${d['party'] ?? ''}', maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(13, FontWeight.w800, _ink)),
+                  Text(Money.rs(asInt(d['amount'])), style: _j(15, FontWeight.w800, c)),
+                  Text(prettyDate(date), style: _j(10.5, FontWeight.w600, _muted)),
+                ]),
+              ),
+            );
+          },
+        ),
+      ),
+    ]);
+  }
+
+  Widget _entry(Rec e) {
+    final k = _kinds[e['kind']] ?? _kinds['goods']!;
+    final isC = e['party_type'] == 'customer';
+    final amount = asInt(e['amount']);
+    final credit = asInt(e['credit']);
+    final name = '${e['party'] ?? ''}';
+    final reason = (e['reason'] as String?) ?? '';
+    final isDoc = e['kind'] == 'goods' || e['kind'] == 'bill';
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: _card(r: 20),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: () => open(context, PartyView(type: e['party_type'] as String, id: asInt(e['party_id']))),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Stack(clipBehavior: Clip.none, children: [
+                Container(
+                  width: 46,
+                  height: 46,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(15),
+                    gradient: LinearGradient(colors: isC ? const [Color(0xFF8B5CF6), Color(0xFF4F46E5)] : const [Color(0xFFFFA24A), Color(0xFFF06A1A)]),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  alignment: Alignment.center,
+                  child: storedImage(e['photo'] as String?,
+                      fallback: Text(name.isEmpty ? '?' : name[0].toUpperCase(), style: _j(17, FontWeight.w800, Colors.white))),
+                ),
+                Positioned(
+                  right: -4,
+                  bottom: -4,
+                  child: Container(
+                    padding: const EdgeInsets.all(3),
+                    decoration: BoxDecoration(color: k.color, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)),
+                    child: Icon(k.icon, size: 11, color: Colors.white),
+                  ),
+                ),
+              ]),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Expanded(child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(14, FontWeight.w800, _ink))),
+                    Text(
+                      '${k.raises ? '+' : '−'}${Money.rs(amount)}',
+                      style: _j(14, FontWeight.w800, k.raises ? (isC ? _red : _amber) : _green),
+                    ),
+                  ]),
+                  const SizedBox(height: 3),
+                  Row(children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(color: k.color.withAlpha(0x1A), borderRadius: BorderRadius.circular(6)),
+                      child: Text(k.label, style: _j(10, FontWeight.w800, k.color)),
+                    ),
+                    const SizedBox(width: 6),
+                    Text('${prettyDate(e['date'] as String)} · ${e['ref']}', style: _j(10.5, FontWeight.w600, _muted)),
+                  ]),
+                  if (reason.isNotEmpty) ...[
+                    const SizedBox(height: 5),
+                    Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Icon(isDoc ? Icons.inventory_2_outlined : Icons.notes_rounded, size: 14, color: _muted),
+                      const SizedBox(width: 5),
+                      Expanded(
+                        child: Text(reason, maxLines: 2, overflow: TextOverflow.ellipsis, style: _j(11.5, FontWeight.w600, const Color(0xFF3A4155))),
+                      ),
+                    ]),
+                  ],
+                  if (isDoc && credit < amount) ...[
+                    const SizedBox(height: 4),
+                    Text('Paid ${Money.rs(amount - credit)} at the time · ${Money.rs(credit)} on credit',
+                        style: _j(10.5, FontWeight.w600, _muted)),
+                  ],
+                  if (isDoc)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        style: TextButton.styleFrom(padding: EdgeInsets.zero, visualDensity: VisualDensity.compact),
+                        onPressed: () => open(context, e['kind'] == 'goods' ? SaleView(id: asInt(e['doc_id'])) : PurchaseView(id: asInt(e['doc_id']))),
+                        icon: const Icon(Icons.receipt_long_rounded, size: 15),
+                        label: Text(e['kind'] == 'goods' ? 'Open invoice' : 'Open bill', style: _j(11.5, FontWeight.w700, _purple)),
+                      ),
+                    ),
+                ]),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------- balances tab
+  List<Widget> _balances(_KhataData d) {
+    final get = <(Rec, String, int)>[];
+    final give = <(Rec, String, int)>[];
+    for (final c in d.customers) {
+      final b = d.cBal[asInt(c['id'])] ?? 0;
+      if (b > 0) get.add((c, 'customer', b));
+      if (b < 0) give.add((c, 'customer', -b));
+    }
+    for (final s in d.suppliers) {
+      final b = d.sBal[asInt(s['id'])] ?? 0;
+      if (b > 0) give.add((s, 'supplier', b));
+      if (b < 0) get.add((s, 'supplier', -b));
+    }
+    get.sort((a, b) => b.$3.compareTo(a.$3));
+    give.sort((a, b) => b.$3.compareTo(a.$3));
+    Widget section(String title, String sub, List<(Rec, String, int)> rows, Color c, IconData icon) {
+      final total = rows.fold<int>(0, (a, r) => a + r.$3);
+      return Container(
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.fromLTRB(14, 14, 14, 6),
+        decoration: _card(),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(color: c.withAlpha(0x1F), borderRadius: BorderRadius.circular(11)),
+              child: Icon(icon, color: c, size: 19),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(title, style: _j(15, FontWeight.w800, _ink)),
+                Text(sub, style: _j(11, FontWeight.w500, _muted)),
+              ]),
+            ),
+            Text(Money.rs(total), style: _j(15, FontWeight.w800, c)),
+          ]),
+          const SizedBox(height: 8),
+          if (rows.isEmpty) const EmptyState('Nobody here'),
+          for (final r in rows)
+            InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => open(context, PartyView(type: r.$2, id: asInt(r.$1['id']))),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(children: [
+                  Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: r.$2 == 'customer' ? const Color(0xFFEFEBFF) : const Color(0xFFFFF1E0),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    alignment: Alignment.center,
+                    child: storedImage(r.$1['photo'] as String?,
+                        fallback: Text('${r.$1['name']}'.isEmpty ? '?' : '${r.$1['name']}'[0].toUpperCase(),
+                            style: _j(14, FontWeight.w800, r.$2 == 'customer' ? _purple : const Color(0xFFF06A1A)))),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('${r.$1['name']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(13.5, FontWeight.w700, _ink)),
+                      Text(r.$2 == 'customer' ? 'Customer' : 'Supplier', style: _j(10.5, FontWeight.w600, _muted)),
+                    ]),
+                  ),
+                  Text(Money.rs(r.$3), style: _j(13.5, FontWeight.w800, c)),
+                  const SizedBox(width: 4),
+                  GestureDetector(
+                    onTap: () => Contact.call(r.$1['phone'] as String?),
+                    child: Container(
+                      width: 30,
+                      height: 30,
+                      decoration: BoxDecoration(color: const Color(0x1F2F6BFF), borderRadius: BorderRadius.circular(10)),
+                      child: const Icon(Icons.call_rounded, size: 16, color: Color(0xFF2F6BFF)),
+                    ),
+                  ),
+                ]),
+              ),
+            ),
+        ]),
+      );
+    }
+
+    return [
+      section('You will get', 'People who owe you', get, _green, Icons.south_west_rounded),
+      section('You will give', 'People you owe', give, _red, Icons.north_east_rounded),
+    ];
+  }
+
+  // ---------------------------------------------------------------- accounts tab
+  Widget _accounts(_KhataData d) {
     const groups = [('asset', 'Assets'), ('liability', 'Liabilities'), ('equity', 'Equity'), ('income', 'Income'), ('expense', 'Expenses')];
     const colors = {
       'asset': Color(0xFF2F6BFF),
@@ -423,203 +722,26 @@ class _LedgersScreenState extends State<LedgersScreen> {
   }
 }
 
-class _PartyCard extends StatelessWidget {
-  final String type;
-  final Rec r;
-  final int balance;
-  final Ageing? ageing;
-  const _PartyCard({required this.type, required this.r, required this.balance, this.ageing});
-
-  @override
-  Widget build(BuildContext context) {
-    final isC = type == 'customer';
-    final name = r['name'] as String;
-    final phone = r['phone'] as String?;
-    final days = balance > 0 ? ageing?.oldestDays ?? 0 : 0;
-    final ageColor = days > 60 ? _red : days > 30 ? _amber : _green;
-    final initials = name.trim().split(RegExp(r'\s+')).take(2).map((w) => w.isEmpty ? '' : w[0].toUpperCase()).join();
-    final grad = isC ? const [Color(0xFF8B5CF6), Color(0xFF4F46E5)] : const [Color(0xFFFFA24A), Color(0xFFF06A1A)];
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: _card(r: 20),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(20),
-          onTap: () => open(context, PartyView(type: type, id: asInt(r['id']))),
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  gradient: LinearGradient(colors: grad, begin: Alignment.topLeft, end: Alignment.bottomRight),
-                  boxShadow: [BoxShadow(color: grad.last.withAlpha(0x55), blurRadius: 10, offset: const Offset(0, 4), spreadRadius: -3)],
-                ),
-                alignment: Alignment.center,
-                child: Text(initials.isEmpty ? '?' : initials, style: _j(16, FontWeight.w800, Colors.white)),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(14, FontWeight.w800, _ink)),
-                  const SizedBox(height: 2),
-                  Row(children: [
-                    if (balance > 0) ...[
-                      Container(width: 7, height: 7, decoration: BoxDecoration(color: ageColor, shape: BoxShape.circle)),
-                      const SizedBox(width: 5),
-                      Text(days == 0 ? 'Due today' : '${days}d old', style: _j(11, FontWeight.w700, ageColor)),
-                      const SizedBox(width: 6),
-                    ],
-                    Flexible(
-                      child: Text(
-                        ageing?.lastActivity == null ? (phone ?? 'No activity') : 'Last · ${timeAgoDate(ageing!.lastActivity!)}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: _j(11, FontWeight.w500, _muted),
-                      ),
-                    ),
-                  ]),
-                ]),
-              ),
-              Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                Text(Money.rs(balance.abs()),
-                    style: _j(14.5, FontWeight.w800, balance > 0 ? (isC ? _red : _amber) : _green)),
-                Text(balance > 0 ? (isC ? 'to receive' : 'to pay') : balance < 0 ? 'advance' : 'settled',
-                    style: _j(10.5, FontWeight.w600, _muted)),
-              ]),
-              const SizedBox(width: 6),
-              Column(children: [
-                _mini(Icons.call_rounded, const Color(0xFF2F6BFF), () => Contact.call(phone)),
-                const SizedBox(height: 6),
-                _mini(Icons.chat_rounded, const Color(0xFF25D366), () => Contact.whatsapp(phone, 'Hi $name,')),
-              ]),
-            ]),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _mini(IconData i, Color c, VoidCallback onTap) => GestureDetector(
-        onTap: () {
-          HapticFeedback.selectionClick();
-          onTap();
-        },
-        child: Container(
-          width: 30,
-          height: 30,
-          decoration: BoxDecoration(color: c.withAlpha(0x1F), borderRadius: BorderRadius.circular(10)),
-          child: Icon(i, size: 16, color: c),
-        ),
-      );
+/// "in 3 days", "in 2 wk" for a future yyyy-MM-dd date.
+String timeUntil(String ymdDate) {
+  final d = DateTime.tryParse(ymdDate);
+  if (d == null) return ymdDate;
+  final now = DateTime.now();
+  final days = DateTime(d.year, d.month, d.day).difference(DateTime(now.year, now.month, now.day)).inDays;
+  if (days <= 0) return 'Today';
+  if (days == 1) return 'Tomorrow';
+  if (days < 14) return 'in $days days';
+  if (days < 60) return 'in ${days ~/ 7} wk';
+  return 'in ${days ~/ 30} mo';
 }
 
-/// Sends a smart reminder to each customer with dues, one tap each.
-class _BulkReminderSheet extends StatefulWidget {
-  final List<Rec> customers;
-  final Map<int, int> balances;
-  final Map<int, Ageing> ageing;
-  final Map<String, String> settings;
-  const _BulkReminderSheet({required this.customers, required this.balances, required this.ageing, required this.settings});
-  @override
-  State<_BulkReminderSheet> createState() => _BulkReminderSheetState();
-}
-
-class _BulkReminderSheetState extends State<_BulkReminderSheet> {
-  final sent = <int>{};
-  bool bangla = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final list = [...widget.customers]
-      ..sort((a, b) => (widget.balances[asInt(b['id'])] ?? 0).compareTo(widget.balances[asInt(a['id'])] ?? 0));
-    return DraggableScrollableSheet(
-      initialChildSize: .8,
-      maxChildSize: .95,
-      minChildSize: .4,
-      builder: (context, scroll) => Container(
-        decoration: const BoxDecoration(color: _bg, borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
-        child: Column(children: [
-          const SizedBox(height: 10),
-          Container(width: 42, height: 5, decoration: BoxDecoration(color: const Color(0xFFD5D8EA), borderRadius: BorderRadius.circular(3))),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
-            child: Row(children: [
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Payment reminders', style: _j(18, FontWeight.w800, _navy)),
-                  Text('${sent.length} of ${list.length} sent · tone picked by due age', style: _j(12, FontWeight.w500, _muted)),
-                ]),
-              ),
-              GestureDetector(
-                onTap: () => setState(() => bangla = !bangla),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(color: const Color(0xFFE7F8EE), borderRadius: BorderRadius.circular(12)),
-                  child: Text(bangla ? 'বাংলা' : 'English', style: const TextStyle(fontWeight: FontWeight.w800, color: Color(0xFF075E54))),
-                ),
-              ),
-            ]),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-            child: Text('WhatsApp opens with the message ready — just tap Send there.', style: _j(11.5, FontWeight.w500, _muted)),
-          ),
-          Expanded(
-            child: ListView(controller: scroll, padding: const EdgeInsets.fromLTRB(16, 4, 16, 24), children: [
-              for (final c in list) _row(c),
-            ]),
-          ),
-        ]),
-      ),
-    );
-  }
-
-  Widget _row(Rec c) {
-    final id = asInt(c['id']);
-    final due = widget.balances[id] ?? 0;
-    final days = widget.ageing[id]?.oldestDays ?? 0;
-    final tone = Reminders.suggest(days);
-    final done = sent.contains(id);
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: _card(r: 16),
-      child: Row(children: [
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(c['name'] as String, style: _j(13.5, FontWeight.w800, _ink)),
-            Text('${Money.rs(due)} · ${days}d · ${Reminders.label(tone, bangla: bangla)}',
-                style: _j(11.5, FontWeight.w600, days > 60 ? _red : days > 30 ? _amber : _muted)),
-          ]),
-        ),
-        GestureDetector(
-          onTap: () async {
-            final msg = Reminders.message(
-                tone: tone, bangla: bangla, name: c['name'] as String, due: due, days: days, settings: widget.settings);
-            await Contact.whatsapp(c['phone'] as String?, msg);
-            await Books.logReminder('customer', id, c['name'] as String, 'WhatsApp');
-            if (mounted) setState(() => sent.add(id));
-          },
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-            decoration: BoxDecoration(
-              color: done ? const Color(0xFFE3F7EC) : const Color(0xFF25D366),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(done ? Icons.check_rounded : Icons.send_rounded, size: 16, color: done ? _green : Colors.white),
-              const SizedBox(width: 5),
-              Text(done ? 'Sent' : 'Send', style: _j(12.5, FontWeight.w800, done ? _green : Colors.white)),
-            ]),
-          ),
-        ),
-      ]),
-    );
+/// Keeps reminders in sync when a due is marked paid or removed.
+Future<void> closeDue(int id, {bool delete = false}) async {
+  await Alarms.cancelDue(id);
+  if (delete) {
+    await Books.deleteDue(id);
+  } else {
+    await Books.setDueStatus(id, 'paid');
   }
 }
 

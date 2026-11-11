@@ -1080,6 +1080,149 @@ class Books {
     changes.value++;
   }
 
+  // ------------------------------------------------------------ khata: cash lending & due dates
+  /// Cash given to / taken from a party outside a sale or purchase
+  /// ("You gave" / "You got"). kind: 'gave' | 'got'.
+  static Future<int> createLend({
+    required String kind,
+    required String partyType,
+    required int partyId,
+    required int amount,
+    required int accountId,
+    String? date,
+    String? reason,
+  }) {
+    return _write((x) async {
+      if (amount <= 0) throw AccountingError('Amount must be greater than zero');
+      if (kind != 'gave' && kind != 'got') throw AccountingError('Unknown entry type');
+      final isC = partyType == 'customer';
+      final p = await x.query(isC ? 'customers' : 'suppliers', where: 'id = ?', whereArgs: [partyId]);
+      if (p.isEmpty) throw AccountingError('Choose a customer or supplier');
+      final name = p.first['name'] as String;
+      final when = date ?? ymd(DateTime.now());
+      final number = await _nextNumber(x, 'cash_lends', 'KH');
+      final id = await x.insert('cash_lends', {
+        'number': number,
+        'kind': kind,
+        'party_type': partyType,
+        'party_id': partyId,
+        'account_id': accountId,
+        'amount': amount,
+        'date': when,
+        'reason': (reason ?? '').trim().isEmpty ? null : reason!.trim(),
+        'created_at': _now(),
+      });
+      final party = await accountId_(x, isC ? arCode : apCode);
+      final why = (reason ?? '').trim().isEmpty ? '' : ' — ${reason!.trim()}';
+      final lines = kind == 'gave'
+          ? [JL(party, amount, 0, partyType, partyId), JL(accountId, 0, amount)]
+          : [JL(accountId, amount, 0), JL(party, 0, amount, partyType, partyId)];
+      final text = kind == 'gave' ? 'Cash given to $name$why' : 'Cash received from $name$why';
+      await post(x, 'lend', id, when, text, lines);
+      await _log(x, kind == 'gave' ? 'payment' : 'receipt', text, number, amount);
+      return id;
+    });
+  }
+
+  static Future<int> addDue(String partyType, int partyId, int amount, String dueDate, String? note) {
+    return _write((x) async {
+      if (amount <= 0) throw AccountingError('Amount must be greater than zero');
+      return x.insert('party_dues', {
+        'party_type': partyType,
+        'party_id': partyId,
+        'amount': amount,
+        'due_date': dueDate,
+        'note': (note ?? '').trim().isEmpty ? null : note!.trim(),
+        'status': 'open',
+        'created_at': _now(),
+      });
+    });
+  }
+
+  static Future<void> setDueStatus(int id, String status) =>
+      _write((x) => x.update('party_dues', {'status': status}, where: 'id = ?', whereArgs: [id]));
+
+  static Future<void> deleteDue(int id) => _write((x) => x.delete('party_dues', where: 'id = ?', whereArgs: [id]));
+
+  /// Due dates, soonest first, with the party's name and phone.
+  static Future<List<Rec>> dues({String? partyType, int? partyId, bool openOnly = true}) => query(
+      'SELECT d.*, CASE d.party_type WHEN \'customer\' THEN (SELECT name FROM customers WHERE id = d.party_id) '
+      'ELSE (SELECT name FROM suppliers WHERE id = d.party_id) END AS party, '
+      'CASE d.party_type WHEN \'customer\' THEN (SELECT phone FROM customers WHERE id = d.party_id) '
+      'ELSE (SELECT phone FROM suppliers WHERE id = d.party_id) END AS phone, '
+      'CASE d.party_type WHEN \'customer\' THEN (SELECT photo FROM customers WHERE id = d.party_id) '
+      'ELSE (SELECT photo FROM suppliers WHERE id = d.party_id) END AS photo '
+      'FROM party_dues d WHERE 1=1'
+      '${openOnly ? " AND d.status = 'open'" : ''}'
+      '${partyType != null ? ' AND d.party_type = ? AND d.party_id = ?' : ''} '
+      'ORDER BY d.status = \'open\' DESC, d.due_date',
+      partyType != null ? [partyType, partyId] : null);
+
+  /// Every credit movement: goods on credit (sales/purchases with balance),
+  /// cash given / received, and payments — newest first.
+  static Future<List<Rec>> khataFeed() => query(
+      "SELECT 'goods' AS kind, s.id AS doc_id, s.number AS ref, s.date AS date, 'customer' AS party_type, "
+      's.customer_id AS party_id, c.name AS party, c.photo AS photo, s.total AS amount, s.total - s.paid AS credit, '
+      "(SELECT GROUP_CONCAT(name || ' ×' || qty, ', ') FROM sale_items WHERE sale_id = s.id) AS reason, s.created_at AS created_at "
+      'FROM sales s JOIN customers c ON c.id = s.customer_id WHERE s.total > s.paid '
+      'UNION ALL '
+      "SELECT 'bill', p.id, p.number, p.date, 'supplier', p.supplier_id, su.name, su.photo, p.total, p.total - p.paid, "
+      "(SELECT GROUP_CONCAT(name || ' ×' || qty, ', ') FROM purchase_items WHERE purchase_id = p.id), p.created_at "
+      'FROM purchases p JOIN suppliers su ON su.id = p.supplier_id WHERE p.total > p.paid '
+      'UNION ALL '
+      "SELECT 'cash_' || l.kind, l.id, l.number, l.date, l.party_type, l.party_id, "
+      "CASE l.party_type WHEN 'customer' THEN (SELECT name FROM customers WHERE id = l.party_id) ELSE (SELECT name FROM suppliers WHERE id = l.party_id) END, "
+      "CASE l.party_type WHEN 'customer' THEN (SELECT photo FROM customers WHERE id = l.party_id) ELSE (SELECT photo FROM suppliers WHERE id = l.party_id) END, "
+      'l.amount, l.amount, l.reason, l.created_at FROM cash_lends l '
+      'UNION ALL '
+      'SELECT pm.kind, pm.id, pm.number, pm.date, pm.party_type, pm.party_id, '
+      "CASE pm.party_type WHEN 'customer' THEN (SELECT name FROM customers WHERE id = pm.party_id) ELSE (SELECT name FROM suppliers WHERE id = pm.party_id) END, "
+      "CASE pm.party_type WHEN 'customer' THEN (SELECT photo FROM customers WHERE id = pm.party_id) ELSE (SELECT photo FROM suppliers WHERE id = pm.party_id) END, "
+      'pm.amount, pm.amount, COALESCE(pm.note, pm.reference), pm.created_at FROM payments pm '
+      'ORDER BY date DESC, created_at DESC');
+
+  static Future<KhataTotals> khataTotals() async {
+    Future<int> one(String sql) async => asInt((await query(sql)).first['v']);
+    final cb = await partyBalances('customer'), sb = await partyBalances('supplier');
+    // a party can be on either side: customers who paid in advance are owed money, and so on
+    final get = cb.values.where((v) => v > 0).fold<int>(0, (a, b) => a + b) + sb.values.where((v) => v < 0).fold<int>(0, (a, b) => a - b);
+    final give = sb.values.where((v) => v > 0).fold<int>(0, (a, b) => a + b) + cb.values.where((v) => v < 0).fold<int>(0, (a, b) => a - b);
+    return KhataTotals(
+      youGet: get,
+      youGive: give,
+      goodsCredit: await one('SELECT COALESCE(SUM(total - paid),0) AS v FROM sales WHERE customer_id IS NOT NULL'),
+      cashLent: await one("SELECT COALESCE(SUM(amount),0) AS v FROM cash_lends WHERE kind = 'gave' AND party_type = 'customer'"),
+      received: await one("SELECT COALESCE(SUM(amount),0) AS v FROM payments WHERE kind = 'receipt'") +
+          await one("SELECT COALESCE(SUM(amount),0) AS v FROM cash_lends WHERE kind = 'got' AND party_type = 'customer'"),
+      customersWithDue: cb.values.where((v) => v > 0).length,
+      suppliersToPay: sb.values.where((v) => v > 0).length,
+    );
+  }
+
+  /// Products a customer has bought (newest first).
+  static Future<List<Rec>> boughtBy(int customerId) => query(
+      'SELECT i.product_id AS pid, i.name AS name, i.qty AS qty, i.rate AS rate, i.amount AS amount, i.tax AS tax, '
+      'i.serial AS serial, s.date AS date, s.number AS number, s.id AS sale_id, p.image AS image, c.name AS category '
+      'FROM sale_items i JOIN sales s ON s.id = i.sale_id LEFT JOIN products p ON p.id = i.product_id '
+      'LEFT JOIN categories c ON c.id = p.category_id WHERE s.customer_id = ? ORDER BY s.date DESC, s.id DESC',
+      [customerId]);
+
+  /// Goods-on-credit vs cash lent vs money received, for one party.
+  static Future<CreditSplit> creditSplit(String type, int id) async {
+    Future<int> one(String sql, List<Object?> a) async => asInt((await query(sql, a)).first['v']);
+    final isC = type == 'customer';
+    return CreditSplit(
+      goods: await one(
+          isC
+              ? 'SELECT COALESCE(SUM(total - paid),0) AS v FROM sales WHERE customer_id = ?'
+              : 'SELECT COALESCE(SUM(total - paid),0) AS v FROM purchases WHERE supplier_id = ?',
+          [id]),
+      cashGave: await one("SELECT COALESCE(SUM(amount),0) AS v FROM cash_lends WHERE kind = 'gave' AND party_type = ? AND party_id = ?", [type, id]),
+      cashGot: await one("SELECT COALESCE(SUM(amount),0) AS v FROM cash_lends WHERE kind = 'got' AND party_type = ? AND party_id = ?", [type, id]),
+      payments: await one('SELECT COALESCE(SUM(amount),0) AS v FROM payments WHERE party_type = ? AND party_id = ?', [type, id]),
+    );
+  }
+
   // ------------------------------------------------------------ expense intelligence
   static Future<ExpenseInsights> expenseInsights(DateTime from, DateTime to) async {
     final f = ymd(from), t = ymd(to);
@@ -1266,7 +1409,15 @@ class Books {
       }, openingQty: s[5] as int, openingCost: s[3] as int));
     }
     final sup = await saveParty('supplier', {'name': 'Kolkata Mobile Distributors', 'phone': '9830000001'});
-    final rahul = await saveParty('customer', {'name': 'Rahul Das', 'phone': '9800000011', 'credit_limit': 2000000});
+    final rahul = await saveParty('customer', {
+      'name': 'Rahul Das',
+      'phone': '9800000011',
+      'alt_phone': '9830012345',
+      'address': '12 Station Road, Howrah',
+      'credit_limit': 2000000,
+      'aadhaar': '234567891234',
+      'notes': 'Pays after the 5th of every month',
+    });
     final priya = await saveParty('customer', {'name': 'Priya Sen', 'phone': '9800000022'}, opening: 350000);
     final money = await moneyAccounts();
     final cash = asInt(money[0]['id']), bank = asInt(money[1]['id']), upi = asInt(money[2]['id']);
@@ -1292,6 +1443,9 @@ class Books {
     await createSale(items: [ItemIn(ids[2], 1, 2399900)], accountId: cash);
     await createPurchase(items: [ItemIn(ids[6], 6, 88000)], supplierId: sup);
     await createPayment(kind: 'receipt', partyId: rahul, amount: 1000000, accountId: upi, reference: 'UPI 4423');
+    await createLend(kind: 'gave', partyType: 'customer', partyId: rahul, amount: 500000, accountId: cash, reason: 'Cash loan', date: ago(3));
+    await addDue('customer', rahul, 1500000, ymd(now.add(const Duration(days: 4))), '1st installment');
+    await addDue('customer', priya, 350000, ymd(now.subtract(const Duration(days: 2))), 'Old due');
     final heads = await accounts(kind: 'expense');
     await createExpense(headId: asInt(heads[0]['id']), amount: 1200000, accountId: bank, date: ago(5), note: 'Monthly rent');
     await createExpense(headId: asInt(heads.last['id']), amount: 24000, accountId: cash, note: 'Tea & snacks');
@@ -1352,6 +1506,25 @@ class Analytics {
     required this.recentSales,
   });
   int change(int Function(PeriodTotals p) f) => Books.pctChange(f(cur), f(prev));
+}
+
+class KhataTotals {
+  final int youGet, youGive, goodsCredit, cashLent, received, customersWithDue, suppliersToPay;
+  KhataTotals({
+    required this.youGet,
+    required this.youGive,
+    required this.goodsCredit,
+    required this.cashLent,
+    required this.received,
+    required this.customersWithDue,
+    required this.suppliersToPay,
+  });
+  int get net => youGet - youGive;
+}
+
+class CreditSplit {
+  final int goods, cashGave, cashGot, payments;
+  CreditSplit({required this.goods, required this.cashGave, required this.cashGot, required this.payments});
 }
 
 class RecurringExpense {
