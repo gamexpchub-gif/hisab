@@ -100,7 +100,7 @@ class LiquidGlassNav extends StatelessWidget {
   const LiquidGlassNav({super.key, required this.index, required this.onTap});
 
   static const _labels = ['Home', 'Dashboard', 'Products', 'Menu'];
-  static const _icons = [Icons.home_rounded, Icons.pie_chart_rounded, null, Icons.menu_rounded];
+  static const _icons = [Icons.home_rounded, Icons.pie_chart_rounded, Icons.view_in_ar_rounded, Icons.menu_rounded];
 
   static double get barHeight => p(112);
   static double get bottomGap => p(28);
@@ -111,11 +111,6 @@ class LiquidGlassNav extends StatelessWidget {
 
   Widget _icon(int i, bool on) {
     final size = p(46);
-    if (_icons[i] == null) {
-      // 3D cube from the design; tinted grey when inactive
-      final img = Image.asset('assets/products/nav_cube.png', width: size, height: size, fit: BoxFit.contain);
-      return on ? img : ColorFiltered(colorFilter: const ColorFilter.mode(_inactive, BlendMode.srcIn), child: img);
-    }
     if (!on) return Icon(_icons[i], size: size, color: _inactive);
     return ShaderMask(
       blendMode: BlendMode.srcIn,
