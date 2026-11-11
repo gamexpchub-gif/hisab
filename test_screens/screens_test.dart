@@ -2,7 +2,10 @@
 // Run: flutter test --update-goldens test_screens/
 import 'dart:io';
 
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -46,10 +49,17 @@ void main() {
       t.view.physicalSize = const Size(1080, 2340);
       t.view.devicePixelRatio = 2.75;
       addTearDown(t.view.reset);
-      await t.pumpWidget(MaterialApp(debugShowCheckedModeBanner: false, theme: buildTheme(), home: Shell(initialIndex: index)));
-      for (var i = 0; i < 8; i++) {
-        await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 250)));
-        await t.pump(const Duration(milliseconds: 400));
+      final key = GlobalKey();
+      await t.pumpWidget(RepaintBoundary(
+        key: key,
+        child: MaterialApp(debugShowCheckedModeBanner: false, theme: buildTheme(), home: Shell(initialIndex: index)),
+      ));
+      // Each database query completes on a real isolate: keep letting real
+      // time pass and pumping until no loading spinner is left.
+      for (var i = 0; i < 400; i++) {
+        await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 15)));
+        await t.pump(const Duration(milliseconds: 50));
+        if (i > 20 && find.byType(CircularProgressIndicator).evaluate().isEmpty) break;
       }
       await t.runAsync(() async {
         for (final e in find.byType(Image).evaluate()) {
@@ -57,7 +67,13 @@ void main() {
         }
       });
       await t.pump(const Duration(seconds: 2));
-      await expectLater(find.byType(Shell), matchesGoldenFile('../screenshots/$name.png'));
+      final boundary = key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+      await t.runAsync(() async {
+        final image = await boundary.toImage(pixelRatio: 2.75);
+        final png = await image.toByteData(format: ui.ImageByteFormat.png);
+        final out = File('screenshots/$name.png')..createSync(recursive: true);
+        out.writeAsBytesSync(png!.buffer.asUint8List());
+      });
     });
   }
 }

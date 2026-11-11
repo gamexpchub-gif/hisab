@@ -45,7 +45,7 @@ jobs:
         continue-on-error: true
         run: |
           curl -sSfLo /tmp/Roboto.ttf "https://raw.githubusercontent.com/google/fonts/main/ofl/roboto/Roboto%5Bwdth,wght%5D.ttf" || true
-          ROBOTO_TTF=/tmp/Roboto.ttf flutter test --update-goldens test_screens/
+          ROBOTO_TTF=/tmp/Roboto.ttf flutter test test_screens/
 
       - name: Commit screenshots
         if: github.event_name == 'push'
