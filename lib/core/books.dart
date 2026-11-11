@@ -895,7 +895,7 @@ class Books {
         "SELECT IFNULL(c.name, 'Other') AS name, COALESCE(SUM(i.amount),0) AS v FROM sale_items i "
         'JOIN sales s ON s.id = i.sale_id JOIN products p ON p.id = i.product_id '
         'LEFT JOIN categories c ON c.id = p.category_id WHERE s.date >= ? AND s.date <= ? '
-        'GROUP BY name ORDER BY v DESC',
+        "GROUP BY IFNULL(c.name, 'Other') ORDER BY v DESC",
         [f, t]);
     final payments = await query(
         'SELECT a.name AS name, a.kind AS kind, COALESCE(SUM(x.v),0) AS v FROM ('
