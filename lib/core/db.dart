@@ -21,7 +21,7 @@ class AppDb {
     );
   }
 
-  static const schemaVersion = 3;
+  static const schemaVersion = 4;
 
   static Future<void> upgrade(Database db, int from, int to) async {
     if (from < 2) {
@@ -31,6 +31,9 @@ class AppDb {
     }
     if (from < 3) {
       await db.execute('ALTER TABLE products ADD COLUMN warranty_months INTEGER NOT NULL DEFAULT 0');
+    }
+    if (from < 4) {
+      await db.execute('ALTER TABLE purchases ADD COLUMN bill_image TEXT');
     }
   }
 
@@ -97,7 +100,7 @@ class AppDb {
       id INTEGER PRIMARY KEY AUTOINCREMENT, number TEXT NOT NULL UNIQUE, bill_no TEXT, date TEXT NOT NULL,
       supplier_id INTEGER NOT NULL REFERENCES suppliers(id), subtotal INTEGER NOT NULL, tax INTEGER NOT NULL,
       total INTEGER NOT NULL, paid INTEGER NOT NULL, account_id INTEGER REFERENCES accounts(id),
-      note TEXT, created_at TEXT NOT NULL)''',
+      note TEXT, created_at TEXT NOT NULL, bill_image TEXT)''',
     'CREATE INDEX ix_purchases_date ON purchases(date)',
     '''CREATE TABLE purchase_items (
       id INTEGER PRIMARY KEY AUTOINCREMENT, purchase_id INTEGER NOT NULL REFERENCES purchases(id),

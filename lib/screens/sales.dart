@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../core/books.dart';
 import '../core/money.dart';
+import '../ui/photo.dart';
 import '../ui/theme.dart';
 import '../ui/widgets.dart';
 import 'purchase_form.dart';
@@ -199,6 +200,17 @@ class PurchaseView extends StatelessWidget {
               paidVia: p['account'] as String?,
             ),
             CardBox(child: TotalLine('Balance payable', Money.rs(due), bold: true, color: due > 0 ? C.red : C.green)),
+            if ((p['bill_image'] as String? ?? '').isNotEmpty)
+              CardBox(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Text('Supplier bill photo', style: TextStyle(fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 10),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: storedImage(p['bill_image'] as String?, fit: BoxFit.contain),
+                  ),
+                ]),
+              ),
           ],
         );
       },

@@ -245,6 +245,7 @@ class Books {
     String? date,
     String? billNo,
     String? note,
+    String? billImage,
   }) {
     return _write((x) async {
       final when = date ?? ymd(DateTime.now());
@@ -292,6 +293,7 @@ class Books {
         'paid': paid,
         'account_id': money,
         'note': note,
+        'bill_image': billImage,
         'created_at': _now(),
       });
       for (final r in rows) {

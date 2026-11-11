@@ -14,6 +14,7 @@ import 'package:hisab/core/books.dart';
 import 'package:hisab/core/db.dart';
 import 'package:hisab/main.dart';
 import 'package:hisab/screens/product_form.dart';
+import 'package:hisab/screens/purchase_pos.dart';
 import 'package:hisab/screens/sale_pos.dart';
 import 'package:hisab/ui/theme.dart';
 
@@ -46,7 +47,7 @@ void main() {
     await Books.loadDemo();
   });
 
-  for (final (name, index) in [('home', 0), ('dashboard', 1), ('products', 2), ('menu', 3), ('add_product', -1), ('new_sale', -2)]) {
+  for (final (name, index) in [('home', 0), ('dashboard', 1), ('products', 2), ('menu', 3), ('add_product', -1), ('new_sale', -2), ('new_purchase', -3)]) {
     testWidgets(name, (t) async {
       t.view.physicalSize = const Size(1080, 2340);
       t.view.devicePixelRatio = 2.75;
@@ -57,7 +58,13 @@ void main() {
         child: MaterialApp(
           debugShowCheckedModeBanner: false,
           theme: buildTheme(),
-          home: index >= 0 ? Shell(initialIndex: index) : index == -1 ? const ProductForm() : const SaleForm(),
+          home: index >= 0
+              ? Shell(initialIndex: index)
+              : index == -1
+                  ? const ProductForm()
+                  : index == -2
+                      ? const SaleForm()
+                      : const PurchaseForm(supplierId: 1),
         ),
       ));
       if (index == -1) {
