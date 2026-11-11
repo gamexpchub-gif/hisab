@@ -300,7 +300,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
         const SizedBox(height: 14),
         Row(children: [
           _mini('Daily average', Money.compact(x.dailyAvg)),
-          _mini(period == 'month' ? 'Month-end estimate' : 'Previous period', Money.compact(period == 'month' ? projection : x.previous)),
+          _mini(period == 'month' ? 'Month-end est.' : 'Previous period', Money.compact(period == 'month' ? projection : x.previous)),
           _mini('Of revenue', x.revenue == 0 ? '—' : '${x.ofRevenue.toStringAsFixed(1)}%'),
         ]),
         const SizedBox(height: 16),
@@ -340,11 +340,14 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   }
 
   Widget _mini(String l, String v) => Expanded(
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        child: Padding(
+          padding: const EdgeInsets.only(right: 10),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(l, maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(10.5, FontWeight.w500, const Color(0xB3FFFFFF))),
           const SizedBox(height: 2),
           Text(v, style: _j(15, FontWeight.w800, Colors.white)),
         ]),
+        ),
       );
 
   // ---------------------------------------------------------------- smart insights
