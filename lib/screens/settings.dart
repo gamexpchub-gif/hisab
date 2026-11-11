@@ -20,6 +20,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     'phone': 'Shop phone',
     'address': 'Shop address',
     'gstin': 'GSTIN',
+    'upi_id': 'UPI ID for QR payments (e.g. shop@okaxis)',
   };
   final ctrls = <String, TextEditingController>{};
   String? photo;

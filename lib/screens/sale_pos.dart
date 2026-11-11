@@ -1,0 +1,1337 @@
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import '../core/books.dart';
+import '../core/money.dart';
+import '../ui/widgets.dart';
+import 'parties.dart';
+import 'product_form.dart';
+import 'products.dart';
+import 'sales.dart';
+import 'scanner.dart';
+
+// =============================================================================
+// New Sale — point-of-sale billing screen.
+// Customer search with dues/credit limit · product search, barcode scan and
+// quick picks · cart with qty, rate, IMEI scan, swipe to remove · discount
+// (₹ or %), CGST/SGST split, round-off · cash/UPI/bank with change & due ·
+// UPI QR for exact amount · success screen with WhatsApp invoice.
+// =============================================================================
+
+const _bg = Color(0xFFF6F7FC);
+const _ink = Color(0xFF0A0E26);
+const _navy = Color(0xFF0B0F5E);
+const _muted = Color(0xFF6B7094);
+const _line = Color(0xFFE9EAF5);
+const _purple = Color(0xFF5B2EE0);
+const _green = Color(0xFF16A36A);
+const _red = Color(0xFFDC4545);
+const _amber = Color(0xFFE39A0F);
+
+TextStyle _j(double size, FontWeight w, Color c, {double? height, TextDecoration? deco}) => TextStyle(
+      fontFamily: 'Jakarta',
+      fontSize: size,
+      fontWeight: w,
+      fontVariations: [FontVariation('wght', w.value.toDouble())],
+      color: c,
+      height: height,
+      decoration: deco,
+    );
+
+BoxDecoration _card({double r = 22}) => BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(r),
+      border: Border.all(color: const Color(0xFFEEF0F8)),
+      boxShadow: const [
+        BoxShadow(color: Color(0x1A2A2F7A), blurRadius: 18, offset: Offset(0, 6), spreadRadius: -6),
+        BoxShadow(color: Color(0x0A2A2F7A), blurRadius: 3, offset: Offset(0, 1)),
+      ],
+    );
+
+class _Line {
+  final Rec p;
+  int qty;
+  int rate; // paise, before GST
+  final serial = TextEditingController();
+  _Line(this.p, {this.qty = 1}) : rate = asInt(p['price']);
+  int get id => asInt(p['id']);
+  int get stock => asInt(p['stock']);
+  int get gstBp => asInt(p['gst_bp']);
+  int get amount => rate * qty;
+  int get tax => Money.percent(amount, gstBp);
+  int get cost => asInt(p['cost']) * qty;
+}
+
+class SaleForm extends StatefulWidget {
+  final int? customerId;
+  const SaleForm({super.key, this.customerId});
+  @override
+  State<SaleForm> createState() => _SaleFormState();
+}
+
+class _SaleFormState extends State<SaleForm> {
+  List<Rec> products = [], customers = [], accounts = [], quick = [];
+  Map<int, int> dues = {};
+  Map<String, String> settings = {};
+  final cart = <_Line>[];
+  Rec? customer;
+  int? account;
+  String date = ymd(DateTime.now());
+  final search = TextEditingController();
+  final received = TextEditingController();
+  final discountCtrl = TextEditingController();
+  final note = TextEditingController();
+  bool discountPct = false;
+  bool roundOff = true;
+  bool receivedTouched = false;
+  bool showProfit = false;
+  bool saving = false;
+  String nextNo = '';
+
+  @override
+  void initState() {
+    super.initState();
+    search.addListener(() => setState(() {}));
+    discountCtrl.addListener(_recalc);
+    _load();
+  }
+
+  Future<void> _load() async {
+    products = await Books.query(
+        'SELECT p.*, c.name AS category, (SELECT COALESCE(SUM(qty),0) FROM sale_items WHERE product_id = p.id) AS sold '
+        'FROM products p LEFT JOIN categories c ON c.id = p.category_id ORDER BY p.name COLLATE NOCASE');
+    quick = [...products.where((p) => asInt(p['stock']) > 0)]..sort((a, b) => asInt(b['sold']).compareTo(asInt(a['sold'])));
+    if (quick.length > 10) quick = quick.sublist(0, 10);
+    customers = await Books.query('SELECT * FROM customers ORDER BY name COLLATE NOCASE');
+    dues = await Books.partyBalances('customer');
+    accounts = await Books.moneyAccounts();
+    settings = await Books.settings();
+    final n = asInt((await Books.query('SELECT COUNT(*) AS c FROM sales')).first['c']) + 1;
+    nextNo = 'INV-${n.toString().padLeft(5, '0')}';
+    account ??= accounts.isNotEmpty ? asInt(accounts.first['id']) : null;
+    if (widget.customerId != null) {
+      for (final c in customers) {
+        if (asInt(c['id']) == widget.customerId) customer = c;
+      }
+    }
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    for (final l in cart) {
+      l.serial.dispose();
+    }
+    search.dispose();
+    received.dispose();
+    discountCtrl.dispose();
+    note.dispose();
+    super.dispose();
+  }
+
+  // ---------------------------------------------------------------- totals
+  int get subtotal => cart.fold(0, (a, l) => a + l.amount);
+  int get tax => cart.fold(0, (a, l) => a + l.tax);
+  int get _discountInput {
+    try {
+      final v = Money.parse(discountCtrl.text);
+      return discountPct ? Money.percent(subtotal, v) : v; // "10" % → 1000 basis points
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  int get _disc => math.min(math.max(_discountInput, 0), subtotal);
+  int get _gross => subtotal + tax - _disc;
+  int get roundAmount => roundOff ? _gross % 100 : 0; // drop the paise
+  int get discount => _disc + roundAmount;
+  int get total => subtotal + tax - discount;
+  int get profit => subtotal - discount - cart.fold(0, (a, l) => a + l.cost);
+  int get qtyTotal => cart.fold(0, (a, l) => a + l.qty);
+
+  int get _received {
+    if (!receivedTouched) return total;
+    try {
+      return Money.parse(received.text);
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  int get paid => math.min(_received, total);
+  int get change => math.max(0, _received - total);
+  int get due => total - paid;
+
+  void _recalc() => setState(() {});
+
+  // ---------------------------------------------------------------- cart
+  void _add(Rec p, {String? serial}) {
+    HapticFeedback.selectionClick();
+    final existing = cart.where((l) => l.id == asInt(p['id']) && serial == null).toList();
+    setState(() {
+      if (existing.isNotEmpty) {
+        existing.first.qty++;
+      } else {
+        final l = _Line(p);
+        if (serial != null) l.serial.text = serial;
+        cart.add(l);
+      }
+      search.clear();
+    });
+    final inCart = cart.where((l) => l.id == asInt(p['id'])).fold<int>(0, (a, l) => a + l.qty);
+    if (inCart > asInt(p['stock'])) toast(context, 'Only ${p['stock']} × ${p['name']} in stock', error: true);
+  }
+
+  Future<void> _scan() async {
+    final code = await BarcodeScannerScreen.scan(context, title: 'Scan product to add');
+    if (code == null || !mounted) return;
+    for (final p in products) {
+      if ((p['sku'] as String?)?.trim() == code) {
+        _add(p);
+        return;
+      }
+    }
+    final add = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Product not found'),
+        content: Text('No product has barcode “$code”. Add it as a new product?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Add product')),
+        ],
+      ),
+    );
+    if (add == true && mounted) {
+      await open(context, const ProductForm());
+      _load();
+    }
+  }
+
+  Future<void> _editRate(_Line l) async {
+    final c = TextEditingController(text: Money.edit(l.rate));
+    final r = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Price for ${l.p['name']}'),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          TextField(
+            controller: c,
+            autofocus: true,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(prefixText: '₹ ', labelText: 'Rate per unit (before GST)'),
+          ),
+          const SizedBox(height: 8),
+          Text('MRP ${Money.rs(asInt(l.p['mrp']))} · list price ${Money.rs(asInt(l.p['price']))}',
+              style: _j(12, FontWeight.w500, _muted)),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, c.text), child: const Text('Set price')),
+        ],
+      ),
+    );
+    if (r == null) return;
+    try {
+      setState(() => l.rate = Money.parse(r));
+    } catch (_) {
+      if (mounted) toast(context, 'Enter a valid amount', error: true);
+    }
+  }
+
+  Future<void> _scanSerial(_Line l) async {
+    final code = await BarcodeScannerScreen.scan(context, title: 'Scan IMEI / serial');
+    if (code != null) setState(() => l.serial.text = code);
+  }
+
+  // ---------------------------------------------------------------- customer
+  Future<void> _pickCustomer() async {
+    final r = await showModalBottomSheet<Object>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _CustomerSheet(customers: customers, dues: dues),
+    );
+    if (r == 'walkin') {
+      setState(() => customer = null);
+    } else if (r == 'new') {
+      await open(context, const PartyForm(type: 'customer'));
+      await _load();
+      if (customers.isNotEmpty) {
+        final newest = [...customers]..sort((a, b) => asInt(b['id']).compareTo(asInt(a['id'])));
+        setState(() => customer = newest.first);
+      }
+    } else if (r is Map<String, Object?>) {
+      setState(() => customer = r);
+    }
+  }
+
+  // ---------------------------------------------------------------- charge
+  Future<void> _charge() async {
+    if (saving) return;
+    if (cart.isEmpty) {
+      toast(context, 'Add at least one product', error: true);
+      return;
+    }
+    if (due > 0 && customer == null) {
+      toast(context, 'Select a customer to give credit (₹${Money.inr(due)} due)', error: true);
+      return;
+    }
+    if (customer != null && due > 0) {
+      final limit = asInt(customer!['credit_limit']);
+      final after = (dues[asInt(customer!['id'])] ?? 0) + due;
+      if (limit > 0 && after > limit) {
+        final ok = await showDialog<bool>(
+          context: context,
+          builder: (c) => AlertDialog(
+            title: const Text('Credit limit crossed'),
+            content: Text('${customer!['name']} will owe ${Money.rs(after)}, above the limit of ${Money.rs(limit)}. Continue?'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+              TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Continue')),
+            ],
+          ),
+        );
+        if (ok != true) return;
+      }
+    }
+    setState(() => saving = true);
+    try {
+      final id = await Books.createSale(
+        items: [for (final l in cart) ItemIn(l.id, l.qty, l.rate, l.serial.text)],
+        customerId: customer == null ? null : asInt(customer!['id']),
+        paid: paid,
+        accountId: account,
+        discount: discount,
+        date: date,
+        note: note.text.trim().isEmpty ? null : note.text.trim(),
+      );
+      if (!mounted) return;
+      HapticFeedback.heavyImpact();
+      Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => SaleSuccessScreen(saleId: id, change: change)));
+    } catch (e) {
+      toast(context, '$e', error: true);
+      setState(() => saving = false);
+    }
+  }
+
+  Rec? get _account {
+    for (final a in accounts) {
+      if (asInt(a['id']) == account) return a;
+    }
+    return null;
+  }
+
+  // ================================================================== UI
+  @override
+  Widget build(BuildContext context) {
+    final safe = MediaQuery.of(context).padding.bottom;
+    return Scaffold(
+      backgroundColor: _bg,
+      body: Stack(children: [
+        SafeArea(
+          bottom: false,
+          child: ListView(
+            padding: EdgeInsets.fromLTRB(16, 8, 16, 150 + safe),
+            children: [
+              _header(),
+              const SizedBox(height: 14),
+              _customerCard(),
+              const SizedBox(height: 14),
+              _searchBar(),
+              if (search.text.trim().isNotEmpty) _results() else _quickPicks(),
+              const SizedBox(height: 14),
+              _cartCard(),
+              if (cart.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                _billCard(),
+                const SizedBox(height: 14),
+                _paymentCard(),
+                const SizedBox(height: 14),
+                _noteField(),
+              ],
+            ],
+          ),
+        ),
+        Positioned(left: 0, right: 0, bottom: 0, child: _checkoutBar(safe)),
+      ]),
+    );
+  }
+
+  Widget _header() => Row(children: [
+        _round(Icons.arrow_back_rounded, () => Navigator.of(context).pop()),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('New Sale', style: _j(21, FontWeight.w800, _navy)),
+            Row(children: [
+              Text(nextNo.isEmpty ? 'Tax invoice' : '$nextNo · tax invoice', style: _j(12, FontWeight.w600, const Color(0xFF323B60))),
+            ]),
+          ]),
+        ),
+        GestureDetector(
+          onTap: () async {
+            final d = await showDatePicker(
+              context: context,
+              initialDate: DateTime.parse(date),
+              firstDate: DateTime(2015),
+              lastDate: DateTime.now().add(const Duration(days: 1)),
+            );
+            if (d != null) setState(() => date = ymd(d));
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+            decoration: _card(r: 16),
+            child: Row(children: [
+              const Icon(Icons.event_rounded, size: 16, color: _purple),
+              const SizedBox(width: 6),
+              Text(date == ymd(DateTime.now()) ? 'Today' : prettyDate(date), style: _j(12.5, FontWeight.w700, _ink)),
+            ]),
+          ),
+        ),
+      ]);
+
+  Widget _round(IconData icon, VoidCallback onTap) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 44,
+          height: 44,
+          decoration: const BoxDecoration(
+            shape: BoxShape.circle,
+            color: Colors.white,
+            boxShadow: [BoxShadow(color: Color(0x262A2F7A), blurRadius: 14, offset: Offset(0, 5), spreadRadius: -4)],
+          ),
+          child: Icon(icon, color: _ink, size: 22),
+        ),
+      );
+
+  // ---------------------------------------------------------------- customer card
+  Widget _customerCard() {
+    final c = customer;
+    final cDue = c == null ? 0 : dues[asInt(c['id'])] ?? 0;
+    final limit = c == null ? 0 : asInt(c['credit_limit']);
+    return GestureDetector(
+      onTap: _pickCustomer,
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: _card(),
+        child: Row(children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              gradient: LinearGradient(
+                  colors: c == null ? const [Color(0xFFE2E8F0), Color(0xFFCBD5E1)] : const [Color(0xFF4FD8E0), Color(0xFF139DB0)]),
+            ),
+            alignment: Alignment.center,
+            child: c == null
+                ? const Icon(Icons.storefront_rounded, color: Color(0xFF475569))
+                : Text((c['name'] as String).isEmpty ? '?' : (c['name'] as String)[0].toUpperCase(),
+                    style: _j(20, FontWeight.w800, Colors.white)),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(c == null ? 'Walk-in customer' : c['name'] as String, style: _j(15, FontWeight.w800, _ink)),
+              const SizedBox(height: 2),
+              Text(
+                c == null
+                    ? 'Cash sale · tap to choose a customer'
+                    : [c['phone'] ?? '', if (limit > 0) 'limit ${Money.compact(limit)}'].where((e) => '$e'.isNotEmpty).join(' · '),
+                style: _j(11.5, FontWeight.w500, _muted),
+              ),
+            ]),
+          ),
+          if (c != null)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: cDue > 0 ? const Color(0xFFFDE4EA) : const Color(0xFFE3F7EC),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(cDue > 0 ? 'Due ${Money.compact(cDue)}' : 'No dues',
+                  style: _j(11, FontWeight.w800, cDue > 0 ? const Color(0xFFC8102E) : const Color(0xFF0E6E47))),
+            ),
+          const SizedBox(width: 4),
+          const Icon(Icons.unfold_more_rounded, color: Color(0xFFB9BCD6)),
+        ]),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------- search + quick picks
+  Widget _searchBar() => Row(children: [
+        Expanded(
+          child: Container(
+            height: 52,
+            decoration: _card(r: 26),
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: Row(children: [
+              const Icon(Icons.search_rounded, color: Color(0xFF2C3B8F)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextField(
+                  controller: search,
+                  style: _j(14, FontWeight.w600, _ink),
+                  decoration: InputDecoration(
+                    isCollapsed: true,
+                    filled: false,
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    hintText: 'Search product, brand or barcode',
+                    hintStyle: _j(13.5, FontWeight.w400, const Color(0xFF8A8FAD)),
+                  ),
+                ),
+              ),
+              if (search.text.isNotEmpty)
+                GestureDetector(onTap: search.clear, child: const Icon(Icons.close_rounded, color: _muted, size: 20)),
+            ]),
+          ),
+        ),
+        const SizedBox(width: 10),
+        GestureDetector(
+          onTap: _scan,
+          child: Container(
+            width: 52,
+            height: 52,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(colors: [Color(0xFF7B4DFF), Color(0xFF4318D2)]),
+              boxShadow: [BoxShadow(color: Color(0x664A17C9), blurRadius: 14, offset: Offset(0, 5), spreadRadius: -4)],
+            ),
+            child: const Icon(Icons.qr_code_scanner_rounded, color: Colors.white),
+          ),
+        ),
+      ]);
+
+  Widget _results() {
+    final q = search.text.trim().toLowerCase();
+    final r = products
+        .where((p) => [p['name'], p['brand'], p['sku'], p['variant'], p['category']]
+            .any((v) => v != null && '$v'.toLowerCase().contains(q)))
+        .take(8)
+        .toList();
+    return Container(
+      margin: const EdgeInsets.only(top: 10),
+      decoration: _card(),
+      child: r.isEmpty
+          ? Padding(
+              padding: const EdgeInsets.all(18),
+              child: Row(children: [
+                Expanded(child: Text('No product matches “${search.text}”', style: _j(13, FontWeight.w500, _muted))),
+                TextButton(
+                  onPressed: () async {
+                    await open(context, const ProductForm());
+                    _load();
+                  },
+                  child: const Text('Add product'),
+                ),
+              ]),
+            )
+          : Column(children: [
+              for (var i = 0; i < r.length; i++) ...[
+                if (i > 0) const Divider(height: 1, indent: 72, color: Color(0xFFEEF0F8)),
+                InkWell(
+                  onTap: () => _add(r[i]),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    child: Row(children: [
+                      ProductThumb(r[i], width: 46, height: 50),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(r[i]['name'] as String, maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(13.5, FontWeight.w700, _ink)),
+                          Text(
+                            [r[i]['variant'], 'Stock ${r[i]['stock']}'].where((e) => e != null && '$e'.isNotEmpty).join(' · '),
+                            style: _j(11, FontWeight.w500, asInt(r[i]['stock']) <= 0 ? _red : _muted),
+                          ),
+                        ]),
+                      ),
+                      Text(Money.rs(asInt(r[i]['price'])), style: _j(13.5, FontWeight.w800, const Color(0xFF1C1CA0))),
+                      const SizedBox(width: 8),
+                      const Icon(Icons.add_circle_rounded, color: _purple),
+                    ]),
+                  ),
+                ),
+              ],
+            ]),
+    );
+  }
+
+  Widget _quickPicks() {
+    if (quick.isEmpty) return const SizedBox();
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.bolt_rounded, color: _amber, size: 18),
+          const SizedBox(width: 4),
+          Text('Quick add · best sellers', style: _j(12.5, FontWeight.w700, const Color(0xFF3A4155))),
+        ]),
+        const SizedBox(height: 8),
+        SizedBox(
+          height: 118,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: quick.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 10),
+            itemBuilder: (context, i) {
+              final p = quick[i];
+              return GestureDetector(
+                onTap: () => _add(p),
+                child: Container(
+                  width: 96,
+                  padding: const EdgeInsets.all(8),
+                  decoration: _card(r: 18),
+                  child: Column(children: [
+                    ProductThumb(p, width: 52, height: 52),
+                    const SizedBox(height: 6),
+                    Text(p['name'] as String, maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(11, FontWeight.w700, _ink)),
+                    Text(Money.compact(asInt(p['price'])), style: _j(11, FontWeight.w800, _purple)),
+                  ]),
+                ),
+              );
+            },
+          ),
+        ),
+      ]),
+    );
+  }
+
+  // ---------------------------------------------------------------- cart
+  Widget _cartCard() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
+      decoration: _card(),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(color: const Color(0xFFEFEBFF), borderRadius: BorderRadius.circular(10)),
+            child: const Icon(Icons.shopping_cart_rounded, color: _purple, size: 18),
+          ),
+          const SizedBox(width: 10),
+          Expanded(child: Text('Cart', style: _j(15, FontWeight.w800, _ink))),
+          if (cart.isNotEmpty)
+            Text('$qtyTotal item${qtyTotal == 1 ? '' : 's'}', style: _j(12, FontWeight.w700, _muted)),
+          if (cart.isNotEmpty)
+            IconButton(
+              tooltip: 'Clear cart',
+              icon: const Icon(Icons.delete_sweep_rounded, color: _red, size: 22),
+              onPressed: () => setState(cart.clear),
+            ),
+        ]),
+        if (cart.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 18),
+            child: Center(
+              child: Column(children: [
+                Image.asset('assets/home/cart.png', width: 96, height: 92),
+                const SizedBox(height: 8),
+                Text('Cart is empty', style: _j(14, FontWeight.w800, _ink)),
+                Text('Search, scan a barcode or tap a best seller', style: _j(12, FontWeight.w500, _muted)),
+              ]),
+            ),
+          ),
+        for (final l in cart) _cartLine(l),
+      ]),
+    );
+  }
+
+  Widget _cartLine(_Line l) {
+    final over = l.qty > l.stock;
+    final isDevice = (l.p['category'] as String? ?? '').toLowerCase().contains(RegExp('mobile|laptop|tablet|desktop'));
+    return Dismissible(
+      key: ObjectKey(l),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 18),
+        decoration: BoxDecoration(color: const Color(0xFFFDE4EA), borderRadius: BorderRadius.circular(16)),
+        child: const Icon(Icons.delete_rounded, color: _red),
+      ),
+      onDismissed: (_) => setState(() => cart.remove(l)),
+      child: Container(
+        margin: const EdgeInsets.only(top: 10),
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFAFAFE),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: over ? const Color(0xFFF5B5C2) : const Color(0xFFEEF0F8)),
+        ),
+        child: Column(children: [
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            ProductThumb(l.p, width: 54, height: 60),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(l.p['name'] as String, maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(13.5, FontWeight.w800, _ink)),
+                if ((l.p['variant'] as String? ?? '').isNotEmpty)
+                  Text(l.p['variant'] as String, maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(11, FontWeight.w500, _muted)),
+                const SizedBox(height: 4),
+                GestureDetector(
+                  onTap: () => _editRate(l),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Text(Money.rs(l.rate), style: _j(13, FontWeight.w800, const Color(0xFF1C1CA0))),
+                    const SizedBox(width: 4),
+                    const Icon(Icons.edit_rounded, size: 13, color: _purple),
+                    const SizedBox(width: 6),
+                    Text('+${l.gstBp ~/ 100}% GST', style: _j(10.5, FontWeight.w600, _muted)),
+                  ]),
+                ),
+              ]),
+            ),
+            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              Text(Money.rs(l.amount + l.tax), style: _j(14, FontWeight.w800, _ink)),
+              const SizedBox(height: 6),
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: _line),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  _qtyBtn(Icons.remove_rounded, () {
+                    setState(() {
+                      if (l.qty > 1) {
+                        l.qty--;
+                      } else {
+                        cart.remove(l);
+                      }
+                    });
+                  }),
+                  SizedBox(width: 30, child: Text('${l.qty}', textAlign: TextAlign.center, style: _j(14, FontWeight.w800, _ink))),
+                  _qtyBtn(Icons.add_rounded, () => setState(() => l.qty++)),
+                ]),
+              ),
+            ]),
+          ]),
+          if (over)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Row(children: [
+                const Icon(Icons.warning_amber_rounded, color: _red, size: 15),
+                const SizedBox(width: 4),
+                Text('Only ${l.stock} in stock', style: _j(11, FontWeight.w700, _red)),
+              ]),
+            ),
+          if (isDevice || l.serial.text.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Container(
+                height: 40,
+                padding: const EdgeInsets.only(left: 10),
+                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: _line)),
+                child: Row(children: [
+                  const Icon(Icons.qr_code_2_rounded, size: 18, color: Color(0xFF8B7FD6)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: l.serial,
+                      style: _j(12.5, FontWeight.w600, _ink),
+                      decoration: InputDecoration(
+                        isCollapsed: true,
+                        filled: false,
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        hintText: 'IMEI / serial number',
+                        hintStyle: _j(12, FontWeight.w400, const Color(0xFFA3A7C2)),
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.qr_code_scanner_rounded, color: _purple, size: 20),
+                    onPressed: () => _scanSerial(l),
+                  ),
+                ]),
+              ),
+            ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _qtyBtn(IconData icon, VoidCallback onTap) => InkWell(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onTap();
+        },
+        borderRadius: BorderRadius.circular(10),
+        child: SizedBox(width: 30, height: 30, child: Icon(icon, size: 18, color: _purple)),
+      );
+
+  // ---------------------------------------------------------------- bill
+  Widget _billCard() {
+    Widget row(String l, String v, {Color? color, bool bold = false}) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(children: [
+            Expanded(child: Text(l, style: _j(13, bold ? FontWeight.w800 : FontWeight.w500, bold ? _ink : const Color(0xFF3A4155)))),
+            Text(v, style: _j(bold ? 18 : 13, FontWeight.w800, color ?? _ink)),
+          ]),
+        );
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: _card(),
+      child: Column(children: [
+        Row(children: [
+          Expanded(
+            child: Container(
+              height: 46,
+              padding: const EdgeInsets.only(left: 12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFAFAFE),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: _line),
+              ),
+              child: Row(children: [
+                const Icon(Icons.discount_rounded, size: 18, color: Color(0xFF8B7FD6)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: discountCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    style: _j(14, FontWeight.w700, _ink),
+                    decoration: InputDecoration(
+                      isCollapsed: true,
+                      filled: false,
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      hintText: 'Discount',
+                      hintStyle: _j(13, FontWeight.w500, const Color(0xFFA3A7C2)),
+                    ),
+                  ),
+                ),
+              ]),
+            ),
+          ),
+          const SizedBox(width: 8),
+          _seg(['₹', '%'], discountPct ? 1 : 0, (i) => setState(() => discountPct = i == 1)),
+        ]),
+        const SizedBox(height: 10),
+        row('Subtotal ($qtyTotal item${qtyTotal == 1 ? '' : 's'})', Money.rs(subtotal)),
+        if (_disc > 0) row('Discount', '− ${Money.rs(_disc)}', color: _green),
+        row('CGST', Money.rs(tax ~/ 2)),
+        row('SGST', Money.rs(tax - tax ~/ 2)),
+        Row(children: [
+          Expanded(child: Text('Round off', style: _j(13, FontWeight.w500, const Color(0xFF3A4155)))),
+          if (roundOff && roundAmount > 0) Text('− ${Money.rs(roundAmount)}  ', style: _j(12.5, FontWeight.w700, _muted)),
+          Switch(value: roundOff, onChanged: (v) => setState(() => roundOff = v)),
+        ]),
+        const Divider(color: Color(0xFFEEF0F8)),
+        row('Total', Money.rs(total), color: _navy, bold: true),
+        const SizedBox(height: 4),
+        GestureDetector(
+          onTap: () => setState(() => showProfit = !showProfit),
+          child: Row(children: [
+            Icon(showProfit ? Icons.visibility_rounded : Icons.visibility_off_rounded, size: 16, color: _muted),
+            const SizedBox(width: 6),
+            Text(showProfit ? 'Profit on this bill: ${Money.rs(profit)}' : 'Show profit (owner only)',
+                style: _j(11.5, FontWeight.w700, showProfit ? (profit >= 0 ? _green : _red) : _muted)),
+          ]),
+        ),
+      ]),
+    );
+  }
+
+  Widget _seg(List<String> labels, int sel, ValueChanged<int> on) => Container(
+        height: 46,
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(color: const Color(0xFFF1F2FA), borderRadius: BorderRadius.circular(14)),
+        child: Row(children: [
+          for (var i = 0; i < labels.length; i++)
+            GestureDetector(
+              onTap: () => on(i),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                width: 40,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  gradient: i == sel ? const LinearGradient(colors: [Color(0xFF6B35EE), Color(0xFF4318D2)]) : null,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(labels[i], style: _j(14, FontWeight.w800, i == sel ? Colors.white : _ink)),
+              ),
+            ),
+        ]),
+      );
+
+  // ---------------------------------------------------------------- payment
+  Widget _paymentCard() {
+    IconData icon(String? k) =>
+        k == 'cash' ? Icons.payments_rounded : k == 'upi' ? Icons.qr_code_2_rounded : Icons.account_balance_rounded;
+    final acc = _account;
+    final upiId = (settings['upi_id'] ?? '').trim();
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: _card(),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('Payment', style: _j(15, FontWeight.w800, _ink)),
+        const SizedBox(height: 10),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          for (final a in accounts)
+            GestureDetector(
+              onTap: () => setState(() => account = asInt(a['id'])),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                decoration: BoxDecoration(
+                  gradient: account == asInt(a['id']) ? const LinearGradient(colors: [Color(0xFF6B35EE), Color(0xFF4318D2)]) : null,
+                  color: account == asInt(a['id']) ? null : Colors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  border: account == asInt(a['id']) ? null : Border.all(color: _line),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(icon(a['kind'] as String?), size: 17, color: account == asInt(a['id']) ? Colors.white : _purple),
+                  const SizedBox(width: 6),
+                  Text(a['name'] as String, style: _j(12.5, FontWeight.w700, account == asInt(a['id']) ? Colors.white : _ink)),
+                ]),
+              ),
+            ),
+        ]),
+        const SizedBox(height: 14),
+        Container(
+          height: 54,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFAFAFE),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFCFC4FF), width: 1.4),
+          ),
+          child: Row(children: [
+            Text('Received', style: _j(13, FontWeight.w600, _muted)),
+            const SizedBox(width: 10),
+            Text('₹', style: _j(18, FontWeight.w800, _ink)),
+            const SizedBox(width: 4),
+            Expanded(
+              child: TextField(
+                controller: received,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                style: _j(18, FontWeight.w800, _ink),
+                onChanged: (_) => setState(() => receivedTouched = true),
+                decoration: InputDecoration(
+                  isCollapsed: true,
+                  filled: false,
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  hintText: Money.inr(total),
+                  hintStyle: _j(18, FontWeight.w800, const Color(0xFFB9BCD6)),
+                ),
+              ),
+            ),
+          ]),
+        ),
+        const SizedBox(height: 10),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          _quickAmt('Full', total),
+          for (final n in [50000, 100000, 200000, 500000])
+            if (n < total * 3) _quickAmt('₹${Money.inr(n)}', n),
+          _quickAmt('Credit (₹0)', 0),
+        ]),
+        const SizedBox(height: 12),
+        Row(children: [
+          Expanded(
+            child: _stat(change > 0 ? 'Change to return' : 'Paid now', Money.rs(change > 0 ? change : paid),
+                change > 0 ? _amber : _green),
+          ),
+          const SizedBox(width: 10),
+          Expanded(child: _stat('Balance due', Money.rs(due), due > 0 ? _red : _muted)),
+        ]),
+        if (acc != null && acc['kind'] == 'upi' && upiId.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          GestureDetector(
+            onTap: () => _showUpiQr(upiId),
+            child: Container(
+              height: 48,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                gradient: const LinearGradient(colors: [Color(0xFF0EA5E9), Color(0xFF2563EB)]),
+              ),
+              alignment: Alignment.center,
+              child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                const Icon(Icons.qr_code_2_rounded, color: Colors.white),
+                const SizedBox(width: 8),
+                Text('Show UPI QR for ${Money.rs(paid)}', style: _j(13.5, FontWeight.w800, Colors.white)),
+              ]),
+            ),
+          ),
+        ] else if (acc != null && acc['kind'] == 'upi')
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Text('Tip: add your UPI ID in Settings to show a payment QR here.', style: _j(11, FontWeight.w500, _muted)),
+          ),
+      ]),
+    );
+  }
+
+  Widget _quickAmt(String label, int v) => GestureDetector(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          setState(() {
+            receivedTouched = true;
+            received.text = Money.edit(v);
+          });
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          decoration: BoxDecoration(color: const Color(0xFFF1F2FA), borderRadius: BorderRadius.circular(12)),
+          child: Text(label, style: _j(12, FontWeight.w700, _ink)),
+        ),
+      );
+
+  Widget _stat(String l, String v, Color c) => Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(color: c.withAlpha(0x14), borderRadius: BorderRadius.circular(14)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(l, style: _j(11, FontWeight.w600, c)),
+          const SizedBox(height: 2),
+          FittedBox(fit: BoxFit.scaleDown, child: Text(v, style: _j(16, FontWeight.w800, _ink))),
+        ]),
+      );
+
+  void _showUpiQr(String upiId) {
+    final name = settings['business_name'] ?? 'GameX PC Hub';
+    final amt = (paid / 100).toStringAsFixed(2);
+    final data = 'upi://pay?pa=${Uri.encodeComponent(upiId)}&pn=${Uri.encodeComponent(name)}&am=$amt&cu=INR'
+        '&tn=${Uri.encodeComponent('Invoice $nextNo')}';
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text('Scan to pay', style: _j(18, FontWeight.w800, _navy)),
+            const SizedBox(height: 4),
+            Text('$name · $upiId', style: _j(12, FontWeight.w500, _muted)),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: _card(),
+              child: QrImageView(data: data, size: 220),
+            ),
+            const SizedBox(height: 14),
+            Text(Money.rs(paid), style: _j(26, FontWeight.w800, _ink)),
+            Text('Any UPI app — GPay, PhonePe, Paytm, BHIM', style: _j(12, FontWeight.w500, _muted)),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _noteField() => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        decoration: _card(r: 18),
+        child: TextField(
+          controller: note,
+          style: _j(13.5, FontWeight.w500, _ink),
+          decoration: InputDecoration(
+            filled: false,
+            border: InputBorder.none,
+            enabledBorder: InputBorder.none,
+            focusedBorder: InputBorder.none,
+            icon: const Icon(Icons.sticky_note_2_rounded, color: Color(0xFF8B7FD6)),
+            hintText: 'Note (warranty, delivery, exchange details…)',
+            hintStyle: _j(13, FontWeight.w400, const Color(0xFFA3A7C2)),
+          ),
+        ),
+      );
+
+  // ---------------------------------------------------------------- checkout
+  Widget _checkoutBar(double safe) {
+    final ready = cart.isNotEmpty && !saving;
+    return Container(
+      padding: EdgeInsets.fromLTRB(16, 12, 16, 12 + safe),
+      decoration: const BoxDecoration(
+        color: Color(0xF7FFFFFF),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+        boxShadow: [BoxShadow(color: Color(0x262A2F7A), blurRadius: 24, offset: Offset(0, -6), spreadRadius: -8)],
+      ),
+      child: Row(children: [
+        Expanded(
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(cart.isEmpty ? 'No items' : '$qtyTotal item${qtyTotal == 1 ? '' : 's'} · ${due > 0 ? 'due ${Money.compact(due)}' : 'fully paid'}',
+                style: _j(11.5, FontWeight.w600, due > 0 ? _red : _muted)),
+            FittedBox(fit: BoxFit.scaleDown, child: Text(Money.rs(total), style: _j(22, FontWeight.w800, _navy))),
+          ]),
+        ),
+        GestureDetector(
+          onTap: ready ? _charge : null,
+          child: AnimatedOpacity(
+            duration: const Duration(milliseconds: 200),
+            opacity: ready ? 1 : .5,
+            child: Container(
+              height: 56,
+              padding: const EdgeInsets.symmetric(horizontal: 22),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(28),
+                gradient: const LinearGradient(colors: [Color(0xFF1BB574), Color(0xFF0F8C58)]),
+                boxShadow: const [BoxShadow(color: Color(0x8016A36A), blurRadius: 18, offset: Offset(0, 8), spreadRadius: -6)],
+              ),
+              alignment: Alignment.center,
+              child: saving
+                  ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white))
+                  : Row(mainAxisSize: MainAxisSize.min, children: [
+                      const Icon(Icons.check_circle_rounded, color: Colors.white),
+                      const SizedBox(width: 8),
+                      Text('Complete sale', style: _j(15, FontWeight.w800, Colors.white)),
+                    ]),
+            ),
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+// =============================================================================
+// Customer picker sheet
+// =============================================================================
+class _CustomerSheet extends StatefulWidget {
+  final List<Rec> customers;
+  final Map<int, int> dues;
+  const _CustomerSheet({required this.customers, required this.dues});
+  @override
+  State<_CustomerSheet> createState() => _CustomerSheetState();
+}
+
+class _CustomerSheetState extends State<_CustomerSheet> {
+  String q = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final list = widget.customers
+        .where((c) => q.isEmpty || '${c['name']} ${c['phone'] ?? ''}'.toLowerCase().contains(q.toLowerCase()))
+        .toList();
+    return DraggableScrollableSheet(
+      initialChildSize: .75,
+      maxChildSize: .95,
+      minChildSize: .4,
+      builder: (context, scroll) => Container(
+        decoration: const BoxDecoration(color: _bg, borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+        child: Column(children: [
+          const SizedBox(height: 10),
+          Container(width: 42, height: 5, decoration: BoxDecoration(color: const Color(0xFFD5D8EA), borderRadius: BorderRadius.circular(3))),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+            child: Row(children: [
+              Expanded(child: Text('Choose customer', style: _j(18, FontWeight.w800, _navy))),
+              TextButton.icon(
+                onPressed: () => Navigator.pop(context, 'new'),
+                icon: const Icon(Icons.person_add_alt_1_rounded),
+                label: const Text('New'),
+              ),
+            ]),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: TextField(
+              autofocus: false,
+              onChanged: (v) => setState(() => q = v),
+              decoration: const InputDecoration(hintText: 'Search name or phone', prefixIcon: Icon(Icons.search_rounded)),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: ListView(controller: scroll, padding: const EdgeInsets.fromLTRB(16, 4, 16, 24), children: [
+              _tile(
+                leading: const Icon(Icons.storefront_rounded, color: Color(0xFF475569)),
+                title: 'Walk-in customer',
+                sub: 'Cash sale, no account',
+                onTap: () => Navigator.pop(context, 'walkin'),
+              ),
+              for (final c in list)
+                _tile(
+                  leading: Text((c['name'] as String).isEmpty ? '?' : (c['name'] as String)[0].toUpperCase(),
+                      style: _j(17, FontWeight.w800, const Color(0xFF139DB0))),
+                  title: c['name'] as String,
+                  sub: '${c['phone'] ?? ''}',
+                  due: widget.dues[asInt(c['id'])] ?? 0,
+                  onTap: () => Navigator.pop(context, c),
+                ),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _tile({required Widget leading, required String title, required String sub, int due = 0, required VoidCallback onTap}) =>
+      Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Material(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(color: const Color(0xFFE2FAFA), borderRadius: BorderRadius.circular(13)),
+                  alignment: Alignment.center,
+                  child: leading,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(title, style: _j(14, FontWeight.w700, _ink)),
+                    if (sub.isNotEmpty) Text(sub, style: _j(11.5, FontWeight.w500, _muted)),
+                  ]),
+                ),
+                if (due > 0) Text('Due ${Money.compact(due)}', style: _j(11.5, FontWeight.w800, _red)),
+              ]),
+            ),
+          ),
+        ),
+      );
+}
+
+// =============================================================================
+// Sale complete
+// =============================================================================
+class SaleSuccessScreen extends StatelessWidget {
+  final int saleId;
+  final int change;
+  const SaleSuccessScreen({super.key, required this.saleId, this.change = 0});
+
+  Future<(Rec, List<Rec>, Map<String, String>)> _load() async {
+    final s = (await Books.query(
+            'SELECT s.*, c.name AS customer, c.phone AS phone FROM sales s LEFT JOIN customers c ON c.id = s.customer_id WHERE s.id = ?',
+            [saleId]))
+        .first;
+    return (s, await Books.query('SELECT * FROM sale_items WHERE sale_id = ?', [saleId]), await Books.settings());
+  }
+
+  Future<void> _whatsApp(BuildContext context, Rec s, List<Rec> items, Map<String, String> st) async {
+    final text = invoiceText(st, s, items);
+    var phone = (s['phone'] as String? ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+    if (phone.length == 10) phone = '91$phone';
+    final uri = Uri.parse('https://wa.me/$phone?text=${Uri.encodeComponent(text)}');
+    var ok = false;
+    try {
+      ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      ok = false;
+    }
+    if (!ok && context.mounted) {
+      await Clipboard.setData(ClipboardData(text: text));
+      if (context.mounted) toast(context, 'WhatsApp not available — invoice copied');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: _bg,
+      body: SafeArea(
+        child: Live<(Rec, List<Rec>, Map<String, String>)>(
+          load: _load,
+          builder: (context, d) {
+            final s = d.$1;
+            final due = asInt(s['total']) - asInt(s['paid']);
+            return ListView(padding: const EdgeInsets.fromLTRB(20, 30, 20, 30), children: [
+              Center(
+                child: TweenAnimationBuilder<double>(
+                  tween: Tween(begin: 0, end: 1),
+                  duration: const Duration(milliseconds: 900),
+                  curve: Curves.elasticOut,
+                  builder: (context, v, child) => Transform.scale(scale: v, child: child),
+                  child: Container(
+                    width: 110,
+                    height: 110,
+                    decoration: const BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: LinearGradient(colors: [Color(0xFF34D399), Color(0xFF0F8C58)]),
+                      boxShadow: [BoxShadow(color: Color(0x8016A36A), blurRadius: 30, offset: Offset(0, 12), spreadRadius: -6)],
+                    ),
+                    child: const Icon(Icons.check_rounded, color: Colors.white, size: 64),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Center(child: Text('Sale completed!', style: _j(22, FontWeight.w800, _navy))),
+              const SizedBox(height: 4),
+              Center(
+                child: Text('${s['number']} · ${(s['customer'] as String?) ?? 'Walk-in customer'}',
+                    style: _j(13, FontWeight.w600, _muted)),
+              ),
+              const SizedBox(height: 20),
+              Container(
+                padding: const EdgeInsets.all(18),
+                decoration: _card(),
+                child: Column(children: [
+                  Text(Money.rs(asInt(s['total'])), style: _j(32, FontWeight.w800, _ink)),
+                  const SizedBox(height: 12),
+                  Row(children: [
+                    Expanded(child: _pill('Paid', Money.rs(asInt(s['paid'])), _green)),
+                    const SizedBox(width: 10),
+                    Expanded(child: _pill('Due', Money.rs(due), due > 0 ? _red : _muted)),
+                  ]),
+                  if (change > 0) ...[
+                    const SizedBox(height: 10),
+                    _pill('Return change', Money.rs(change), _amber),
+                  ],
+                ]),
+              ),
+              const SizedBox(height: 18),
+              _action(Icons.send_rounded, 'Send invoice on WhatsApp', const [Color(0xFF25D366), Color(0xFF128C7E)],
+                  () => _whatsApp(context, s, d.$2, d.$3)),
+              const SizedBox(height: 10),
+              _action(Icons.receipt_long_rounded, 'View invoice', const [Color(0xFF7B4DFF), Color(0xFF4318D2)],
+                  () => Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => SaleView(id: saleId)))),
+              const SizedBox(height: 10),
+              _action(Icons.add_shopping_cart_rounded, 'Start a new sale', const [Color(0xFF38BDF8), Color(0xFF2563EB)],
+                  () => Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const SaleForm()))),
+              const SizedBox(height: 14),
+              Center(
+                child: TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: Text('Done', style: _j(15, FontWeight.w800, _purple)),
+                ),
+              ),
+            ]);
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _pill(String l, String v, Color c) => Container(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+        decoration: BoxDecoration(color: c.withAlpha(0x14), borderRadius: BorderRadius.circular(14)),
+        child: Row(children: [
+          Expanded(child: Text(l, style: _j(12, FontWeight.w700, c))),
+          Text(v, style: _j(14, FontWeight.w800, _ink)),
+        ]),
+      );
+
+  Widget _action(IconData icon, String label, List<Color> colors, VoidCallback onTap) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          height: 54,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(27),
+            gradient: LinearGradient(colors: colors),
+            boxShadow: [BoxShadow(color: colors.last.withAlpha(0x66), blurRadius: 16, offset: const Offset(0, 6), spreadRadius: -6)],
+          ),
+          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Icon(icon, color: Colors.white),
+            const SizedBox(width: 10),
+            Text(label, style: _j(14.5, FontWeight.w800, Colors.white)),
+          ]),
+        ),
+      );
+}
