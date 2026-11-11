@@ -111,6 +111,13 @@ class LiquidGlassNav extends StatelessWidget {
 
   Widget _icon(int i, bool on) {
     final size = p(46);
+    if (i == 2) {
+      return CubeIcon(
+        size: size * .9,
+        color: on ? _active : _inactive,
+        gradient: on ? const LinearGradient(colors: [Color(0xFF7A45F5), Color(0xFF4A17C9)]) : null,
+      );
+    }
     if (!on) return Icon(_icons[i], size: size, color: _inactive);
     return ShaderMask(
       blendMode: BlendMode.srcIn,

@@ -584,3 +584,61 @@ void toast(BuildContext context, String msg, {bool error = false}) {
 
 Future<T?> open<T>(BuildContext context, Widget page) =>
     Navigator.of(context).push<T>(MaterialPageRoute(builder: (_) => page));
+
+/// Isometric 3D cube icon (top face lighter, sides shaded) — the Products glyph.
+class CubeIcon extends StatelessWidget {
+  final double size;
+  final Color color;
+  final Gradient? gradient;
+  const CubeIcon({super.key, required this.size, required this.color, this.gradient});
+
+  @override
+  Widget build(BuildContext context) =>
+      SizedBox(width: size, height: size, child: CustomPaint(painter: _CubePainter(color, gradient)));
+}
+
+class _CubePainter extends CustomPainter {
+  final Color color;
+  final Gradient? gradient;
+  _CubePainter(this.color, this.gradient);
+
+  @override
+  void paint(Canvas canvas, Size s) {
+    final w = s.width, h = s.height;
+    final top = Path()
+      ..moveTo(w * .5, h * .08)
+      ..lineTo(w * .9, h * .29)
+      ..lineTo(w * .5, h * .5)
+      ..lineTo(w * .1, h * .29)
+      ..close();
+    final left = Path()
+      ..moveTo(w * .1, h * .35)
+      ..lineTo(w * .46, h * .55)
+      ..lineTo(w * .46, h * .94)
+      ..lineTo(w * .1, h * .74)
+      ..close();
+    final right = Path()
+      ..moveTo(w * .9, h * .35)
+      ..lineTo(w * .54, h * .55)
+      ..lineTo(w * .54, h * .94)
+      ..lineTo(w * .9, h * .74)
+      ..close();
+    Paint paint(double alpha) {
+      final p = Paint()..isAntiAlias = true;
+      if (gradient != null) {
+        p.shader = gradient!.createShader(Offset.zero & s);
+        p.color = Colors.white.withAlpha((alpha * 255).round());
+      } else {
+        p.color = color.withAlpha((alpha * 255).round());
+      }
+      return p;
+    }
+
+    canvas.drawPath(left, paint(.85));
+    canvas.drawPath(right, paint(1));
+    canvas.drawPath(top, paint(.6));
+  }
+
+  @override
+  bool shouldRepaint(covariant _CubePainter old) => old.color != color || old.gradient != gradient;
+}
