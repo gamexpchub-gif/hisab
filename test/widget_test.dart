@@ -8,11 +8,13 @@ void main() {
   testWidgets('illustrations and logo render without errors', (tester) async {
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(
-        body: ListView(children: [
-          const LogoTile(),
-          for (final k in ArtKind.values) Art(k, width: 80),
-          const Kpi('Today', 123456, accent: true),
-        ]),
+        body: SingleChildScrollView(
+          child: Column(children: [
+            const LogoTile(),
+            const Kpi('Today', 123456, accent: true),
+            Wrap(children: [for (final k in ArtKind.values) Art(k, width: 60)]),
+          ]),
+        ),
       ),
     ));
     expect(find.text('GameX'), findsOneWidget);
