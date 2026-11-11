@@ -21,7 +21,7 @@ class AppDb {
     );
   }
 
-  static const schemaVersion = 6;
+  static const schemaVersion = 7;
 
   static Future<void> upgrade(Database db, int from, int to) async {
     if (from < 2) {
@@ -49,6 +49,15 @@ class AppDb {
       }
       await db.execute(_cashLends);
       await db.execute(_partyDues);
+    }
+    if (from < 7) {
+      for (final c in ['bank_name TEXT', 'acc_no TEXT', 'holder TEXT', 'ifsc TEXT', 'card_type TEXT', 'network TEXT',
+        'credit_limit INTEGER NOT NULL DEFAULT 0', 'color INTEGER', 'bill_days INTEGER NOT NULL DEFAULT 40']) {
+        await db.execute('ALTER TABLE accounts ADD COLUMN $c');
+      }
+      await db.execute("UPDATE accounts SET bank_name = 'State Bank of India', card_type = 'savings' WHERE code = '1010'");
+      await db.execute("UPDATE accounts SET card_type = 'cash' WHERE code = '1000'");
+      await db.execute("UPDATE accounts SET card_type = 'upi' WHERE code = '1020'");
     }
   }
 
@@ -85,7 +94,9 @@ class AppDb {
     'CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)',
     '''CREATE TABLE accounts (
       id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
-      type TEXT NOT NULL, kind TEXT, is_system INTEGER NOT NULL DEFAULT 0)''',
+      type TEXT NOT NULL, kind TEXT, is_system INTEGER NOT NULL DEFAULT 0,
+      bank_name TEXT, acc_no TEXT, holder TEXT, ifsc TEXT, card_type TEXT, network TEXT,
+      credit_limit INTEGER NOT NULL DEFAULT 0, color INTEGER, bill_days INTEGER NOT NULL DEFAULT 40)''',
     '''CREATE TABLE journal_entries (
       id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, ref TEXT NOT NULL UNIQUE,
       narration TEXT, source_type TEXT NOT NULL, source_id INTEGER NOT NULL, created_at TEXT NOT NULL,
@@ -193,6 +204,9 @@ class AppDb {
       await db.insert('accounts', {'code': a[0], 'name': a[1], 'type': a[2], 'kind': a[3], 'is_system': 1},
           conflictAlgorithm: ConflictAlgorithm.ignore);
     }
+    await db.execute("UPDATE accounts SET bank_name = 'State Bank of India', card_type = 'savings' WHERE code = '1010' AND card_type IS NULL");
+    await db.execute("UPDATE accounts SET card_type = 'cash' WHERE code = '1000' AND card_type IS NULL");
+    await db.execute("UPDATE accounts SET card_type = 'upi' WHERE code = '1020' AND card_type IS NULL");
     for (final c in ['Mobile', 'Laptop', 'Accessories', 'Tablet', 'Desktop / PC']) {
       await db.insert('categories', {'name': c}, conflictAlgorithm: ConflictAlgorithm.ignore);
     }

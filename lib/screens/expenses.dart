@@ -716,7 +716,7 @@ class _ExpenseSheetState extends State<ExpenseSheet> {
 
   Future<void> _load() async {
     heads = await Books.accounts(kind: 'expense');
-    accounts = await Books.moneyAccounts();
+    accounts = await Books.moneyAccounts(withCards: true);
     final st = await Books.settings();
     final last = int.tryParse(st['last_expense_account'] ?? '');
     account ??= (last != null && accounts.any((a) => asInt(a['id']) == last)) ? last : (accounts.isNotEmpty ? asInt(accounts.first['id']) : null);

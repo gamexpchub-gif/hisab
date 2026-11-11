@@ -128,7 +128,7 @@ class _PurchaseFormState extends State<PurchaseForm> {
         'SELECT p.*, c.name AS category FROM products p LEFT JOIN categories c ON c.id = p.category_id ORDER BY p.name COLLATE NOCASE');
     suppliers = await Books.query('SELECT * FROM suppliers ORDER BY name COLLATE NOCASE');
     payables = await Books.partyBalances('supplier');
-    accounts = await Books.moneyAccounts();
+    accounts = await Books.moneyAccounts(withCards: true);
     final rates = await Books.query('SELECT i.product_id AS pid, i.rate AS rate FROM purchase_items i '
         'JOIN purchases p ON p.id = i.purchase_id ORDER BY p.date DESC, p.id DESC');
     lastRates = {};

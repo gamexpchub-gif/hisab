@@ -13,7 +13,9 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:hisab/core/books.dart';
 import 'package:hisab/core/db.dart';
 import 'package:hisab/main.dart';
+import 'package:hisab/screens/bank.dart';
 import 'package:hisab/screens/expenses.dart';
+import 'package:hisab/screens/sales.dart';
 import 'package:hisab/screens/ledgers.dart';
 import 'package:hisab/screens/parties.dart';
 import 'package:hisab/screens/product_form.dart';
@@ -50,7 +52,7 @@ void main() {
     await Books.loadDemo();
   });
 
-  for (final (name, index) in [('home', 0), ('dashboard', 1), ('products', 2), ('menu', 3), ('add_product', -1), ('new_sale', -2), ('new_purchase', -3), ('ledgers', -4), ('customer_profile', -5), ('expenses', -6), ('customers', -7)]) {
+  for (final (name, index) in [('home', 0), ('dashboard', 1), ('products', 2), ('menu', 3), ('add_product', -1), ('new_sale', -2), ('new_purchase', -3), ('ledgers', -4), ('customer_profile', -5), ('expenses', -6), ('customers', -7), ('sales', -8), ('bank', -9), ('add_card', -10)]) {
     testWidgets(name, (t) async {
       t.view.physicalSize = const Size(1080, 2340);
       t.view.devicePixelRatio = 2.75;
@@ -75,7 +77,16 @@ void main() {
                                   ? const PartyView(type: 'customer', id: 1)
                                   : index == -6
                                       ? const ExpensesScreen()
-                                      : const PartiesScreen(),
+                                      : index == -7
+                                          ? const PartiesScreen()
+                                          : index == -8
+                                              ? const SalesScreen()
+                                              : index == -9
+                                                  ? const BankScreen()
+                                                  : const Scaffold(
+                                                      backgroundColor: Color(0xFF8A8FAD),
+                                                      body: Align(alignment: Alignment.bottomCenter, child: AccountSheet()),
+                                                    ),
         ),
       ));
       if (index == -1) {

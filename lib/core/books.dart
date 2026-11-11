@@ -482,15 +482,79 @@ class Books {
     });
   }
 
-  static Future<int> addMoneyAccount(String name, String kind) {
+  static Future<int> addMoneyAccount(String name, String kind) => saveMoneyAccount({'name': name, 'kind': kind});
+
+  /// Creates or updates a cash / bank / UPI / wallet / credit-card account.
+  /// card_type: cash | savings | current | debit | credit | upi | wallet.
+  /// A credit card is a liability (its balance is what you owe); an opening
+  /// balance is posted against Opening Balance Equity.
+  static Future<int> saveMoneyAccount(Rec data, {int? id, int opening = 0}) {
     return _write((x) async {
-      if (name.trim().isEmpty) throw AccountingError('Account name is required');
+      final name = '${data['name'] ?? ''}'.trim();
+      if (name.isEmpty) throw AccountingError('Account name is required');
+      final cardType = (data['card_type'] as String?) ??
+          switch (data['kind']) { 'cash' => 'cash', 'upi' => 'upi', 'wallet' => 'wallet', _ => 'savings' };
+      final credit = cardType == 'credit';
+      final kind = switch (cardType) { 'cash' => 'cash', 'upi' => 'upi', 'wallet' => 'wallet', 'credit' => 'card', _ => 'bank' };
+      final values = <String, Object?>{
+        'name': name,
+        'kind': kind,
+        'type': credit ? 'liability' : 'asset',
+        'card_type': cardType,
+        for (final k in ['bank_name', 'acc_no', 'holder', 'ifsc', 'network', 'color'])
+          if (data.containsKey(k)) k: data[k],
+        if (data.containsKey('credit_limit')) 'credit_limit': asInt(data['credit_limit']),
+        if (data.containsKey('bill_days')) 'bill_days': asInt(data['bill_days']) <= 0 ? 40 : asInt(data['bill_days']),
+      };
+      if (id != null) {
+        await x.update('accounts', values, where: 'id = ?', whereArgs: [id]);
+        return id;
+      }
+      final prefix = credit ? '21' : '10';
       var n = 30;
-      while ((await x.query('accounts', where: 'code = ?', whereArgs: ['10$n'])).isNotEmpty) {
+      while ((await x.query('accounts', where: 'code = ?', whereArgs: ['$prefix$n'])).isNotEmpty) {
         n++;
       }
-      return x.insert('accounts', {'code': '10$n', 'name': name.trim(), 'type': 'asset', 'kind': kind, 'is_system': 0});
+      final aid = await x.insert('accounts', {...values, 'code': '$prefix$n', 'is_system': 0});
+      if (opening > 0) {
+        final obe = await accountId_(x, obeCode);
+        await post(x, 'opening_account', aid, ymd(DateTime.now()), 'Opening balance — $name',
+            credit ? [JL(obe, opening, 0), JL(aid, 0, opening)] : [JL(aid, opening, 0), JL(obe, 0, opening)]);
+      }
+      await _log(x, 'transfer', 'Account added: $name');
+      return aid;
     });
+  }
+
+  /// Credit-card position: spends are settled oldest-first by payments; each
+  /// unpaid spend falls due [bill_days] (default 40) after it was made.
+  static Future<CardStatus> cardStatus(Rec card) async {
+    final id = asInt(card['id']);
+    final days = asInt(card['bill_days']) <= 0 ? 40 : asInt(card['bill_days']);
+    final rows = await query(
+        'SELECT e.date AS date, l.debit AS dr, l.credit AS cr FROM journal_lines l JOIN journal_entries e ON e.id = l.entry_id '
+        'WHERE l.account_id = ? ORDER BY e.date, e.id, l.id',
+        [id]);
+    final open = <List<Object>>[];
+    for (final r in rows) {
+      final spend = asInt(r['cr']);
+      var pay = asInt(r['dr']);
+      if (spend > 0) open.add([r['date'] as String, spend]);
+      while (pay > 0 && open.isNotEmpty) {
+        final take = math.min(pay, open.first[1] as int);
+        open.first[1] = (open.first[1] as int) - take;
+        pay -= take;
+        if (open.first[1] == 0) open.removeAt(0);
+      }
+    }
+    final buckets = <String, int>{}; // due date → amount
+    for (final o in open) {
+      final due = ymd(DateTime.parse(o[0] as String).add(Duration(days: days)));
+      buckets[due] = (buckets[due] ?? 0) + (o[1] as int);
+    }
+    final dues = buckets.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
+    final outstanding = await balance(id, 'liability');
+    return CardStatus(outstanding, asInt(card['credit_limit']), dues, days);
   }
 
   static Future<int> addCategory(String name) {
@@ -544,8 +608,15 @@ class Books {
     return db.query('accounts', where: where.isEmpty ? null : where.join(' AND '), whereArgs: args, orderBy: 'code');
   }
 
-  static Future<List<Rec>> moneyAccounts() async =>
-      (await _db).query('accounts', where: "kind IN ('cash','bank','upi')", orderBy: 'code');
+  /// Cash, bank, UPI and wallet accounts; credit cards too when [withCards]
+  /// (cards can pay for purchases and expenses but never hold money).
+  static Future<List<Rec>> moneyAccounts({bool withCards = false}) async => (await _db).query('accounts',
+      where: withCards ? "kind IN ('cash','bank','upi','wallet','card')" : "kind IN ('cash','bank','upi','wallet')",
+      orderBy: 'type, code');
+
+  /// Natural balance of a money account: what you hold (cash/bank/UPI/wallet)
+  /// or, for a credit card, what you owe on it.
+  static Future<int> moneyBalance(Rec a) => balance(asInt(a['id']), a['type'] as String);
 
   static bool debitNormal(String type) => type == 'asset' || type == 'expense';
 
@@ -820,6 +891,18 @@ class Books {
       recentSales: await recentSales(6),
     );
   }
+
+  /// Every sale with what the Sales book searches and shows: customer name,
+  /// phone, address and photo, item names, IMEI / serial numbers and the
+  /// accounts that took the money.
+  static Future<List<Rec>> salesBook() => query(
+      'SELECT s.*, c.name AS customer, c.phone AS phone, c.alt_phone AS alt_phone, c.address AS address, '
+      'c.photo AS photo, '
+      '(SELECT GROUP_CONCAT(i.name, \' · \') FROM sale_items i WHERE i.sale_id = s.id) AS items, '
+      '(SELECT IFNULL(SUM(i.qty), 0) FROM sale_items i WHERE i.sale_id = s.id) AS qty, '
+      '(SELECT GROUP_CONCAT(i.serial, \' \') FROM sale_items i WHERE i.sale_id = s.id AND i.serial IS NOT NULL AND i.serial <> \'\') AS serials, '
+      '(SELECT GROUP_CONCAT(a.name, \' + \') FROM sale_payments p JOIN accounts a ON a.id = p.account_id WHERE p.sale_id = s.id) AS accounts '
+      'FROM sales s LEFT JOIN customers c ON c.id = s.customer_id ORDER BY s.date DESC, s.id DESC');
 
   static Future<List<Rec>> recentSales(int limit, {String? search}) async {
     final args = <Object?>[];
@@ -1449,6 +1532,18 @@ class Books {
     final heads = await accounts(kind: 'expense');
     await createExpense(headId: asInt(heads[0]['id']), amount: 1200000, accountId: bank, date: ago(5), note: 'Monthly rent');
     await createExpense(headId: asInt(heads.last['id']), amount: 24000, accountId: cash, note: 'Tea & snacks');
+    await saveMoneyAccount({
+      'name': 'HDFC Debit 4821', 'card_type': 'debit', 'bank_name': 'HDFC Bank', 'acc_no': '5241 8800 1234 4821',
+      'holder': 'Said Hasan', 'network': 'visa',
+    }, opening: 4500000);
+    final card = await saveMoneyAccount({
+      'name': 'ICICI Credit 7709', 'card_type': 'credit', 'bank_name': 'ICICI Bank', 'acc_no': '4375 5100 2231 7709',
+      'holder': 'Said Hasan', 'network': 'mastercard', 'credit_limit': 20000000, 'bill_days': 40,
+    });
+    await createPurchase(
+        items: [ItemIn(ids[6], 10, 85000)], supplierId: sup, paid: 850000, accountId: card, date: ago(33), billNo: 'KMD/921');
+    await createExpense(headId: asInt(heads[0]['id']), amount: 350000, accountId: card, date: ago(8), note: 'Shop electricity');
+    await createTransfer(fromId: card, toId: cash, amount: 500000, date: ago(2), note: 'ATM cash on card');
   }
 }
 
@@ -1506,6 +1601,15 @@ class Analytics {
     required this.recentSales,
   });
   int change(int Function(PeriodTotals p) f) => Books.pctChange(f(cur), f(prev));
+}
+
+class CardStatus {
+  final int outstanding, limit, billDays;
+  final List<MapEntry<String, int>> dues; // due date → amount, soonest first
+  CardStatus(this.outstanding, this.limit, this.dues, this.billDays);
+  int get available => limit <= 0 ? 0 : limit - outstanding;
+  double get used => limit <= 0 ? 0 : (outstanding / limit).clamp(0, 1).toDouble();
+  MapEntry<String, int>? get next => dues.isEmpty ? null : dues.first;
 }
 
 class KhataTotals {

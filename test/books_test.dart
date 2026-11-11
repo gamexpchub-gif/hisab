@@ -5,6 +5,7 @@ import 'package:hisab/core/books.dart';
 import 'package:hisab/core/db.dart';
 import 'package:hisab/core/money.dart';
 import 'package:hisab/core/smart.dart';
+import 'package:hisab/screens/sales_book.dart' show matchSale;
 
 Future<void> freshDb() async {
   sqfliteFfiInit();
@@ -195,6 +196,51 @@ void main() {
     expect((await Books.dues(partyType: 'customer', partyId: c, openOnly: false)).single['status'], 'paid');
     expect((await Books.boughtBy(c)).single['qty'], 2);
     await expectBalanced();
+  });
+
+  test('credit card: spends fall due after bill days, payments settle oldest first', () async {
+    final acc = await Books.moneyAccounts();
+    final bank = asInt(acc[1]['id']);
+    final card = await Books.saveMoneyAccount(
+        {'name': 'Test Credit', 'card_type': 'credit', 'credit_limit': 1000000, 'bill_days': 40}, opening: 0);
+    final rec = (await Books.query('SELECT * FROM accounts WHERE id = ?', [card])).single;
+    expect(rec['type'], 'liability');
+    expect((await Books.moneyAccounts()).any((a) => asInt(a['id']) == card), isFalse);
+    expect((await Books.moneyAccounts(withCards: true)).any((a) => asInt(a['id']) == card), isTrue);
+    final heads = await Books.accounts(kind: 'expense');
+    final now = DateTime.now();
+    String ago(int d) => ymd(now.subtract(Duration(days: d)));
+    await Books.createExpense(headId: asInt(heads[0]['id']), amount: 300000, accountId: card, date: ago(30));
+    await Books.createExpense(headId: asInt(heads[0]['id']), amount: 200000, accountId: card, date: ago(10));
+    var st = await Books.cardStatus(rec);
+    expect(st.outstanding, 500000);
+    expect(st.available, 500000);
+    expect(st.dues.first.key, ymd(DateTime.parse(ago(30)).add(const Duration(days: 40))));
+    expect(st.dues.first.value, 300000);
+    await Books.createTransfer(fromId: bank, toId: card, amount: 350000);
+    st = await Books.cardStatus(rec);
+    expect(st.outstanding, 150000);
+    expect(st.dues.length, 1);
+    expect(st.next!.value, 150000);
+    expect(st.next!.key, ymd(DateTime.parse(ago(10)).add(const Duration(days: 40))));
+    final debit = await Books.saveMoneyAccount({'name': 'My Debit', 'card_type': 'debit', 'acc_no': '1234'}, opening: 100000);
+    expect(await Books.balance(debit, 'asset'), 100000);
+    await expectBalanced();
+  });
+
+  test('sales book search: mobile, IMEI, amount, address', () async {
+    final c = await Books.saveParty('customer', {'name': 'Rahul Das', 'phone': '98300 12345', 'address': 'Salt Lake, Kolkata'});
+    final p = await Books.saveProduct({'name': 'iPhone 15', 'gst_bp': 0, 'price': 7000000}, openingQty: 2, openingCost: 6000000);
+    await Books.createSale(items: [ItemIn(p, 1, 7000000, '356789104455667')], customerId: c, paid: 7000000, accountId: asInt((await Books.moneyAccounts())[0]['id']));
+    final rows = await Books.salesBook();
+    expect(rows.single['serials'], '356789104455667');
+    expect(rows.single['accounts'], 'Cash in Hand');
+    expect(matchSale(rows.single, '9830012345')?.$1, 'Mobile');
+    expect(matchSale(rows.single, '4455667')?.$1, 'IMEI / Serial');
+    expect(matchSale(rows.single, '70000')?.$1, 'Amount');
+    expect(matchSale(rows.single, 'salt lake')?.$1, 'Address');
+    expect(matchSale(rows.single, 'iphone')?.$1, 'Product');
+    expect(matchSale(rows.single, 'samsung'), isNull);
   });
 
   test('demo data loads and balances', () async {
