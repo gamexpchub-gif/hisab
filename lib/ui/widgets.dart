@@ -10,7 +10,11 @@ import 'theme.dart';
 class Live<T> extends StatefulWidget {
   final Future<T> Function() load;
   final Widget Function(BuildContext context, T data) builder;
-  const Live({super.key, required this.load, required this.builder});
+
+  /// When this value changes the data is reloaded, keeping the old data on
+  /// screen until the new data arrives (no loading flash).
+  final Object? reloadKey;
+  const Live({super.key, required this.load, required this.builder, this.reloadKey});
 
   @override
   State<Live<T>> createState() => _LiveState<T>();
@@ -28,6 +32,12 @@ class _LiveState<T> extends State<Live<T>> {
 
   void _reload() {
     if (mounted) setState(() => _future = widget.load());
+  }
+
+  @override
+  void didUpdateWidget(covariant Live<T> oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.reloadKey != widget.reloadKey) _future = widget.load();
   }
 
   @override

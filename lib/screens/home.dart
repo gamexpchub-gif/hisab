@@ -596,7 +596,7 @@ class _OverviewCardState extends State<_OverviewCard> {
       height: p(187),
       decoration: _whiteCard(34),
       child: Live<Overview>(
-        key: ValueKey(period),
+        reloadKey: period,
         load: () => Books.overview(period),
         builder: (context, ov) => Stack(children: [
           _at(28, 22, _img('ov_icon', 36, 35)),

@@ -4,6 +4,7 @@ import '../core/books.dart';
 import '../ui/theme.dart';
 import '../ui/widgets.dart';
 import 'forms.dart';
+import '../ui/photo.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -21,6 +22,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     'gstin': 'GSTIN',
   };
   final ctrls = <String, TextEditingController>{};
+  String? photo;
 
   @override
   void initState() {
@@ -32,6 +34,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       for (final k in keys.keys) {
         ctrls[k]!.text = s[k] ?? '';
       }
+      photo = s['owner_photo'];
       if (mounted) setState(() {});
     });
   }
@@ -47,6 +50,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     return PageShell(title: 'Settings', subtitle: 'Business profile', children: [
+      CardBox(
+        onTap: () async {
+          final r = await pickPhoto(context, folder: 'profile', allowRemove: (photo ?? '').isNotEmpty);
+          if (r == null) return;
+          await Books.setSetting('owner_photo', r);
+          setState(() => photo = r);
+        },
+        child: Row(children: [
+          ClipOval(
+            child: SizedBox(
+              width: 64,
+              height: 64,
+              child: storedImage(photo,
+                  fallback: Container(
+                    color: const Color(0xFFEAF0FF),
+                    child: const Icon(Icons.person_rounded, color: Color(0xFF2F6BFF), size: 38),
+                  )),
+            ),
+          ),
+          const SizedBox(width: 14),
+          const Expanded(
+            child: Text('Profile photo\nTap to change', style: TextStyle(color: C.muted, height: 1.4)),
+          ),
+          const Icon(Icons.photo_camera_rounded, color: C.purple2),
+        ]),
+      ),
       CardBox(child: Column(children: [for (final e in keys.entries) field(ctrls[e.key]!, e.value)])),
       const SizedBox(height: 14),
       GradientButton(

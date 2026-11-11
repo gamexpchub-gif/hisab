@@ -828,20 +828,88 @@ class Books {
 
   static Future<List<Rec>> activity(int limit) => query('SELECT * FROM audit_log ORDER BY id DESC LIMIT ?', [limit]);
 
+  // ------------------------------------------------------------ inventory
+  /// Products with category, units sold and realised gross profit.
+  /// filter: all | in | low | out
+  static Future<List<Rec>> inventory({String filter = 'all', String search = ''}) {
+    final where = <String>[];
+    final args = <Object?>[];
+    switch (filter) {
+      case 'in':
+        where.add('p.stock > p.low_stock');
+        break;
+      case 'low':
+        where.add('p.stock > 0 AND p.stock <= p.low_stock');
+        break;
+      case 'out':
+        where.add('p.stock <= 0');
+        break;
+    }
+    if (search.trim().isNotEmpty) {
+      final like = '%${search.trim()}%';
+      where.add("(p.name LIKE ? OR IFNULL(p.brand,'') LIKE ? OR IFNULL(c.name,'') LIKE ? OR "
+          "IFNULL(p.sku,'') LIKE ? OR IFNULL(p.variant,'') LIKE ?)");
+      args.addAll([like, like, like, like, like]);
+    }
+    return query(
+        'SELECT p.*, c.name AS category, '
+        '(SELECT COALESCE(SUM(qty),0) FROM sale_items WHERE product_id = p.id) AS sold, '
+        '(SELECT COALESCE(SUM(amount - unit_cost * qty),0) FROM sale_items WHERE product_id = p.id) AS profit '
+        'FROM products p LEFT JOIN categories c ON c.id = p.category_id '
+        '${where.isEmpty ? '' : 'WHERE ${where.join(' AND ')}'} ORDER BY p.name COLLATE NOCASE',
+        args);
+  }
+
+  static Future<InventoryStats> inventoryStats() async {
+    final r = (await query('SELECT COUNT(*) AS total, '
+            'SUM(CASE WHEN stock <= 0 THEN 1 ELSE 0 END) AS out_n, '
+            'SUM(CASE WHEN stock > 0 AND stock <= low_stock THEN 1 ELSE 0 END) AS low_n, '
+            'SUM(CASE WHEN stock > low_stock THEN 1 ELSE 0 END) AS in_n FROM products'))
+        .first;
+    final now = DateTime.now();
+    final monthStart = DateTime(now.year, now.month, 1).toIso8601String();
+    final before = asInt((await query('SELECT COUNT(*) AS c FROM products WHERE created_at < ?', [monthStart])).first['c']);
+    final total = asInt(r['total']);
+    return InventoryStats(
+      total: total,
+      out: asInt(r['out_n']),
+      low: asInt(r['low_n']),
+      inStock: asInt(r['in_n']),
+      growth: pctChange(total, before),
+    );
+  }
+
+  /// Deletes a product that has never been bought or sold.
+  static Future<void> deleteProduct(int id) {
+    return _write((x) async {
+      final used = await x.rawQuery(
+          'SELECT (SELECT COUNT(*) FROM sale_items WHERE product_id = ?) + '
+          '(SELECT COUNT(*) FROM purchase_items WHERE product_id = ?) + '
+          "(SELECT COUNT(*) FROM journal_entries WHERE source_type = 'opening_stock' AND source_id = ?) AS n",
+          [id, id, id]);
+      if (asInt(used.first['n']) > 0) {
+        throw AccountingError('This product has stock or transactions in the books, so it cannot be deleted');
+      }
+      final p = await _product(x, id);
+      await x.delete('products', where: 'id = ?', whereArgs: [id]);
+      await _log(x, 'product', 'Product deleted: ${p['name']}');
+    });
+  }
+
   // ------------------------------------------------------------ demo data
   static Future<void> loadDemo() async {
     final existing = await query('SELECT COUNT(*) AS c FROM products');
     if (asInt(existing.first['c']) > 0) throw AccountingError('Demo data can only be loaded into an empty book');
     final cats = {for (final c in await query('SELECT * FROM categories')) c['name'] as String: asInt(c['id'])};
     final specs = [
-      ['iPhone 13 128GB', 'Apple', 'Mobile', 4200000, 4999900, 4],
-      ['Samsung Galaxy S23', 'Samsung', 'Mobile', 5200000, 5999900, 3],
-      ['Redmi Note 13 Pro', 'Xiaomi', 'Mobile', 1950000, 2399900, 6],
-      ['HP Victus 15 i5 RTX 3050', 'HP', 'Laptop', 5600000, 6499000, 2],
-      ['Dell Inspiron 3520 i3', 'Dell', 'Laptop', 3100000, 3650000, 3],
-      ['boAt Airdopes 141', 'boAt', 'Accessories', 65000, 119900, 12],
-      ['20W USB-C Charger', 'Apple', 'Accessories', 90000, 149900, 1],
-      ['Logitech G102 Mouse', 'Logitech', 'Accessories', 110000, 159500, 2],
+      ['iPhone 14 Pro', 'Apple', 'Mobile', 7200000, 8999900, 10, '256GB • Deep Purple', 11990000, 'asset:mobile'],
+      ['Samsung Galaxy S23', 'Samsung', 'Mobile', 5200000, 5999900, 3, '8GB • 256GB', 7499900, null],
+      ['Redmi Note 13 Pro', 'Xiaomi', 'Mobile', 1950000, 2399900, 6, '8GB • 128GB', 2899900, null],
+      ['MacBook Air M1', 'Apple', 'Laptop', 5000000, 5999900, 4, '8GB • 256GB SSD', 7990000, 'asset:laptop'],
+      ['Dell Inspiron 3520 i3', 'Dell', 'Laptop', 3100000, 3650000, 3, '8GB • 512GB SSD', 4499000, null],
+      ['AirPods Pro', 'Apple', 'Accessories', 1900000, 2499900, 12, '2nd Gen • USB-C', 3490000, 'asset:accessory'],
+      ['20W USB-C Charger', 'Apple', 'Accessories', 90000, 149900, 1, 'Type-C', 190000, null],
+      ['Logitech G102 Mouse', 'Logitech', 'Accessories', 110000, 159500, 0, 'RGB • Wired', 199500, null],
     ];
     final ids = <int>[];
     for (final s in specs) {
@@ -853,6 +921,9 @@ class Books {
         'price': s[4],
         'low_stock': 2,
         'condition': 'new',
+        'variant': s[6],
+        'mrp': s[7],
+        'image': s[8],
       }, openingQty: s[5] as int, openingCost: s[3] as int));
     }
     final sup = await saveParty('supplier', {'name': 'Kolkata Mobile Distributors', 'phone': '9830000001'});
@@ -863,18 +934,18 @@ class Books {
     final now = DateTime.now();
     String ago(int d) => ymd(now.subtract(Duration(days: d)));
     for (final d in [150, 120, 90, 60, 30]) {
-      await createSale(items: [ItemIn(ids[5], 2, 119900)], accountId: upi, date: ago(d));
+      await createSale(items: [ItemIn(ids[5], 2, 2499900)], accountId: upi, date: ago(d));
     }
     await createPurchase(
         items: [ItemIn(ids[2], 4, 1900000)], supplierId: sup, paid: 4000000, accountId: bank, date: ago(20), billNo: 'KMD/889');
     await createSale(
-        items: [ItemIn(ids[0], 1, 4999900, '356789104455667')],
+        items: [ItemIn(ids[0], 1, 8999900, '356789104455667')],
         customerId: rahul,
-        paid: 3000000,
+        paid: 6000000,
         accountId: upi,
         date: ago(1));
     await createSale(
-        items: [ItemIn(ids[3], 1, 6499000), ItemIn(ids[7], 1, 159500)],
+        items: [ItemIn(ids[3], 1, 5999900), ItemIn(ids[6], 1, 149900)],
         customerId: priya,
         paid: 6000000,
         accountId: bank,
@@ -886,6 +957,13 @@ class Books {
     await createExpense(headId: asInt(heads[0]['id']), amount: 1200000, accountId: bank, date: ago(5), note: 'Monthly rent');
     await createExpense(headId: asInt(heads.last['id']), amount: 24000, accountId: cash, note: 'Tea & snacks');
   }
+}
+
+class InventoryStats {
+  final int total, out, low, inStock, growth;
+  InventoryStats({required this.total, required this.out, required this.low, required this.inStock, required this.growth});
+  int get alerts => out + low;
+  double pct(int n) => total == 0 ? 0 : n * 100 / total;
 }
 
 class ProfitLoss {

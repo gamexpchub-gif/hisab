@@ -11,6 +11,8 @@ dependencies:
     sdk: flutter
   sqflite: ^2.3.3
   path: ^1.9.0
+  image_picker: ^1.1.2
+  path_provider: ^2.1.4
 
 dev_dependencies:
   flutter_test:
@@ -22,7 +24,11 @@ flutter:
   uses-material-design: true
   assets:
     - assets/home/
+    - assets/products/
   fonts:
     - family: Montserrat
       fonts:
         - asset: assets/fonts/Montserrat.ttf
+    - family: Jakarta
+      fonts:
+        - asset: assets/fonts/PlusJakartaSans.ttf

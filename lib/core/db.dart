@@ -17,10 +17,19 @@ class AppDb {
       version: schemaVersion,
       onConfigure: configure,
       onCreate: create,
+      onUpgrade: upgrade,
     );
   }
 
-  static const schemaVersion = 1;
+  static const schemaVersion = 2;
+
+  static Future<void> upgrade(Database db, int from, int to) async {
+    if (from < 2) {
+      await db.execute('ALTER TABLE products ADD COLUMN variant TEXT');
+      await db.execute('ALTER TABLE products ADD COLUMN mrp INTEGER NOT NULL DEFAULT 0');
+      await db.execute('ALTER TABLE products ADD COLUMN image TEXT');
+    }
+  }
 
   static Future<void> configure(Database db) async {
     await db.execute('PRAGMA foreign_keys = ON');
@@ -60,7 +69,7 @@ class AppDb {
       gst_bp INTEGER NOT NULL DEFAULT 1800, cost INTEGER NOT NULL DEFAULT 0,
       price INTEGER NOT NULL DEFAULT 0, stock INTEGER NOT NULL DEFAULT 0,
       low_stock INTEGER NOT NULL DEFAULT 2, condition TEXT NOT NULL DEFAULT 'new',
-      created_at TEXT NOT NULL)''',
+      created_at TEXT NOT NULL, variant TEXT, mrp INTEGER NOT NULL DEFAULT 0, image TEXT)''',
     '''CREATE TABLE customers (
       id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, phone TEXT, email TEXT,
       address TEXT, gstin TEXT, opening INTEGER NOT NULL DEFAULT 0,

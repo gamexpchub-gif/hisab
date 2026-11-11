@@ -8,7 +8,7 @@ import 'package:hisab/core/money.dart';
 Future<void> freshDb() async {
   sqfliteFfiInit();
   final db = await databaseFactoryFfi.openDatabase(inMemoryDatabasePath,
-      options: OpenDatabaseOptions(version: 1, onConfigure: AppDb.configure, onCreate: AppDb.create, singleInstance: false));
+      options: OpenDatabaseOptions(version: AppDb.schemaVersion, onConfigure: AppDb.configure, onCreate: AppDb.create, singleInstance: false));
   AppDb.useDatabase(db);
 }
 

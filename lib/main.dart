@@ -90,149 +90,162 @@ class _ShellState extends State<Shell> {
   }
 }
 
-/// Floating "liquid glass" navigation bar: frosted, translucent capsule with
-/// a specular top highlight and a glass lens that slides to the active tab.
+/// Floating "liquid glass" navigation bar (matches the Products reference):
+/// a frosted white panel with a specular top highlight, and a soft lavender
+/// glass lens with a purple underline that glides to the active tab.
 class LiquidGlassNav extends StatelessWidget {
   final int index;
   final ValueChanged<int> onTap;
   const LiquidGlassNav({super.key, required this.index, required this.onTap});
 
-  static const _items = [
-    (Icons.home_rounded, 'Home'),
-    (Icons.pie_chart_rounded, 'Dashboard'),
-    (Icons.work_rounded, 'Products'),
-    (Icons.menu_rounded, 'Menu'),
-  ];
+  static const _labels = ['Home', 'Dashboard', 'Products', 'Menu'];
+  static const _icons = [Icons.home_rounded, Icons.pie_chart_rounded, null, Icons.menu_rounded];
 
-  static double get barHeight => p(132);
-  static double get bottomGap => p(18);
+  static double get barHeight => p(112);
+  static double get bottomGap => p(28);
   static double outerHeight(double safeBottom) => barHeight + bottomGap + safeBottom;
+
+  static const _active = Color(0xFF5B1FD9);
+  static const _inactive = Color(0xFF3A4155);
+
+  Widget _icon(int i, bool on) {
+    final size = p(46);
+    if (_icons[i] == null) {
+      // 3D cube from the design; tinted grey when inactive
+      final img = Image.asset('assets/products/nav_cube.png', width: size, height: size, fit: BoxFit.contain);
+      return on ? img : ColorFiltered(colorFilter: const ColorFilter.mode(_inactive, BlendMode.srcIn), child: img);
+    }
+    if (!on) return Icon(_icons[i], size: size, color: _inactive);
+    return ShaderMask(
+      blendMode: BlendMode.srcIn,
+      shaderCallback: (r) => const LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [Color(0xFF7A45F5), Color(0xFF4A17C9)],
+      ).createShader(r),
+      child: Icon(_icons[i], size: size, color: Colors.white),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final safe = MediaQuery.of(context).padding.bottom;
-    final radius = BorderRadius.circular(p(66));
-    const active = Color(0xFF4A17C9);
-    const inactive = Color(0xFF23253F);
+    final radius = BorderRadius.circular(p(44));
+    final n = _labels.length;
     return Padding(
-      padding: EdgeInsets.fromLTRB(p(26), 0, p(26), bottomGap + safe),
+      padding: EdgeInsets.fromLTRB(p(10), 0, p(10), bottomGap + safe),
       child: Container(
         height: barHeight,
         decoration: BoxDecoration(
           borderRadius: radius,
           boxShadow: const [
-            BoxShadow(color: Color(0x2E2A2F7A), blurRadius: 30, offset: Offset(0, 12), spreadRadius: -8),
-            BoxShadow(color: Color(0x14000000), blurRadius: 4, offset: Offset(0, 1)),
+            BoxShadow(color: Color(0x262A2F7A), blurRadius: 28, offset: Offset(0, 10), spreadRadius: -8),
+            BoxShadow(color: Color(0x0F000000), blurRadius: 3, offset: Offset(0, 1)),
           ],
         ),
         child: ClipRRect(
           borderRadius: radius,
           child: BackdropFilter(
-            filter: ui.ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+            filter: ui.ImageFilter.blur(sigmaX: 24, sigmaY: 24),
             child: Container(
               decoration: BoxDecoration(
                 borderRadius: radius,
                 gradient: const LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  colors: [Color(0xC7FFFFFF), Color(0x9EF4F3FF)],
+                  colors: [Color(0xE6FFFFFF), Color(0xCCF8F8FF)],
                 ),
-                border: Border.all(color: const Color(0xE6FFFFFF), width: 1.3),
+                border: Border.all(color: const Color(0xF2FFFFFF), width: 1.3),
               ),
               child: Stack(children: [
-                // specular sheen across the top edge
+                // specular highlight along the top edge
                 Positioned(
-                  left: p(40),
-                  right: p(40),
+                  left: p(30),
+                  right: p(30),
                   top: 0,
-                  height: p(46),
+                  height: p(30),
                   child: DecoratedBox(
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.vertical(bottom: Radius.circular(p(40))),
+                      borderRadius: BorderRadius.vertical(bottom: Radius.circular(p(30))),
                       gradient: const LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
-                        colors: [Color(0xCCFFFFFF), Color(0x00FFFFFF)],
+                        colors: [Color(0xF2FFFFFF), Color(0x00FFFFFF)],
                       ),
                     ),
                   ),
                 ),
-                // sliding glass lens behind the active tab
+                // gliding glass lens + underline
                 AnimatedAlign(
-                  alignment: Alignment(-1 + 2 * index / (_items.length - 1), 0),
+                  alignment: Alignment(-1 + 2 * index / (n - 1), 0),
                   duration: const Duration(milliseconds: 420),
                   curve: Curves.easeOutBack,
                   child: FractionallySizedBox(
-                    widthFactor: 1 / _items.length,
+                    widthFactor: 1 / n,
                     heightFactor: 1,
                     child: Padding(
-                      padding: EdgeInsets.all(p(11)),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(p(56)),
-                          gradient: const LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [Color(0x2E7B5CFF), Color(0x1A3155C8), Color(0x335B2EE0)],
-                          ),
-                          border: Border.all(color: const Color(0xF2FFFFFF), width: 1.4),
-                          boxShadow: const [
-                            BoxShadow(color: Color(0x404A17C9), blurRadius: 18, offset: Offset(0, 6), spreadRadius: -8),
-                          ],
-                        ),
-                        child: Align(
-                          alignment: Alignment.topCenter,
-                          child: FractionallySizedBox(
-                            widthFactor: .7,
-                            heightFactor: .42,
-                            child: DecoratedBox(
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.vertical(bottom: Radius.circular(p(30))),
-                                gradient: const LinearGradient(
-                                  begin: Alignment.topCenter,
-                                  end: Alignment.bottomCenter,
-                                  colors: [Color(0x99FFFFFF), Color(0x00FFFFFF)],
-                                ),
+                      padding: EdgeInsets.symmetric(horizontal: p(35)),
+                      child: Stack(children: [
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          top: p(10),
+                          bottom: p(10),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(p(24)),
+                              gradient: const LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: [Color(0xFFF3F0FF), Color(0xFFE9E3FF)],
                               ),
+                              border: Border.all(color: const Color(0xFFFFFFFF), width: 1.2),
+                              boxShadow: const [
+                                BoxShadow(color: Color(0x2E4A17C9), blurRadius: 14, offset: Offset(0, 5), spreadRadius: -6),
+                              ],
                             ),
                           ),
                         ),
-                      ),
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: p(1),
+                          height: p(5),
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(p(3)),
+                              gradient: const LinearGradient(colors: [Color(0xFF6B2FE8), Color(0xFF4A17C9)]),
+                            ),
+                          ),
+                        ),
+                      ]),
                     ),
                   ),
                 ),
                 Row(children: [
-                  for (var i = 0; i < _items.length; i++)
+                  for (var i = 0; i < n; i++)
                     Expanded(
                       child: GestureDetector(
                         behavior: HitTestBehavior.opaque,
                         onTap: () => onTap(i),
                         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
                           AnimatedScale(
-                            scale: i == index ? 1.08 : 1,
+                            scale: i == index ? 1.06 : 1,
                             duration: const Duration(milliseconds: 250),
-                            child: i == index
-                                ? ShaderMask(
-                                    blendMode: BlendMode.srcIn,
-                                    shaderCallback: (r) => const LinearGradient(
-                                      begin: Alignment.topLeft,
-                                      end: Alignment.bottomRight,
-                                      colors: [Color(0xFF6B3BF0), Color(0xFF3A12C8)],
-                                    ).createShader(r),
-                                    child: Icon(_items[i].$1, size: p(52), color: Colors.white),
-                                  )
-                                : Icon(_items[i].$1, size: p(50), color: inactive),
+                            child: _icon(i, i == index),
                           ),
-                          SizedBox(height: p(6)),
+                          SizedBox(height: p(8)),
                           Text(
-                            _items[i].$2,
+                            _labels[i],
                             maxLines: 1,
                             textScaler: TextScaler.noScaling,
                             style: TextStyle(
-                              fontSize: fs(11.4),
+                              fontFamily: 'Jakarta',
+                              fontSize: fs(9.3),
                               height: 1.0,
-                              fontWeight: i == index ? FontWeight.w600 : FontWeight.w400,
-                              color: i == index ? active : inactive,
+                              fontWeight: i == index ? FontWeight.w700 : FontWeight.w600,
+                              fontVariations: [FontVariation('wght', i == index ? 700 : 600)],
+                              color: i == index ? _active : _inactive,
                             ),
                           ),
                         ]),
