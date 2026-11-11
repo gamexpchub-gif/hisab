@@ -149,6 +149,7 @@ class Books {
     int discount = 0,
     String? date,
     String? note,
+    List<MapEntry<int, int>>? splits, // account id → amount, for split payments
   }) {
     return _write((x) async {
       final when = date ?? ymd(DateTime.now());
@@ -196,12 +197,15 @@ class Books {
       }
       if (discount < 0 || discount > subtotal) throw AccountingError('Discount must be between 0 and the subtotal');
       final total = subtotal + tax - discount;
-      final paidAmt = paid ?? (customerId == null ? total : 0);
+      final parts = (splits ?? const <MapEntry<int, int>>[]).where((e) => e.value != 0).toList();
+      if (parts.any((e) => e.value < 0)) throw AccountingError('Split amounts cannot be negative');
+      final paidAmt = parts.isNotEmpty ? parts.fold<int>(0, (a, e) => a + e.value) : (paid ?? (customerId == null ? total : 0));
       if (paidAmt < 0 || paidAmt > total) throw AccountingError('Paid amount must be between 0 and the total');
       if (customerId == null && paidAmt != total) {
         throw AccountingError('Walk-in sales must be fully paid — select a customer for credit sales');
       }
-      final money = accountId ?? await accountId_(x, cashCode);
+      final money = parts.isNotEmpty ? parts.first.key : (accountId ?? await accountId_(x, cashCode));
+      final payments = parts.isNotEmpty ? parts : [if (paidAmt > 0) MapEntry(money, paidAmt)];
       final number = await _nextNumber(x, 'sales', 'INV');
       final saleId = await x.insert('sales', {
         'number': number,
@@ -220,6 +224,9 @@ class Books {
       for (final r in rows) {
         await x.insert('sale_items', {...r, 'sale_id': saleId});
       }
+      for (final p in payments) {
+        await x.insert('sale_payments', {'sale_id': saleId, 'account_id': p.key, 'amount': p.value});
+      }
       final ar = await accountId_(x, arCode);
       await post(x, 'sale', saleId, when, 'Sale $number${customerName != null ? ' to $customerName' : ''}', [
         JL(ar, total, 0, 'customer', customerId),
@@ -227,7 +234,7 @@ class Books {
         JL(await accountId_(x, gstOutCode), 0, tax),
         JL(await accountId_(x, cogsCode), cogs, 0),
         JL(await accountId_(x, inventoryCode), 0, cogs),
-        JL(money, paidAmt, 0),
+        for (final p in payments) JL(p.key, p.value, 0),
         JL(ar, 0, paidAmt, 'customer', customerId),
       ]);
       await _log(x, 'sale', 'New sale recorded', number, total);
@@ -363,6 +370,7 @@ class Books {
     required int accountId,
     String? date,
     String? note,
+    String? image,
   }) {
     return _write((x) async {
       if (amount <= 0) throw AccountingError('Amount must be greater than zero');
@@ -377,6 +385,7 @@ class Books {
         'account_id': accountId,
         'amount': amount,
         'note': note,
+        'image': image,
         'created_at': _now(),
       });
       final head = h.first['name'] as String;
@@ -913,7 +922,8 @@ class Books {
         [f, t]);
     final payments = await query(
         'SELECT a.name AS name, a.kind AS kind, COALESCE(SUM(x.v),0) AS v FROM ('
-        '  SELECT account_id, paid AS v FROM sales WHERE date >= ? AND date <= ? AND paid > 0 '
+        '  SELECT sp.account_id AS account_id, sp.amount AS v FROM sale_payments sp JOIN sales s ON s.id = sp.sale_id '
+        '  WHERE s.date >= ? AND s.date <= ? '
         "  UNION ALL SELECT account_id, amount AS v FROM payments WHERE kind = 'receipt' AND date >= ? AND date <= ?"
         ') x JOIN accounts a ON a.id = x.account_id GROUP BY a.id ORDER BY v DESC',
         [f, t, f, t]);
@@ -1069,6 +1079,93 @@ class Books {
     await _log(db, 'reminder', 'Payment reminder to $name ($channel)', '$type:$id');
     changes.value++;
   }
+
+  // ------------------------------------------------------------ expense intelligence
+  static Future<ExpenseInsights> expenseInsights(DateTime from, DateTime to) async {
+    final f = ymd(from), t = ymd(to);
+    final days = to.difference(from).inDays + 1;
+    final pTo = from.subtract(const Duration(days: 1));
+    final pFrom = pTo.subtract(Duration(days: days - 1));
+    Future<int> sum(String a, String b) async =>
+        asInt((await query('SELECT COALESCE(SUM(amount),0) AS v FROM expenses WHERE date >= ? AND date <= ?', [a, b])).first['v']);
+    final heads = await query(
+        'SELECT h.id AS id, h.name AS name, COALESCE(SUM(e.amount),0) AS v, COUNT(e.id) AS n FROM expenses e '
+        'JOIN accounts h ON h.id = e.head_id WHERE e.date >= ? AND e.date <= ? GROUP BY h.id ORDER BY v DESC',
+        [f, t]);
+    final now = DateTime.now();
+    // monthly totals for the last 6 months and per-head history for 3 full months
+    final months = <MonthBar>[];
+    for (var i = 5; i >= 0; i--) {
+      final s0 = DateTime(now.year, now.month - i, 1);
+      final e0 = DateTime(s0.year, s0.month + 1, 0);
+      months.add(MonthBar(monthName(s0.month), await sum(ymd(s0), ymd(e0)), 0));
+    }
+    final histFrom = ymd(DateTime(now.year, now.month - 3, 1));
+    final histTo = ymd(DateTime(now.year, now.month, 0));
+    final hist = await query(
+        "SELECT e.head_id AS id, h.name AS name, substr(e.date,1,7) AS ym, SUM(e.amount) AS v, "
+        "CAST(AVG(CAST(substr(e.date,9,2) AS INTEGER)) AS INTEGER) AS dom FROM expenses e JOIN accounts h ON h.id = e.head_id "
+        'WHERE e.date >= ? AND e.date <= ? GROUP BY e.head_id, ym',
+        [histFrom, histTo]);
+    final byHead = <int, List<Rec>>{};
+    for (final r in hist) {
+      byHead.putIfAbsent(asInt(r['id']), () => []).add(r);
+    }
+    final thisMonth = ymd(DateTime(now.year, now.month, 1));
+    final paidThisMonth = {
+      for (final r in await query('SELECT DISTINCT head_id FROM expenses WHERE date >= ?', [thisMonth])) asInt(r['head_id'])
+    };
+    final recurring = <RecurringExpense>[];
+    final avg3 = <int, int>{};
+    for (final e in byHead.entries) {
+      final total = e.value.fold<int>(0, (a, r) => a + asInt(r['v']));
+      avg3[e.key] = total ~/ 3;
+      if (e.value.length >= 2) {
+        final amounts = [for (final r in e.value) asInt(r['v'])]..sort();
+        final day = e.value.fold<int>(0, (a, r) => a + asInt(r['dom'])) ~/ e.value.length;
+        recurring.add(RecurringExpense(e.key, e.value.first['name'] as String, amounts[amounts.length ~/ 2], day,
+            paidThisMonth.contains(e.key)));
+      }
+    }
+    recurring.sort((a, b) => a.day.compareTo(b.day));
+    final spikes = <MapEntry<String, int>>[];
+    for (final h in heads) {
+      final avg = avg3[asInt(h['id'])] ?? 0;
+      final v = asInt(h['v']);
+      if (avg > 0 && v > avg * 3 ~/ 2 && v - avg > 50000) spikes.add(MapEntry(h['name'] as String, ((v - avg) * 100 / avg).round()));
+    }
+    final revenue = (await profitLoss(f, t)).revenue;
+    final recent = await query(
+        'SELECT e.head_id AS head_id, h.name AS head, e.amount AS amount, e.account_id AS account_id, e.note AS note '
+        'FROM expenses e JOIN accounts h ON h.id = e.head_id ORDER BY e.id DESC LIMIT 20');
+    final seen = <String>{};
+    final repeat = <Rec>[];
+    for (final r in recent) {
+      if (seen.add('${r['head_id']}|${r['amount']}') && repeat.length < 4) repeat.add(r);
+    }
+    final budgets = <int, int>{};
+    for (final r in await query("SELECT key, value FROM settings WHERE key LIKE 'budget_%'")) {
+      final id = int.tryParse((r['key'] as String).substring(7));
+      final v = int.tryParse('${r['value']}');
+      if (id != null && v != null && v > 0) budgets[id] = v;
+    }
+    final total = await sum(f, t);
+    return ExpenseInsights(
+      total: total,
+      previous: await sum(ymd(pFrom), ymd(pTo)),
+      days: days,
+      heads: heads,
+      months: months,
+      recurring: recurring,
+      spikes: spikes,
+      revenue: revenue,
+      repeat: repeat,
+      budgets: budgets,
+    );
+  }
+
+  static Future<void> setBudget(int headId, int amount) =>
+      setSetting('budget_$headId', amount <= 0 ? '0' : '$amount');
 
   // ------------------------------------------------------------ inventory
   /// Products with category, units sold and realised gross profit.
@@ -1255,6 +1352,39 @@ class Analytics {
     required this.recentSales,
   });
   int change(int Function(PeriodTotals p) f) => Books.pctChange(f(cur), f(prev));
+}
+
+class RecurringExpense {
+  final int headId;
+  final String name;
+  final int typical; // paise
+  final int day; // usual day of month
+  final bool paidThisMonth;
+  RecurringExpense(this.headId, this.name, this.typical, this.day, this.paidThisMonth);
+}
+
+class ExpenseInsights {
+  final int total, previous, days, revenue;
+  final List<Rec> heads, repeat;
+  final List<MonthBar> months;
+  final List<RecurringExpense> recurring;
+  final List<MapEntry<String, int>> spikes; // head → % above its 3-month average
+  final Map<int, int> budgets; // head id → monthly budget (paise)
+  ExpenseInsights({
+    required this.total,
+    required this.previous,
+    required this.days,
+    required this.heads,
+    required this.months,
+    required this.recurring,
+    required this.spikes,
+    required this.revenue,
+    required this.repeat,
+    required this.budgets,
+  });
+  int get change => Books.pctChange(total, previous);
+  int get dailyAvg => days == 0 ? 0 : total ~/ days;
+  double get ofRevenue => revenue == 0 ? 0 : total * 100 / revenue;
 }
 
 class Ageing {

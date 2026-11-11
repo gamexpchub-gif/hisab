@@ -21,7 +21,7 @@ class AppDb {
     );
   }
 
-  static const schemaVersion = 4;
+  static const schemaVersion = 5;
 
   static Future<void> upgrade(Database db, int from, int to) async {
     if (from < 2) {
@@ -34,6 +34,12 @@ class AppDb {
     }
     if (from < 4) {
       await db.execute('ALTER TABLE purchases ADD COLUMN bill_image TEXT');
+    }
+    if (from < 5) {
+      await db.execute('ALTER TABLE expenses ADD COLUMN image TEXT');
+      await db.execute(_salePayments);
+      await db.execute('INSERT INTO sale_payments (sale_id, account_id, amount) '
+          'SELECT id, account_id, paid FROM sales WHERE paid > 0 AND account_id IS NOT NULL');
     }
   }
 
@@ -49,6 +55,10 @@ class AppDb {
     await batch.commit(noResult: true);
     await seed(db);
   }
+
+  static const _salePayments = '''CREATE TABLE sale_payments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id INTEGER NOT NULL REFERENCES sales(id),
+      account_id INTEGER NOT NULL REFERENCES accounts(id), amount INTEGER NOT NULL)''';
 
   static const schema = <String>[
     'CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)',
@@ -115,7 +125,8 @@ class AppDb {
     '''CREATE TABLE expenses (
       id INTEGER PRIMARY KEY AUTOINCREMENT, number TEXT NOT NULL UNIQUE, date TEXT NOT NULL,
       head_id INTEGER NOT NULL REFERENCES accounts(id), account_id INTEGER NOT NULL REFERENCES accounts(id),
-      amount INTEGER NOT NULL, note TEXT, created_at TEXT NOT NULL)''',
+      amount INTEGER NOT NULL, note TEXT, created_at TEXT NOT NULL, image TEXT)''',
+    _salePayments,
     '''CREATE TABLE transfers (
       id INTEGER PRIMARY KEY AUTOINCREMENT, number TEXT NOT NULL UNIQUE, date TEXT NOT NULL,
       from_id INTEGER NOT NULL REFERENCES accounts(id), to_id INTEGER NOT NULL REFERENCES accounts(id),

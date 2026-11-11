@@ -130,6 +130,42 @@ void main() {
     expect(stats.paymentsTotal, 15000);
   });
 
+  test('split payment posts each account and keeps books balanced', () async {
+    final c = await Books.saveParty('customer', {'name': 'Split Test'});
+    final p = await Books.saveProduct({'name': 'Phone', 'gst_bp': 0, 'price': 1000000}, openingQty: 2, openingCost: 800000);
+    final acc = await Books.moneyAccounts();
+    final cash = asInt(acc[0]['id']), bank = asInt(acc[1]['id']);
+    final id = await Books.createSale(
+      items: [ItemIn(p, 1, 1000000)],
+      customerId: c,
+      splits: [MapEntry(cash, 400000), MapEntry(bank, 500000)],
+    );
+    expect(await Books.balance(cash, 'asset'), 400000);
+    expect(await Books.balance(bank, 'asset'), 500000);
+    expect(await Books.partyBalance('customer', c), 100000);
+    final sp = await Books.query('SELECT account_id, amount FROM sale_payments WHERE sale_id = ? ORDER BY amount', [id]);
+    expect(sp.map((r) => asInt(r['amount'])).toList(), [400000, 500000]);
+    await expectBalanced();
+  });
+
+  test('expense insights: totals, recurring rent and spikes', () async {
+    final heads = await Books.accounts(kind: 'expense');
+    final rent = asInt(heads.first['id']);
+    final cash = asInt((await Books.moneyAccounts()).first['id']);
+    final now = DateTime.now();
+    for (var m = 1; m <= 3; m++) {
+      await Books.createExpense(headId: rent, amount: 1200000, accountId: cash, date: ymd(DateTime(now.year, now.month - m, 5)));
+    }
+    await Books.createExpense(headId: asInt(heads.last['id']), amount: 30000, accountId: cash, date: ymd(now));
+    final x = await Books.expenseInsights(DateTime(now.year, now.month, 1), now);
+    expect(x.total, 30000);
+    expect(x.recurring.single.name, heads.first['name']);
+    expect(x.recurring.single.typical, 1200000);
+    expect(x.recurring.single.day, 5);
+    expect(x.recurring.single.paidThisMonth, isFalse);
+    expect(x.months.length, 6);
+  });
+
   test('demo data loads and balances', () async {
     await Books.loadDemo();
     await expectBalanced();

@@ -66,6 +66,11 @@ class _Line {
   int get cost => asInt(p['cost']) * qty;
 }
 
+class _Split {
+  int? account;
+  final ctrl = TextEditingController();
+}
+
 class SaleForm extends StatefulWidget {
   final int? customerId;
   const SaleForm({super.key, this.customerId});
@@ -88,6 +93,10 @@ class _SaleFormState extends State<SaleForm> {
   bool discountPct = false;
   bool roundOff = true;
   bool receivedTouched = false;
+  String payMode = 'full'; // full | due | split
+  int advancePct = 0; // due mode: 0 / 25 / 50 / 75, or -1 for a custom advance
+  final advanceCtrl = TextEditingController();
+  final splits = <_Split>[];
   bool showProfit = false;
   bool saving = false;
   String nextNo = '';
@@ -112,6 +121,8 @@ class _SaleFormState extends State<SaleForm> {
     settings = await Books.settings();
     final n = asInt((await Books.query('SELECT COUNT(*) AS c FROM sales')).first['c']) + 1;
     nextNo = 'INV-${n.toString().padLeft(5, '0')}';
+    final last = int.tryParse(settings['last_pay_account'] ?? '');
+    if (account == null && last != null && accounts.any((a) => asInt(a['id']) == last)) account = last;
     account ??= accounts.isNotEmpty ? asInt(accounts.first['id']) : null;
     if (widget.customerId != null) {
       for (final c in customers) {
@@ -128,6 +139,10 @@ class _SaleFormState extends State<SaleForm> {
     }
     search.dispose();
     received.dispose();
+    advanceCtrl.dispose();
+    for (final sp in splits) {
+      sp.ctrl.dispose();
+    }
     discountCtrl.dispose();
     note.dispose();
     super.dispose();
@@ -153,17 +168,32 @@ class _SaleFormState extends State<SaleForm> {
   int get profit => subtotal - discount - cart.fold(0, (a, l) => a + l.cost);
   int get qtyTotal => cart.fold(0, (a, l) => a + l.qty);
 
-  int get _received {
-    if (!receivedTouched) return total;
+  int _parse(TextEditingController c) {
     try {
-      return Money.parse(received.text);
+      return Money.parse(c.text);
     } catch (_) {
       return 0;
     }
   }
 
-  int get paid => math.min(_received, total);
-  int get change => math.max(0, _received - total);
+  bool get _cashSelected => _account?['kind'] == 'cash';
+  int get splitSum => splits.fold(0, (a, sp) => a + _parse(sp.ctrl));
+
+  /// Amount collected now, by payment mode.
+  int get paid {
+    switch (payMode) {
+      case 'due':
+        if (advancePct < 0) return math.min(math.max(_parse(advanceCtrl), 0), total);
+        return (total * advancePct ~/ 100) ~/ 100 * 100; // whole rupees
+      case 'split':
+        return math.min(splitSum, total);
+      default:
+        return total;
+    }
+  }
+
+  /// Change to hand back when cash tendered exceeds the bill (full mode, cash).
+  int get change => payMode == 'full' && _cashSelected && receivedTouched ? math.max(0, _parse(received) - total) : 0;
   int get due => total - paid;
 
   void _recalc() => setState(() {});
@@ -277,6 +307,14 @@ class _SaleFormState extends State<SaleForm> {
       toast(context, 'Add at least one product', error: true);
       return;
     }
+    if (payMode == 'split' && splitSum > total) {
+      toast(context, 'Split amounts are ₹${Money.inr(splitSum - total)} more than the bill', error: true);
+      return;
+    }
+    if (payMode == 'split' && splits.any((sp) => sp.account == null && _parse(sp.ctrl) > 0)) {
+      toast(context, 'Choose an account for every split amount', error: true);
+      return;
+    }
     if (due > 0 && customer == null) {
       toast(context, 'Select a customer to give credit (₹${Money.inr(due)} due)', error: true);
       return;
@@ -309,7 +347,11 @@ class _SaleFormState extends State<SaleForm> {
         discount: discount,
         date: date,
         note: note.text.trim().isEmpty ? null : note.text.trim(),
+        splits: payMode == 'split'
+            ? [for (final sp in splits) if (sp.account != null && _parse(sp.ctrl) > 0) MapEntry(sp.account!, _parse(sp.ctrl))]
+            : null,
       );
+      if (account != null) await Books.setSetting('last_pay_account', '$account');
       if (!mounted) return;
       HapticFeedback.heavyImpact();
       Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => SaleSuccessScreen(saleId: id, change: change)));
@@ -865,88 +907,142 @@ class _SaleFormState extends State<SaleForm> {
       );
 
   // ---------------------------------------------------------------- payment
+  IconData _accIcon(String? k) =>
+      k == 'cash' ? Icons.payments_rounded : k == 'upi' ? Icons.qr_code_2_rounded : Icons.account_balance_rounded;
+
+  void _setMode(String m) {
+    HapticFeedback.selectionClick();
+    setState(() {
+      payMode = m;
+      if (m == 'split' && splits.isEmpty) _initSplits();
+    });
+  }
+
+  /// Two rows by default: cash + the first non-cash account, 50/50.
+  void _initSplits() {
+    Rec? cash, other;
+    for (final a in accounts) {
+      if (a['kind'] == 'cash') cash ??= a;
+      if (a['kind'] != 'cash') other ??= a;
+    }
+    final first = cash ?? (accounts.isNotEmpty ? accounts.first : null);
+    final second = other ?? (accounts.length > 1 ? accounts[1] : null);
+    for (final a in [first, second]) {
+      splits.add(_Split()..account = a == null ? null : asInt(a['id']));
+    }
+    _splitPreset(50);
+  }
+
+  /// Puts [pct]% of the bill on the first row (whole rupees) and the rest on the second.
+  void _splitPreset(int pct) {
+    if (splits.length < 2) return;
+    final firstAmt = (total * pct ~/ 100) ~/ 100 * 100;
+    splits[0].ctrl.text = Money.edit(firstAmt);
+    splits[1].ctrl.text = Money.edit(total - firstAmt);
+    for (var i = 2; i < splits.length; i++) {
+      splits[i].ctrl.text = '';
+    }
+  }
+
+  /// Smart split: cash in round ₹500 notes, the remainder digitally.
+  void _smartSplit() {
+    if (splits.length < 2) return;
+    final half = total ~/ 2;
+    final cash = (half ~/ 50000) * 50000;
+    splits[0].ctrl.text = Money.edit(cash == 0 ? half ~/ 100 * 100 : cash);
+    splits[1].ctrl.text = Money.edit(total - _parse(splits[0].ctrl));
+  }
+
+  /// Editing one of two rows auto-fills the other with the remainder.
+  void _balanceFrom(int i) {
+    if (splits.length != 2) return;
+    final other = splits[1 - i];
+    final rest = math.max(0, total - _parse(splits[i].ctrl));
+    final text = Money.edit(rest);
+    if (other.ctrl.text != text) other.ctrl.text = text;
+  }
+
   Widget _paymentCard() {
-    IconData icon(String? k) =>
-        k == 'cash' ? Icons.payments_rounded : k == 'upi' ? Icons.qr_code_2_rounded : Icons.account_balance_rounded;
     final acc = _account;
     final upiId = (settings['upi_id'] ?? '').trim();
+    const modes = [
+      ('full', 'Full paid', Icons.verified_rounded),
+      ('due', 'Due', Icons.schedule_rounded),
+      ('split', 'Split', Icons.call_split_rounded),
+    ];
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: _card(),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('Payment', style: _j(15, FontWeight.w800, _ink)),
-        const SizedBox(height: 10),
-        Wrap(spacing: 8, runSpacing: 8, children: [
-          for (final a in accounts)
-            GestureDetector(
-              onTap: () => setState(() => account = asInt(a['id'])),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-                decoration: BoxDecoration(
-                  gradient: account == asInt(a['id']) ? const LinearGradient(colors: [Color(0xFF6B35EE), Color(0xFF4318D2)]) : null,
-                  color: account == asInt(a['id']) ? null : Colors.white,
-                  borderRadius: BorderRadius.circular(14),
-                  border: account == asInt(a['id']) ? null : Border.all(color: _line),
-                ),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(icon(a['kind'] as String?), size: 17, color: account == asInt(a['id']) ? Colors.white : _purple),
-                  const SizedBox(width: 6),
-                  Text(a['name'] as String, style: _j(12.5, FontWeight.w700, account == asInt(a['id']) ? Colors.white : _ink)),
-                ]),
-              ),
-            ),
+        Row(children: [
+          Text('Payment', style: _j(15, FontWeight.w800, _ink)),
+          const Spacer(),
+          if (payMode != 'full')
+            Text(customer == null ? 'Needs a customer' : 'On ${customer!['name']}\'s account',
+                style: _j(11, FontWeight.w700, customer == null ? _red : _muted)),
         ]),
-        const SizedBox(height: 14),
+        const SizedBox(height: 10),
+        // ---- mode selector
         Container(
           height: 54,
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          decoration: BoxDecoration(
-            color: const Color(0xFFFAFAFE),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: const Color(0xFFCFC4FF), width: 1.4),
-          ),
-          child: Row(children: [
-            Text('Received', style: _j(13, FontWeight.w600, _muted)),
-            const SizedBox(width: 10),
-            Text('₹', style: _j(18, FontWeight.w800, _ink)),
-            const SizedBox(width: 4),
-            Expanded(
-              child: TextField(
-                controller: received,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                style: _j(18, FontWeight.w800, _ink),
-                onChanged: (_) => setState(() => receivedTouched = true),
-                decoration: InputDecoration(
-                  isCollapsed: true,
-                  filled: false,
-                  border: InputBorder.none,
-                  enabledBorder: InputBorder.none,
-                  focusedBorder: InputBorder.none,
-                  hintText: Money.inr(total),
-                  hintStyle: _j(18, FontWeight.w800, const Color(0xFFB9BCD6)),
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(color: const Color(0xFFF1F2FA), borderRadius: BorderRadius.circular(18)),
+          child: LayoutBuilder(builder: (context, c) {
+            final w = c.maxWidth / 3;
+            final i = modes.indexWhere((m) => m.$1 == payMode);
+            return Stack(children: [
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 350),
+                curve: Curves.easeOutBack,
+                left: i * w,
+                top: 0,
+                bottom: 0,
+                width: w,
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    gradient: LinearGradient(
+                      colors: payMode == 'full'
+                          ? const [Color(0xFF1BB574), Color(0xFF0F8C58)]
+                          : payMode == 'due'
+                              ? const [Color(0xFFF59E0B), Color(0xFFD97706)]
+                              : const [Color(0xFF6B35EE), Color(0xFF4318D2)],
+                    ),
+                    boxShadow: const [BoxShadow(color: Color(0x332A2F7A), blurRadius: 10, offset: Offset(0, 4), spreadRadius: -4)],
+                  ),
                 ),
               ),
-            ),
-          ]),
+              Row(children: [
+                for (final m in modes)
+                  Expanded(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => _setMode(m.$1),
+                      child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                        Icon(m.$3, size: 17, color: m.$1 == payMode ? Colors.white : _muted),
+                        const SizedBox(width: 5),
+                        Text(m.$2, style: _j(12.5, FontWeight.w800, m.$1 == payMode ? Colors.white : _ink)),
+                      ]),
+                    ),
+                  ),
+              ]),
+            ]);
+          }),
         ),
-        const SizedBox(height: 10),
-        Wrap(spacing: 8, runSpacing: 8, children: [
-          _quickAmt('Full', total),
-          for (final n in [50000, 100000, 200000, 500000])
-            if (n < total * 3) _quickAmt('₹${Money.inr(n)}', n),
-          _quickAmt('Credit (₹0)', 0),
-        ]),
+        const SizedBox(height: 14),
+        if (payMode == 'full') ..._fullMode(),
+        if (payMode == 'due') ..._dueMode(),
+        if (payMode == 'split') ..._splitMode(),
         const SizedBox(height: 12),
         Row(children: [
           Expanded(
-            child: _stat(change > 0 ? 'Change to return' : 'Paid now', Money.rs(change > 0 ? change : paid),
+            child: _stat(change > 0 ? 'Change to return' : 'Collected now', Money.rs(change > 0 ? change : paid),
                 change > 0 ? _amber : _green),
           ),
           const SizedBox(width: 10),
-          Expanded(child: _stat('Balance due', Money.rs(due), due > 0 ? _red : _muted)),
+          Expanded(child: _stat(due > 0 ? 'Goes to due' : 'Balance due', Money.rs(due), due > 0 ? _red : _muted)),
         ]),
-        if (acc != null && acc['kind'] == 'upi' && upiId.isNotEmpty) ...[
+        if (payMode != 'split' && paid > 0 && acc != null && acc['kind'] == 'upi' && upiId.isNotEmpty) ...[
           const SizedBox(height: 12),
           GestureDetector(
             onTap: () => _showUpiQr(upiId),
@@ -964,13 +1060,291 @@ class _SaleFormState extends State<SaleForm> {
               ]),
             ),
           ),
-        ] else if (acc != null && acc['kind'] == 'upi')
+        ] else if (payMode != 'split' && acc != null && acc['kind'] == 'upi' && upiId.isEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 10),
             child: Text('Tip: add your UPI ID in Settings to show a payment QR here.', style: _j(11, FontWeight.w500, _muted)),
           ),
       ]),
     );
+  }
+
+  /// Account chips — every cash / bank / UPI / wallet account in the books.
+  Widget _accountChips(int? selected, ValueChanged<int> onPick) => Wrap(spacing: 8, runSpacing: 8, children: [
+        for (final a in accounts)
+          GestureDetector(
+            onTap: () {
+              HapticFeedback.selectionClick();
+              onPick(asInt(a['id']));
+            },
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              decoration: BoxDecoration(
+                gradient: selected == asInt(a['id']) ? const LinearGradient(colors: [Color(0xFF6B35EE), Color(0xFF4318D2)]) : null,
+                color: selected == asInt(a['id']) ? null : Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: selected == asInt(a['id']) ? null : Border.all(color: _line),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(_accIcon(a['kind'] as String?), size: 17, color: selected == asInt(a['id']) ? Colors.white : _purple),
+                const SizedBox(width: 6),
+                Text(a['name'] as String, style: _j(12.5, FontWeight.w700, selected == asInt(a['id']) ? Colors.white : _ink)),
+              ]),
+            ),
+          ),
+      ]);
+
+  Widget _label(String t) => Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Text(t, style: _j(12, FontWeight.w700, const Color(0xFF3A4155))),
+      );
+
+  Widget _amountBox(TextEditingController c, String label, {ValueChanged<String>? onChanged, String? hint}) => Container(
+        height: 52,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFAFAFE),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFCFC4FF), width: 1.4),
+        ),
+        child: Row(children: [
+          Text(label, style: _j(12.5, FontWeight.w600, _muted)),
+          const SizedBox(width: 8),
+          Text('₹', style: _j(17, FontWeight.w800, _ink)),
+          const SizedBox(width: 4),
+          Expanded(
+            child: TextField(
+              controller: c,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              style: _j(17, FontWeight.w800, _ink),
+              onChanged: (v) {
+                onChanged?.call(v);
+                setState(() {});
+              },
+              decoration: InputDecoration(
+                isCollapsed: true,
+                filled: false,
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                hintText: hint ?? '0',
+                hintStyle: _j(17, FontWeight.w800, const Color(0xFFB9BCD6)),
+              ),
+            ),
+          ),
+        ]),
+      );
+
+  // ---- FULL PAID: pick the account; for cash, optional tendered amount → change
+  List<Widget> _fullMode() => [
+        _label('Received in'),
+        _accountChips(account, (id) => setState(() => account = id)),
+        if (_cashSelected) ...[
+          const SizedBox(height: 12),
+          _amountBox(received, 'Cash given', hint: Money.inr(total), onChanged: (_) => receivedTouched = true),
+          const SizedBox(height: 8),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            _quickAmt('Exact', total),
+            for (final n in [50000, 100000, 200000, 500000])
+              if (n >= total ~/ 4 && n < total * 3) _quickAmt('₹${Money.inr(n)}', n),
+            _quickAmt('Next ₹500', ((total + 49999) ~/ 50000) * 50000),
+          ]),
+        ],
+      ];
+
+  // ---- DUE: advance presets, advance account
+  List<Widget> _dueMode() {
+    const presets = [(0, 'Nothing'), (25, '25%'), (50, 'Half'), (75, '75%'), (-1, 'Custom')];
+    return [
+      _label('Advance / deposit now'),
+      Row(children: [
+        for (final p in presets) ...[
+          Expanded(
+            child: GestureDetector(
+              onTap: () {
+                HapticFeedback.selectionClick();
+                setState(() => advancePct = p.$1);
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                height: 52,
+                decoration: BoxDecoration(
+                  gradient: advancePct == p.$1 ? const LinearGradient(colors: [Color(0xFFF59E0B), Color(0xFFD97706)]) : null,
+                  color: advancePct == p.$1 ? null : Colors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  border: advancePct == p.$1 ? null : Border.all(color: _line),
+                ),
+                child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  Text(p.$2, style: _j(12, FontWeight.w800, advancePct == p.$1 ? Colors.white : _ink)),
+                  if (p.$1 > 0)
+                    Text(Money.compact((total * p.$1 ~/ 100) ~/ 100 * 100),
+                        style: _j(9.5, FontWeight.w600, advancePct == p.$1 ? const Color(0xE6FFFFFF) : _muted)),
+                ]),
+              ),
+            ),
+          ),
+          if (p != presets.last) const SizedBox(width: 6),
+        ],
+      ]),
+      if (advancePct < 0) ...[
+        const SizedBox(height: 10),
+        _amountBox(advanceCtrl, 'Advance'),
+      ],
+      if (paid > 0) ...[
+        const SizedBox(height: 12),
+        _label('Advance received in'),
+        _accountChips(account, (id) => setState(() => account = id)),
+      ],
+      if (customer != null) ...[
+        const SizedBox(height: 10),
+        Row(children: [
+          const Icon(Icons.info_outline_rounded, size: 15, color: _muted),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              '${customer!['name']} will owe ${Money.rs((dues[asInt(customer!['id'])] ?? 0) + due)} in total after this bill',
+              style: _j(11.5, FontWeight.w600, _muted),
+            ),
+          ),
+        ]),
+      ],
+    ];
+  }
+
+  // ---- SPLIT: several accounts, auto-balancing, presets
+  List<Widget> _splitMode() {
+    final diff = total - splitSum;
+    return [
+      Row(children: [
+        _label('Split between accounts'),
+        const Spacer(),
+        for (final p in const [(50, '50/50'), (70, '70/30')]) ...[
+          GestureDetector(
+            onTap: () => setState(() => _splitPreset(p.$1)),
+            child: Container(
+              margin: const EdgeInsets.only(left: 6, bottom: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(color: const Color(0xFFF1F2FA), borderRadius: BorderRadius.circular(10)),
+              child: Text(p.$2, style: _j(11.5, FontWeight.w800, _ink)),
+            ),
+          ),
+        ],
+        GestureDetector(
+          onTap: () => setState(_smartSplit),
+          child: Container(
+            margin: const EdgeInsets.only(left: 6, bottom: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(colors: [Color(0xFF8B5CF6), Color(0xFF5B2EE0)]),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(children: [
+              const Icon(Icons.auto_awesome_rounded, size: 13, color: Colors.white),
+              const SizedBox(width: 4),
+              Text('Smart', style: _j(11.5, FontWeight.w800, Colors.white)),
+            ]),
+          ),
+        ),
+      ]),
+      for (var i = 0; i < splits.length; i++)
+        Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFAFAFE),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFEEF0F8)),
+          ),
+          child: Column(children: [
+            Row(children: [
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(children: [
+                    for (final a in accounts)
+                      GestureDetector(
+                        onTap: () => setState(() => splits[i].account = asInt(a['id'])),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 160),
+                          margin: const EdgeInsets.only(right: 6),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                          decoration: BoxDecoration(
+                            gradient: splits[i].account == asInt(a['id'])
+                                ? const LinearGradient(colors: [Color(0xFF6B35EE), Color(0xFF4318D2)])
+                                : null,
+                            color: splits[i].account == asInt(a['id']) ? null : Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            border: splits[i].account == asInt(a['id']) ? null : Border.all(color: _line),
+                          ),
+                          child: Row(mainAxisSize: MainAxisSize.min, children: [
+                            Icon(_accIcon(a['kind'] as String?), size: 15,
+                                color: splits[i].account == asInt(a['id']) ? Colors.white : _purple),
+                            const SizedBox(width: 4),
+                            Text(a['name'] as String,
+                                style: _j(11.5, FontWeight.w700, splits[i].account == asInt(a['id']) ? Colors.white : _ink)),
+                          ]),
+                        ),
+                      ),
+                  ]),
+                ),
+              ),
+              if (splits.length > 2)
+                GestureDetector(
+                  onTap: () => setState(() => splits.removeAt(i)),
+                  child: const Padding(padding: EdgeInsets.only(left: 6), child: Icon(Icons.close_rounded, color: _red, size: 20)),
+                ),
+            ]),
+            const SizedBox(height: 8),
+            _amountBox(splits[i].ctrl, 'Amount', onChanged: (_) => _balanceFrom(i)),
+            if (total > 0 && _parse(splits[i].ctrl) > 0)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: (_parse(splits[i].ctrl) / total).clamp(0.0, 1.0).toDouble(),
+                    minHeight: 5,
+                    backgroundColor: const Color(0xFFEDEBFA),
+                    valueColor: const AlwaysStoppedAnimation(_purple),
+                  ),
+                ),
+              ),
+          ]),
+        ),
+      if (splits.length < accounts.length)
+        TextButton.icon(
+          onPressed: () => setState(() {
+            final used = splits.map((sp) => sp.account).toSet();
+            final next = accounts.firstWhere((a) => !used.contains(asInt(a['id'])), orElse: () => accounts.first);
+            splits.add(_Split()..account = asInt(next['id']));
+          }),
+          icon: const Icon(Icons.add_rounded),
+          label: const Text('Add another account'),
+        ),
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        decoration: BoxDecoration(
+          color: diff == 0 ? const Color(0xFFE3F7EC) : diff > 0 ? const Color(0xFFFFF1DC) : const Color(0xFFFDE4EA),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(children: [
+          Icon(diff == 0 ? Icons.check_circle_rounded : diff > 0 ? Icons.info_rounded : Icons.error_rounded,
+              size: 17, color: diff == 0 ? _green : diff > 0 ? _amber : _red),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              diff == 0
+                  ? 'Split matches the bill exactly'
+                  : diff > 0
+                      ? '${Money.rs(diff)} left — it will go to the customer\'s due'
+                      : '${Money.rs(-diff)} more than the bill — reduce an amount',
+              style: _j(12, FontWeight.w700, diff == 0 ? const Color(0xFF0E6E47) : diff > 0 ? const Color(0xFF9A5B00) : _red),
+            ),
+          ),
+        ]),
+      ),
+    ];
   }
 
   Widget _quickAmt(String label, int v) => GestureDetector(

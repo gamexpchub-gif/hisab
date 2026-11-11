@@ -13,6 +13,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:hisab/core/books.dart';
 import 'package:hisab/core/db.dart';
 import 'package:hisab/main.dart';
+import 'package:hisab/screens/expenses.dart';
 import 'package:hisab/screens/ledgers.dart';
 import 'package:hisab/screens/parties.dart';
 import 'package:hisab/screens/product_form.dart';
@@ -49,7 +50,7 @@ void main() {
     await Books.loadDemo();
   });
 
-  for (final (name, index) in [('home', 0), ('dashboard', 1), ('products', 2), ('menu', 3), ('add_product', -1), ('new_sale', -2), ('new_purchase', -3), ('ledgers', -4), ('customer_profile', -5)]) {
+  for (final (name, index) in [('home', 0), ('dashboard', 1), ('products', 2), ('menu', 3), ('add_product', -1), ('new_sale', -2), ('new_purchase', -3), ('ledgers', -4), ('customer_profile', -5), ('expenses', -6)]) {
     testWidgets(name, (t) async {
       t.view.physicalSize = const Size(1080, 2340);
       t.view.devicePixelRatio = 2.75;
@@ -70,7 +71,9 @@ void main() {
                           ? const PurchaseForm(supplierId: 1)
                           : index == -4
                               ? const LedgersScreen()
-                              : const PartyView(type: 'customer', id: 1),
+                              : index == -5
+                                  ? const PartyView(type: 'customer', id: 1)
+                                  : const ExpensesScreen(),
         ),
       ));
       if (index == -1) {
