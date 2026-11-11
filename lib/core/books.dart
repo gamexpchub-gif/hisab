@@ -828,6 +828,155 @@ class Books {
 
   static Future<List<Rec>> activity(int limit) => query('SELECT * FROM audit_log ORDER BY id DESC LIMIT ?', [limit]);
 
+  // ------------------------------------------------------------ analytics
+  /// Everything the Dashboard needs for one period, plus the same figures
+  /// for the previous period of equal length (for % change).
+  static Future<Analytics> analytics(DateTime from, DateTime to) async {
+    final f = ymd(from), t = ymd(to);
+    final days = DateTime(to.year, to.month, to.day).difference(DateTime(from.year, from.month, from.day)).inDays + 1;
+    final prevTo = from.subtract(const Duration(days: 1));
+    final prevFrom = prevTo.subtract(Duration(days: days - 1));
+    final cur = await _periodTotals(f, t);
+    final prev = await _periodTotals(ymd(prevFrom), ymd(prevTo));
+
+    // ---- time series
+    final gran = days <= 1 ? 'hour' : days <= 31 ? 'day' : days <= 120 ? 'week' : 'month';
+    final keyExpr = gran == 'hour' ? 'substr(created_at, 12, 2)' : 'date';
+    Future<Map<String, List<int>>> grouped(String sql) async {
+      final rows = await query(sql.replaceAll('{k}', keyExpr), [f, t]);
+      return {for (final r in rows) r['k'] as String: [asInt(r['a']), asInt(r['b'])]};
+    }
+
+    final s = await grouped('SELECT {k} AS k, COALESCE(SUM(total),0) AS a, COALESCE(SUM(subtotal - discount - cogs),0) AS b '
+        'FROM sales WHERE date >= ? AND date <= ? GROUP BY k');
+    final pu = await grouped('SELECT {k} AS k, COALESCE(SUM(total),0) AS a, 0 AS b FROM purchases WHERE date >= ? AND date <= ? GROUP BY k');
+    final ex = await grouped('SELECT {k} AS k, COALESCE(SUM(amount),0) AS a, 0 AS b FROM expenses WHERE date >= ? AND date <= ? GROUP BY k');
+
+    final buckets = <SeriesPoint>[];
+    void add(String label, Iterable<String> keys) {
+      var sa = 0, pa = 0, gp = 0, e = 0;
+      for (final k in keys) {
+        sa += s[k]?[0] ?? 0;
+        gp += s[k]?[1] ?? 0;
+        pa += pu[k]?[0] ?? 0;
+        e += ex[k]?[0] ?? 0;
+      }
+      buckets.add(SeriesPoint(label, sa, pa, gp - e));
+    }
+
+    if (gran == 'hour') {
+      for (var h = 0; h < 24; h++) {
+        add(h == 0 ? '12a' : h < 12 ? '${h}a' : h == 12 ? '12p' : '${h - 12}p', [two(h)]);
+      }
+    } else {
+      final allDays = [for (var i = 0; i < days; i++) DateTime(from.year, from.month, from.day + i)];
+      if (gran == 'day') {
+        for (final d in allDays) {
+          add(days <= 7 ? const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][d.weekday - 1] : '${d.day}', [ymd(d)]);
+        }
+      } else if (gran == 'week') {
+        for (var i = 0; i < allDays.length; i += 7) {
+          final chunk = allDays.sublist(i, i + 7 > allDays.length ? allDays.length : i + 7);
+          add('${chunk.first.day} ${monthName(chunk.first.month)}', chunk.map(ymd));
+        }
+      } else {
+        final byMonth = <String, List<String>>{};
+        for (final d in allDays) {
+          byMonth.putIfAbsent('${d.year}-${two(d.month)}', () => []).add(ymd(d));
+        }
+        for (final e in byMonth.entries) {
+          add(monthName(int.parse(e.key.substring(5))), e.value);
+        }
+      }
+    }
+
+    // ---- breakdowns
+    final categories = await query(
+        "SELECT IFNULL(c.name, 'Other') AS name, COALESCE(SUM(i.amount),0) AS v FROM sale_items i "
+        'JOIN sales s ON s.id = i.sale_id JOIN products p ON p.id = i.product_id '
+        'LEFT JOIN categories c ON c.id = p.category_id WHERE s.date >= ? AND s.date <= ? '
+        'GROUP BY name ORDER BY v DESC',
+        [f, t]);
+    final payments = await query(
+        'SELECT a.name AS name, a.kind AS kind, COALESCE(SUM(x.v),0) AS v FROM ('
+        '  SELECT account_id, paid AS v FROM sales WHERE date >= ? AND date <= ? AND paid > 0 '
+        "  UNION ALL SELECT account_id, amount AS v FROM payments WHERE kind = 'receipt' AND date >= ? AND date <= ?"
+        ') x JOIN accounts a ON a.id = x.account_id GROUP BY a.id ORDER BY v DESC',
+        [f, t, f, t]);
+    final expenseHeads = await query(
+        'SELECT h.name AS name, COALESCE(SUM(e.amount),0) AS v FROM expenses e JOIN accounts h ON h.id = e.head_id '
+        'WHERE e.date >= ? AND e.date <= ? GROUP BY h.id ORDER BY v DESC LIMIT 6',
+        [f, t]);
+    final topProducts = await query(
+        'SELECT i.product_id AS id, i.name AS name, SUM(i.qty) AS qty, SUM(i.amount) AS v, '
+        'SUM(i.amount - i.unit_cost * i.qty) AS profit FROM sale_items i JOIN sales s ON s.id = i.sale_id '
+        'WHERE s.date >= ? AND s.date <= ? GROUP BY i.product_id ORDER BY v DESC LIMIT 5',
+        [f, t]);
+    final dues = await partyBalances('customer');
+    final topCustomersRaw = await query(
+        'SELECT c.id AS id, c.name AS name, c.phone AS phone, COUNT(s.id) AS n, SUM(s.total) AS v, SUM(s.paid) AS paid, '
+        'MAX(s.date) AS last FROM sales s JOIN customers c ON c.id = s.customer_id '
+        'WHERE s.date >= ? AND s.date <= ? GROUP BY c.id ORDER BY v DESC LIMIT 8',
+        [f, t]);
+    final topCustomers = [for (final r in topCustomersRaw) {...r, 'due': dues[asInt(r['id'])] ?? 0}];
+    final walkIn = asInt((await query(
+            'SELECT COALESCE(SUM(total),0) AS v FROM sales WHERE customer_id IS NULL AND date >= ? AND date <= ?', [f, t]))
+        .first['v']);
+
+    final money = <MapEntry<String, int>>[];
+    for (final a in await moneyAccounts()) {
+      money.add(MapEntry(a['name'] as String, await balance(asInt(a['id']), 'asset')));
+    }
+    return Analytics(
+      from: from,
+      to: to,
+      granularity: gran,
+      cur: cur,
+      prev: prev,
+      series: buckets,
+      categories: categories,
+      payments: payments,
+      expenseHeads: expenseHeads,
+      topProducts: topProducts,
+      topCustomers: topCustomers,
+      walkInSales: walkIn,
+      money: money,
+      receivable: dues.values.where((v) => v > 0).fold(0, (a, b) => a + b),
+      payable: (await partyBalances('supplier')).values.where((v) => v > 0).fold(0, (a, b) => a + b),
+      lowStock: await query('SELECT * FROM products WHERE stock <= low_stock ORDER BY stock LIMIT 5'),
+      recentSales: await recentSales(5),
+    );
+  }
+
+  static Future<PeriodTotals> _periodTotals(String f, String t) async {
+    final s = (await query(
+            'SELECT COUNT(*) AS n, COALESCE(SUM(total),0) AS total, COALESCE(SUM(paid),0) AS paid, '
+            'COALESCE(SUM(tax),0) AS tax FROM sales WHERE date >= ? AND date <= ?',
+            [f, t]))
+        .first;
+    final p = (await query('SELECT COUNT(*) AS n, COALESCE(SUM(total),0) AS total FROM purchases WHERE date >= ? AND date <= ?',
+            [f, t]))
+        .first;
+    final newCustomers = asInt((await query('SELECT COUNT(*) AS c FROM customers WHERE substr(created_at,1,10) >= ? AND substr(created_at,1,10) <= ?',
+            [f, t]))
+        .first['c']);
+    final pl = await profitLoss(f, t);
+    return PeriodTotals(
+      sales: asInt(s['total']),
+      invoices: asInt(s['n']),
+      collected: asInt(s['paid']),
+      gstCollected: asInt(s['tax']),
+      purchases: asInt(p['total']),
+      bills: asInt(p['n']),
+      revenue: pl.revenue,
+      cogs: pl.cogs,
+      expenses: pl.operatingExpenses,
+      grossProfit: pl.grossProfit,
+      netProfit: pl.netProfit,
+      newCustomers: newCustomers,
+    );
+  }
+
   // ------------------------------------------------------------ inventory
   /// Products with category, units sold and realised gross profit.
   /// filter: all | in | low | out
@@ -957,6 +1106,62 @@ class Books {
     await createExpense(headId: asInt(heads[0]['id']), amount: 1200000, accountId: bank, date: ago(5), note: 'Monthly rent');
     await createExpense(headId: asInt(heads.last['id']), amount: 24000, accountId: cash, note: 'Tea & snacks');
   }
+}
+
+class PeriodTotals {
+  final int sales, invoices, collected, gstCollected, purchases, bills, revenue, cogs, expenses, grossProfit, netProfit, newCustomers;
+  PeriodTotals({
+    required this.sales,
+    required this.invoices,
+    required this.collected,
+    required this.gstCollected,
+    required this.purchases,
+    required this.bills,
+    required this.revenue,
+    required this.cogs,
+    required this.expenses,
+    required this.grossProfit,
+    required this.netProfit,
+    required this.newCustomers,
+  });
+  int get avgBill => invoices == 0 ? 0 : sales ~/ invoices;
+  double get margin => revenue == 0 ? 0 : netProfit * 100 / revenue;
+}
+
+class SeriesPoint {
+  final String label;
+  final int sales, purchases, profit;
+  SeriesPoint(this.label, this.sales, this.purchases, this.profit);
+}
+
+class Analytics {
+  final DateTime from, to;
+  final String granularity; // hour | day | week | month
+  final PeriodTotals cur, prev;
+  final List<SeriesPoint> series;
+  final List<Rec> categories, payments, expenseHeads, topProducts, topCustomers, lowStock, recentSales;
+  final int walkInSales, receivable, payable;
+  final List<MapEntry<String, int>> money;
+  Analytics({
+    required this.from,
+    required this.to,
+    required this.granularity,
+    required this.cur,
+    required this.prev,
+    required this.series,
+    required this.categories,
+    required this.payments,
+    required this.expenseHeads,
+    required this.topProducts,
+    required this.topCustomers,
+    required this.walkInSales,
+    required this.money,
+    required this.receivable,
+    required this.payable,
+    required this.lowStock,
+    required this.recentSales,
+  });
+  int change(int Function(PeriodTotals p) f) => Books.pctChange(f(cur), f(prev));
 }
 
 class InventoryStats {

@@ -45,6 +45,17 @@ class Money {
 
   static String rs(int paise) => '₹${inr(paise)}';
 
+  /// Short Indian format for charts: ₹1.2Cr, ₹4.5L, ₹12K, ₹950.
+  static String compact(int paise) {
+    final r = paise.abs() / 100;
+    final sign = paise < 0 ? '-' : '';
+    String f(double v) => v >= 100 ? v.toStringAsFixed(0) : v.toStringAsFixed(1).replaceAll('.0', '');
+    if (r >= 1e7) return '$sign₹${f(r / 1e7)}Cr';
+    if (r >= 1e5) return '$sign₹${f(r / 1e5)}L';
+    if (r >= 1e3) return '$sign₹${f(r / 1e3)}K';
+    return '$sign₹${r.toStringAsFixed(0)}';
+  }
+
   /// Plain editable text (e.g. "1250.50").
   static String edit(int paise) {
     final s = '${paise.abs() ~/ 100}.${(paise.abs() % 100).toString().padLeft(2, '0')}';

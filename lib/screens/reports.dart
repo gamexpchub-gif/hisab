@@ -71,14 +71,15 @@ class _RangeBar extends StatelessWidget {
 }
 
 class ProfitLossScreen extends StatefulWidget {
-  const ProfitLossScreen({super.key});
+  final String? from, to;
+  const ProfitLossScreen({super.key, this.from, this.to});
   @override
   State<ProfitLossScreen> createState() => _ProfitLossScreenState();
 }
 
 class _ProfitLossScreenState extends State<ProfitLossScreen> {
-  String from = ymd(DateTime(DateTime.now().year, DateTime.now().month, 1));
-  String to = ymd(DateTime.now());
+  late String from = widget.from ?? ymd(DateTime(DateTime.now().year, DateTime.now().month, 1));
+  late String to = widget.to ?? ymd(DateTime.now());
 
   @override
   Widget build(BuildContext context) {
@@ -232,14 +233,15 @@ class TrialBalanceScreen extends StatelessWidget {
 }
 
 class DayBookScreen extends StatefulWidget {
-  const DayBookScreen({super.key});
+  final String? from, to;
+  const DayBookScreen({super.key, this.from, this.to});
   @override
   State<DayBookScreen> createState() => _DayBookScreenState();
 }
 
 class _DayBookScreenState extends State<DayBookScreen> {
-  String from = ymd(DateTime.now());
-  String to = ymd(DateTime.now());
+  late String from = widget.from ?? ymd(DateTime.now());
+  late String to = widget.to ?? ymd(DateTime.now());
 
   Future<List<Rec>> _load() => Books.query(
       'SELECT e.id, e.date, e.ref, e.narration, a.name AS account, l.debit, l.credit FROM journal_entries e '
@@ -288,14 +290,15 @@ class _DayBookScreenState extends State<DayBookScreen> {
 }
 
 class GstScreen extends StatefulWidget {
-  const GstScreen({super.key});
+  final String? from, to;
+  const GstScreen({super.key, this.from, this.to});
   @override
   State<GstScreen> createState() => _GstScreenState();
 }
 
 class _GstScreenState extends State<GstScreen> {
-  String from = ymd(DateTime(DateTime.now().year, DateTime.now().month, 1));
-  String to = ymd(DateTime.now());
+  late String from = widget.from ?? ymd(DateTime(DateTime.now().year, DateTime.now().month, 1));
+  late String to = widget.to ?? ymd(DateTime.now());
 
   @override
   Widget build(BuildContext context) {

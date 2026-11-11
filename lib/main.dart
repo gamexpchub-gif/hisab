@@ -39,7 +39,8 @@ class HisabApp extends StatelessWidget {
 
 /// Bottom-navigation shell: Home · Dashboard · Products · Menu.
 class Shell extends StatefulWidget {
-  const Shell({super.key});
+  final int initialIndex;
+  const Shell({super.key, this.initialIndex = 0});
 
   static void goTo(BuildContext context, int index) => context.findAncestorStateOfType<_ShellState>()?.select(index);
 
@@ -48,7 +49,7 @@ class Shell extends StatefulWidget {
 }
 
 class _ShellState extends State<Shell> {
-  int index = 0;
+  late int index = widget.initialIndex;
 
   void select(int i) {
     if (i == index) return;

@@ -79,6 +79,18 @@ void main() {
         throwsA(isA<AccountingError>()));
   });
 
+  test('dashboard analytics: series add up to period totals', () async {
+    await Books.loadDemo();
+    final now = DateTime.now();
+    for (final from in [DateTime(now.year, now.month, now.day), DateTime(now.year, now.month, 1), DateTime(now.year, 1, 1)]) {
+      final a = await Books.analytics(from, now);
+      expect(a.series.fold<int>(0, (s, p) => s + p.sales), a.cur.sales);
+      expect(a.series.fold<int>(0, (s, p) => s + p.purchases), a.cur.purchases);
+    }
+    final year = await Books.analytics(DateTime(now.year - 1, now.month, now.day), now);
+    expect(year.granularity, 'month');
+  });
+
   test('demo data loads and balances', () async {
     await Books.loadDemo();
     await expectBalanced();
