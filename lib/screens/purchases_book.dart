@@ -112,13 +112,26 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
     final canPop = Navigator.of(context).canPop();
     return Scaffold(
       backgroundColor: _bg,
-      floatingActionButton: FloatingActionButton.extended(
-        heroTag: 'purchases_new',
-        backgroundColor: _orange,
-        foregroundColor: Colors.white,
-        onPressed: () => open(context, const PurchaseForm()),
-        icon: const Icon(Icons.inventory_rounded),
-        label: Text('Stock in', style: _j(14, FontWeight.w800, Colors.white)),
+      floatingActionButton: GestureDetector(
+        onTap: () {
+          HapticFeedback.lightImpact();
+          open(context, const PurchaseForm());
+        },
+        child: Container(
+          height: 56,
+          padding: const EdgeInsets.symmetric(horizontal: 22),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(28),
+            gradient: const LinearGradient(colors: _supplierGrad),
+            border: Border.all(color: const Color(0x66FFFFFF), width: 1.2),
+            boxShadow: const [BoxShadow(color: Color(0x774A17C9), blurRadius: 22, offset: Offset(0, 10), spreadRadius: -8)],
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.inventory_rounded, color: Colors.white),
+            const SizedBox(width: 10),
+            Text('Stock in', style: _j(15, FontWeight.w800, Colors.white)),
+          ]),
+        ),
       ),
       body: SafeArea(
         child: Live<_BookData>(

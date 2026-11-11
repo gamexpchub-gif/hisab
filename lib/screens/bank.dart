@@ -156,6 +156,12 @@ class _BankScreenState extends State<BankScreen> {
       final credit = a['kind'] == 'card';
       out.add(_Acc(a, await Books.moneyBalance(a), credit ? await Books.cardStatus(a) : null));
     }
+    const order = ['credit', 'debit', 'savings', 'current', 'upi', 'wallet', 'cash'];
+    int rank(_Acc a) {
+      final i = order.indexOf('${a.r['card_type'] ?? (a.credit ? 'credit' : 'savings')}');
+      return i < 0 ? 2 : i;
+    }
+    out.sort((a, b) => rank(a).compareTo(rank(b)));
     final transfers = await Books.query(
         'SELECT t.*, f.name AS from_name, d.name AS to_name FROM transfers t JOIN accounts f ON f.id = t.from_id '
         'JOIN accounts d ON d.id = t.to_id ORDER BY t.id DESC LIMIT 15');
