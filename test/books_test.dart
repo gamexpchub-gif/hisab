@@ -5,7 +5,7 @@ import 'package:hisab/core/books.dart';
 import 'package:hisab/core/db.dart';
 import 'package:hisab/core/money.dart';
 import 'package:hisab/core/smart.dart';
-import 'package:hisab/screens/sales_book.dart' show matchSale;
+import 'package:hisab/screens/sales_book.dart' show matchSale, matchDoc;
 
 Future<void> freshDb() async {
   sqfliteFfiInit();
@@ -241,6 +241,24 @@ void main() {
     expect(matchSale(rows.single, 'salt lake')?.$1, 'Address');
     expect(matchSale(rows.single, 'iphone')?.$1, 'Product');
     expect(matchSale(rows.single, 'samsung'), isNull);
+  });
+
+  test('purchases book and stock supplied by a supplier', () async {
+    final sup = await Books.saveParty('supplier', {'name': 'Kolkata Mobile Dist', 'phone': '033 2222 1111', 'gstin': '19ABCDE1234F1Z5'});
+    final p = await Books.saveProduct({'name': 'Redmi Note 13', 'gst_bp': 0, 'price': 1500000});
+    final bank = asInt((await Books.moneyAccounts())[1]['id']);
+    await Books.createPurchase(
+        items: [ItemIn(p, 2, 1200000, '861234500012345')], supplierId: sup, paid: 1000000, accountId: bank, billNo: 'KMD/77');
+    final rows = await Books.purchasesBook();
+    expect(rows.single['supplier'], 'Kolkata Mobile Dist');
+    expect(asInt(rows.single['qty']), 2);
+    expect(matchDoc(rows.single, 'kmd/77', party: 'supplier', accounts: 'account')?.$1, 'Bill no.');
+    expect(matchDoc(rows.single, '00012345', party: 'supplier', accounts: 'account')?.$1, 'IMEI / Serial');
+    expect(matchDoc(rows.single, 'kolkata', party: 'supplier', accounts: 'account')?.$1, 'Supplier');
+    expect(matchDoc(rows.single, '19abcde', party: 'supplier', accounts: 'account')?.$1, 'GSTIN');
+    final supplied = await Books.suppliedBy(sup);
+    expect(supplied.single['bill_no'], 'KMD/77');
+    expect(asInt(supplied.single['qty']), 2);
   });
 
   test('demo data loads and balances', () async {

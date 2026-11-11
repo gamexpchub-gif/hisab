@@ -52,14 +52,19 @@ typedef SaleMatch = (String field, String value);
 /// Searches a sales-book row (see [Books.salesBook]). Returns null when the
 /// row does not match, otherwise what matched. Numbers match mobile numbers,
 /// IMEI / serials, invoice numbers and amounts (₹1,250 / 1250 / 1250.50).
-SaleMatch? matchSale(Rec s, String query) {
+SaleMatch? matchSale(Rec s, String query) => matchDoc(s, query);
+
+/// Shared search for sales and purchase bills. [party] is the column with
+/// the customer / supplier name, [accounts] the one with the paying account.
+SaleMatch? matchDoc(Rec s, String query, {String party = 'customer', String accounts = 'accounts'}) {
   final q = query.trim().toLowerCase();
   if (q.isEmpty) return ('', '');
   bool has(Object? v) => v != null && '$v'.toLowerCase().contains(q);
   final digits = q.replaceAll(RegExp(r'[^0-9]'), '');
   final numeric = digits.isNotEmpty && RegExp(r'^[₹rs.\s0-9,]+$').hasMatch(q);
   if (has(s['number'])) return ('Invoice', '${s['number']}');
-  if (has(s['customer'])) return ('Customer', '${s['customer']}');
+  if (has(s['bill_no'])) return ('Bill no.', '${s['bill_no']}');
+  if (has(s[party])) return (party == 'customer' ? 'Customer' : 'Supplier', '${s[party]}');
   String clean(Object? v) => '${v ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '');
   if (numeric && digits.length >= 3) {
     for (final k in ['phone', 'alt_phone']) {
@@ -82,7 +87,8 @@ SaleMatch? matchSale(Rec s, String query) {
   }
   if (has(s['address'])) return ('Address', '${s['address']}');
   if (has(s['items'])) return ('Product', '${s['items']}');
-  if (has(s['accounts'])) return ('Paid via', '${s['accounts']}');
+  if (has(s[accounts])) return ('Paid via', '${s[accounts]}');
+  if (has(s['gstin'])) return ('GSTIN', '${s['gstin']}');
   if (has(s['note'])) return ('Note', '${s['note']}');
   return null;
 }

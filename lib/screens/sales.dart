@@ -9,6 +9,7 @@ import '../ui/widgets.dart';
 import 'purchase_form.dart';
 import 'sale_form.dart';
 
+export 'purchases_book.dart';
 export 'sales_book.dart';
 
 class SaleRow extends StatelessWidget {
@@ -26,46 +27,6 @@ class SaleRow extends StatelessWidget {
       trailingSub: due > 0 ? 'Due ${Money.rs(due)}' : 'Paid',
       trailingSubColor: due > 0 ? C.red : C.green,
       onTap: () => open(context, SaleView(id: asInt(s['id']))),
-    );
-  }
-}
-
-class PurchasesScreen extends StatelessWidget {
-  const PurchasesScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Live<List<Rec>>(
-      load: () => Books.recentPurchases(500),
-      builder: (context, rows) {
-        final total = rows.fold<int>(0, (a, s) => a + asInt(s['total']));
-        return PageShell(
-          title: 'Purchases',
-          subtitle: '${rows.length} bills · ${Money.rs(total)}',
-          action: GradientButton(label: 'New', icon: Icons.add_rounded, onTap: () => open(context, const PurchaseForm())),
-          children: [
-            CardBox(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-              child: rows.isEmpty
-                  ? const EmptyState('No purchases yet')
-                  : Divided([
-                      for (final p in rows)
-                        ListRow(
-                          leading: const Avatar('', icon: Icons.shopping_bag_rounded),
-                          title: p['supplier'] as String,
-                          subtitle: '${p['number']}${p['bill_no'] != null ? ' · ${p['bill_no']}' : ''} · ${prettyDate(p['date'] as String)}',
-                          trailing: Money.rs(asInt(p['total'])),
-                          trailingSub: asInt(p['total']) > asInt(p['paid'])
-                              ? 'Due ${Money.rs(asInt(p['total']) - asInt(p['paid']))}'
-                              : 'Paid',
-                          trailingSubColor: asInt(p['total']) > asInt(p['paid']) ? C.red : C.green,
-                          onTap: () => open(context, PurchaseView(id: asInt(p['id']))),
-                        ),
-                    ]),
-            ),
-          ],
-        );
-      },
     );
   }
 }

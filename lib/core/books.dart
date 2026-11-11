@@ -904,6 +904,17 @@ class Books {
       '(SELECT GROUP_CONCAT(a.name, \' + \') FROM sale_payments p JOIN accounts a ON a.id = p.account_id WHERE p.sale_id = s.id) AS accounts '
       'FROM sales s LEFT JOIN customers c ON c.id = s.customer_id ORDER BY s.date DESC, s.id DESC');
 
+  /// Every purchase bill (stock-in) with supplier details, item names,
+  /// IMEI / serials and the paying account, for the purchases book search.
+  static Future<List<Rec>> purchasesBook() => query(
+      'SELECT b.*, s.name AS supplier, s.phone AS phone, s.alt_phone AS alt_phone, s.address AS address, '
+      's.photo AS photo, s.gstin AS gstin, a.name AS account, '
+      '(SELECT GROUP_CONCAT(i.name, \' · \') FROM purchase_items i WHERE i.purchase_id = b.id) AS items, '
+      '(SELECT IFNULL(SUM(i.qty), 0) FROM purchase_items i WHERE i.purchase_id = b.id) AS qty, '
+      '(SELECT GROUP_CONCAT(i.serial, \' \') FROM purchase_items i WHERE i.purchase_id = b.id AND i.serial IS NOT NULL AND i.serial <> \'\') AS serials '
+      'FROM purchases b JOIN suppliers s ON s.id = b.supplier_id LEFT JOIN accounts a ON a.id = b.account_id '
+      'ORDER BY b.date DESC, b.id DESC');
+
   static Future<List<Rec>> recentSales(int limit, {String? search}) async {
     final args = <Object?>[];
     var where = '';
@@ -1289,6 +1300,15 @@ class Books {
       'FROM sale_items i JOIN sales s ON s.id = i.sale_id LEFT JOIN products p ON p.id = i.product_id '
       'LEFT JOIN categories c ON c.id = p.category_id WHERE s.customer_id = ? ORDER BY s.date DESC, s.id DESC',
       [customerId]);
+
+  /// Stock received from a supplier, newest first.
+  static Future<List<Rec>> suppliedBy(int supplierId) => query(
+      'SELECT i.product_id AS pid, i.name AS name, i.qty AS qty, i.rate AS rate, i.amount AS amount, i.tax AS tax, '
+      'i.serial AS serial, b.date AS date, b.number AS number, b.bill_no AS bill_no, b.id AS purchase_id, '
+      'p.image AS image, c.name AS category '
+      'FROM purchase_items i JOIN purchases b ON b.id = i.purchase_id LEFT JOIN products p ON p.id = i.product_id '
+      'LEFT JOIN categories c ON c.id = p.category_id WHERE b.supplier_id = ? ORDER BY b.date DESC, b.id DESC',
+      [supplierId]);
 
   /// Goods-on-credit vs cash lent vs money received, for one party.
   static Future<CreditSplit> creditSplit(String type, int id) async {

@@ -59,8 +59,9 @@ class _ProfileData {
   final PartyStats stats;
   final Map<String, String> settings;
   final CreditSplit split;
-  final List<Rec> dues, bought;
-  _ProfileData(this.party, this.balance, this.rows, this.ageing, this.stats, this.settings, this.split, this.dues, this.bought);
+  final List<Rec> dues, bought, billPhotos;
+  _ProfileData(this.party, this.balance, this.rows, this.ageing, this.stats, this.settings, this.split, this.dues, this.bought,
+      this.billPhotos);
 }
 
 class PartyView extends StatefulWidget {
@@ -91,7 +92,8 @@ class _PartyViewState extends State<PartyView> {
       await Books.settings(),
       await Books.creditSplit(widget.type, widget.id),
       await Books.dues(partyType: widget.type, partyId: widget.id, openOnly: false),
-      isC ? await Books.boughtBy(widget.id) : const [],
+      isC ? await Books.boughtBy(widget.id) : await Books.suppliedBy(widget.id),
+      isC ? const [] : await Books.query("SELECT id, number, bill_no, date, total, bill_image FROM purchases WHERE supplier_id = ? AND bill_image IS NOT NULL AND bill_image <> '' ORDER BY date DESC, id DESC LIMIT 20", [widget.id]),
     );
   }
 
@@ -126,7 +128,8 @@ class _PartyViewState extends State<PartyView> {
                   if (d.balance > 0) ...[const SizedBox(height: 14), _ageingCard(d)],
                   if (isC && d.balance > 0) ...[const SizedBox(height: 14), _reminderCard(d)],
                   const SizedBox(height: 14),
-                  if (isC && d.bought.isNotEmpty) ...[_boughtCard(d), const SizedBox(height: 14)],
+                  if (d.bought.isNotEmpty) ...[_boughtCard(d), const SizedBox(height: 14)],
+                  if (d.billPhotos.isNotEmpty) ...[_billPhotos(d), const SizedBox(height: 14)],
                   _detailsCard(d),
                   const SizedBox(height: 14),
                   _timeline(d),
@@ -554,17 +557,17 @@ class _PartyViewState extends State<PartyView> {
             width: 32,
             height: 32,
             decoration: BoxDecoration(color: const Color(0xFFEFEBFF), borderRadius: BorderRadius.circular(10)),
-            child: const Icon(Icons.shopping_bag_rounded, color: _purple, size: 18),
+            child: Icon(isC ? Icons.shopping_bag_rounded : Icons.inventory_rounded, color: _purple, size: 18),
           ),
           const SizedBox(width: 10),
-          Expanded(child: Text('Products bought', style: _j(15, FontWeight.w800, _ink))),
+          Expanded(child: Text(isC ? 'Products bought' : 'Stock supplied', style: _j(15, FontWeight.w800, _ink))),
           Text('$units unit${units == 1 ? '' : 's'}', style: _j(12, FontWeight.w700, _muted)),
         ]),
         const SizedBox(height: 6),
         for (final r in d.bought.take(12))
           InkWell(
             borderRadius: BorderRadius.circular(12),
-            onTap: () => open(context, SaleView(id: asInt(r['sale_id']))),
+            onTap: () => open(context, isC ? SaleView(id: asInt(r['sale_id'])) : PurchaseView(id: asInt(r['purchase_id']))),
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Row(children: [
@@ -574,7 +577,11 @@ class _PartyViewState extends State<PartyView> {
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text('${r['name']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(13, FontWeight.w700, _ink)),
                     Text(
-                      [prettyDate(r['date'] as String), '${r['qty']} × ${Money.rs(asInt(r['rate']))}', '${r['number']}'].join(' · '),
+                      [
+                        prettyDate(r['date'] as String),
+                        '${r['qty']} × ${Money.rs(asInt(r['rate']))}',
+                        (r['bill_no'] as String? ?? '').isNotEmpty ? 'Bill ${r['bill_no']}' : '${r['number']}',
+                      ].join(' · '),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: _j(10.5, FontWeight.w600, _muted),
@@ -595,6 +602,60 @@ class _PartyViewState extends State<PartyView> {
       ]),
     );
   }
+
+  Widget _billPhotos(_ProfileData d) => Container(
+        padding: const EdgeInsets.all(14),
+        decoration: _card(),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(color: const Color(0xFFFFF1E6), borderRadius: BorderRadius.circular(10)),
+              child: const Icon(Icons.receipt_long_rounded, color: _amber, size: 18),
+            ),
+            const SizedBox(width: 10),
+            Expanded(child: Text('Supplier bills', style: _j(15, FontWeight.w800, _ink))),
+            Text('${d.billPhotos.length} photo${d.billPhotos.length == 1 ? '' : 's'}', style: _j(12, FontWeight.w700, _muted)),
+          ]),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 132,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: d.billPhotos.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 10),
+              itemBuilder: (context, i) {
+                final b = d.billPhotos[i];
+                return GestureDetector(
+                  onTap: () => open(context, PurchaseView(id: asInt(b['id']))),
+                  child: SizedBox(
+                    width: 96,
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Container(
+                        height: 92,
+                        width: 96,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: const Color(0xFFFFD9BF)),
+                          color: const Color(0xFFFFF7F0),
+                        ),
+                        clipBehavior: Clip.antiAlias,
+                        child: storedImage(b['bill_image'] as String?,
+                            fallback: const Icon(Icons.receipt_long_rounded, color: _amber)),
+                      ),
+                      const SizedBox(height: 4),
+                      Text((b['bill_no'] as String? ?? '').isNotEmpty ? '${b['bill_no']}' : '${b['number']}',
+                          maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(11, FontWeight.w700, _ink)),
+                      Text(Money.rs(asInt(b['total'])), style: _j(10.5, FontWeight.w600, _muted)),
+                    ]),
+                  ),
+                );
+              },
+            ),
+          ),
+        ]),
+      );
 
   // ---------------------------------------------------------------- details & KYC
   Widget _detailsCard(_ProfileData d) {
