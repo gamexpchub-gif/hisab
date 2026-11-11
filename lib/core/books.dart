@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 
@@ -989,6 +991,85 @@ class Books {
     );
   }
 
+  // ------------------------------------------------------------ party ledger intelligence
+  /// FIFO ageing of each party's outstanding balance: payments settle the
+  /// oldest bills first; what remains is aged by bill date.
+  static Future<Map<int, Ageing>> ageing(String type) async {
+    final db = await _db;
+    final acct = await accountId_(db, type == 'customer' ? arCode : apCode);
+    final rows = await query(
+        'SELECT l.party_id AS pid, e.date AS date, l.debit AS dr, l.credit AS cr FROM journal_lines l '
+        'JOIN journal_entries e ON e.id = l.entry_id WHERE l.account_id = ? AND l.party_type = ? AND l.party_id IS NOT NULL '
+        'ORDER BY e.date, e.id, l.id',
+        [acct, type]);
+    final open = <int, List<List<Object>>>{}; // pid → [[date, amount]]
+    final last = <int, String>{};
+    for (final r in rows) {
+      final pid = asInt(r['pid']);
+      final inc = type == 'customer' ? asInt(r['dr']) : asInt(r['cr']);
+      var dec = type == 'customer' ? asInt(r['cr']) : asInt(r['dr']);
+      final q = open.putIfAbsent(pid, () => []);
+      last[pid] = r['date'] as String;
+      if (inc > 0) q.add([r['date'] as String, inc]);
+      while (dec > 0 && q.isNotEmpty) {
+        final head = q.first;
+        final take = math.min(dec, head[1] as int);
+        head[1] = (head[1] as int) - take;
+        dec -= take;
+        if (head[1] == 0) q.removeAt(0);
+      }
+    }
+    final today = DateTime.now();
+    final d0 = DateTime(today.year, today.month, today.day);
+    final out = <int, Ageing>{};
+    for (final pid in {...open.keys, ...last.keys}) {
+      final b = [0, 0, 0, 0];
+      var oldest = 0;
+      for (final item in open[pid] ?? const <List<Object>>[]) {
+        final days = d0.difference(DateTime.parse(item[0] as String)).inDays;
+        oldest = math.max(oldest, days);
+        final amt = item[1] as int;
+        b[days <= 30 ? 0 : days <= 60 ? 1 : days <= 90 ? 2 : 3] += amt;
+      }
+      out[pid] = Ageing(b, oldest, last[pid]);
+    }
+    return out;
+  }
+
+  /// Lifetime numbers for a customer (sales) or supplier (purchases).
+  static Future<PartyStats> partyStats(String type, int id) async {
+    final isC = type == 'customer';
+    final docs = (await query(
+            isC
+                ? 'SELECT COUNT(*) AS n, COALESCE(SUM(total),0) AS t, COALESCE(SUM(paid),0) AS p, MAX(date) AS last, MIN(date) AS first FROM sales WHERE customer_id = ?'
+                : 'SELECT COUNT(*) AS n, COALESCE(SUM(total),0) AS t, COALESCE(SUM(paid),0) AS p, MAX(date) AS last, MIN(date) AS first FROM purchases WHERE supplier_id = ?',
+            [id]))
+        .first;
+    final pay = (await query(
+            'SELECT COUNT(*) AS n, COALESCE(SUM(amount),0) AS t, MAX(date) AS last FROM payments WHERE party_type = ? AND party_id = ?',
+            [type, id]))
+        .first;
+    final reminder = await query(
+        "SELECT created_at FROM audit_log WHERE kind = 'reminder' AND ref = ? ORDER BY id DESC LIMIT 1", ['$type:$id']);
+    return PartyStats(
+      docs: asInt(docs['n']),
+      business: asInt(docs['t']),
+      paidAtBill: asInt(docs['p']),
+      payments: asInt(pay['n']),
+      paymentsTotal: asInt(pay['t']),
+      lastDoc: docs['last'] as String?,
+      firstDoc: docs['first'] as String?,
+      lastPayment: pay['last'] as String?,
+      lastReminder: reminder.isEmpty ? null : reminder.first['created_at'] as String,
+    );
+  }
+
+  static Future<void> logReminder(String type, int id, String name, String channel) async {
+    final db = await _db;
+    await _log(db, 'reminder', 'Payment reminder to $name ($channel)', '$type:$id');
+    changes.value++;
+  }
+
   // ------------------------------------------------------------ inventory
   /// Products with category, units sold and realised gross profit.
   /// filter: all | in | low | out
@@ -1174,6 +1255,31 @@ class Analytics {
     required this.recentSales,
   });
   int change(int Function(PeriodTotals p) f) => Books.pctChange(f(cur), f(prev));
+}
+
+class Ageing {
+  final List<int> buckets; // 0-30, 31-60, 61-90, 90+ days (paise)
+  final int oldestDays;
+  final String? lastActivity;
+  Ageing(this.buckets, this.oldestDays, this.lastActivity);
+  int get total => buckets.fold(0, (a, b) => a + b);
+}
+
+class PartyStats {
+  final int docs, business, paidAtBill, payments, paymentsTotal;
+  final String? lastDoc, firstDoc, lastPayment, lastReminder;
+  PartyStats({
+    required this.docs,
+    required this.business,
+    required this.paidAtBill,
+    required this.payments,
+    required this.paymentsTotal,
+    this.lastDoc,
+    this.firstDoc,
+    this.lastPayment,
+    this.lastReminder,
+  });
+  int get avgBill => docs == 0 ? 0 : business ~/ docs;
 }
 
 class InventoryStats {

@@ -110,6 +110,26 @@ void main() {
     expect(await Smart.nextSku('Mobile', 'Apple'), 'GX-MOB-APP-0001');
   });
 
+  test('due ageing settles the oldest bills first', () async {
+    final c = await Books.saveParty('customer', {'name': 'Ageing Test'});
+    final p = await Books.saveProduct({'name': 'Cable', 'gst_bp': 0, 'price': 10000}, openingQty: 10, openingCost: 5000);
+    final cash = asInt((await Books.moneyAccounts()).first['id']);
+    final now = DateTime.now();
+    String ago(int d) => ymd(now.subtract(Duration(days: d)));
+    await Books.createSale(items: [ItemIn(p, 1, 10000)], customerId: c, paid: 0, accountId: cash, date: ago(75)); // ₹100
+    await Books.createSale(items: [ItemIn(p, 1, 10000)], customerId: c, paid: 0, accountId: cash, date: ago(40)); // ₹100
+    await Books.createSale(items: [ItemIn(p, 1, 10000)], customerId: c, paid: 0, accountId: cash, date: ago(5)); // ₹100
+    await Books.createPayment(kind: 'receipt', partyId: c, amount: 15000, accountId: cash); // ₹150 clears oldest + half
+    final a = (await Books.ageing('customer'))[c]!;
+    expect(a.buckets, [10000, 5000, 0, 0]);
+    expect(a.total, await Books.partyBalance('customer', c));
+    expect(a.oldestDays, 40);
+    final stats = await Books.partyStats('customer', c);
+    expect(stats.docs, 3);
+    expect(stats.business, 30000);
+    expect(stats.paymentsTotal, 15000);
+  });
+
   test('demo data loads and balances', () async {
     await Books.loadDemo();
     await expectBalanced();
