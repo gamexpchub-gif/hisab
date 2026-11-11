@@ -143,7 +143,7 @@ class _MenuScreenState extends State<MenuScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final bottom = LiquidGlassNav.outerHeight(MediaQuery.of(context).padding.bottom) + 24;
+    final bottom = LiquidGlassNav.outerHeight(MediaQuery.of(context).padding.bottom, context) + 24;
     return Scaffold(
       backgroundColor: _bg,
       body: SafeArea(

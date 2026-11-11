@@ -7,11 +7,13 @@ import '../main.dart';
 import '../ui/photo.dart';
 import '../ui/theme.dart';
 import '../ui/widgets.dart';
-import 'forms.dart';
 import 'notifications.dart';
+import 'product_form.dart';
 import 'purchase_form.dart';
 import 'sale_form.dart';
 import 'sales.dart';
+
+export 'product_form.dart';
 
 // ============================================================================
 // Products screen — 1:1 with the reference design (tool/reference/products.webp,
@@ -142,7 +144,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
     final mq = MediaQuery.of(context);
     _w = mq.size.width / 851;
     final embedded = !Navigator.of(context).canPop();
-    final fabBottom = embedded ? LiquidGlassNav.outerHeight(mq.padding.bottom) + q(16) : mq.padding.bottom + q(40);
+    final fabBottom = embedded ? LiquidGlassNav.outerHeight(mq.padding.bottom, context) + q(16) : mq.padding.bottom + q(40);
     return MediaQuery(
       data: mq.copyWith(textScaler: TextScaler.noScaling),
       child: Scaffold(
@@ -966,203 +968,6 @@ class ProductView extends StatelessWidget {
           ],
         );
       },
-    );
-  }
-}
-
-// ============================================================================
-// Add / edit product
-// ============================================================================
-class ProductForm extends StatefulWidget {
-  final Rec? product;
-  const ProductForm({super.key, this.product});
-  @override
-  State<ProductForm> createState() => _ProductFormState();
-}
-
-class _ProductFormState extends State<ProductForm> {
-  final f = <String, TextEditingController>{};
-  int? category;
-  String condition = 'new';
-  String? image;
-  List<Rec> categories = [];
-  bool saving = false;
-
-  TextEditingController c(String k, [String init = '']) => f.putIfAbsent(k, () => TextEditingController(text: init));
-
-  @override
-  void initState() {
-    super.initState();
-    final p = widget.product;
-    c('name', '${p?['name'] ?? ''}');
-    c('variant', '${p?['variant'] ?? ''}');
-    c('brand', '${p?['brand'] ?? ''}');
-    c('sku', '${p?['sku'] ?? ''}');
-    c('hsn', '${p?['hsn'] ?? ''}');
-    c('gst', p == null ? '18' : '${asInt(p['gst_bp']) / 100}');
-    c('price', p == null ? '' : Money.edit(asInt(p['price'])));
-    c('mrp', p == null || asInt(p['mrp']) == 0 ? '' : Money.edit(asInt(p['mrp'])));
-    c('low', '${p?['low_stock'] ?? 2}');
-    c('qty');
-    c('cost');
-    category = p?['category_id'] as int?;
-    condition = (p?['condition'] as String?) ?? 'new';
-    image = p?['image'] as String?;
-    Books.query('SELECT * FROM categories ORDER BY name').then((r) {
-      if (mounted) setState(() => categories = r);
-    });
-  }
-
-  @override
-  void dispose() {
-    for (final x in f.values) {
-      x.dispose();
-    }
-    super.dispose();
-  }
-
-  String? _opt(String k) => f[k]!.text.trim().isEmpty ? null : f[k]!.text.trim();
-
-  Future<void> _save() async {
-    if (saving) return;
-    setState(() => saving = true);
-    try {
-      await Books.saveProduct({
-        'name': f['name']!.text,
-        'variant': _opt('variant'),
-        'brand': _opt('brand'),
-        'sku': f['sku']!.text,
-        'hsn': _opt('hsn'),
-        'gst_bp': Money.parse(f['gst']!.text), // percent × 100 = basis points
-        'price': Money.parse(f['price']!.text),
-        'mrp': Money.parse(f['mrp']!.text),
-        'low_stock': int.tryParse(f['low']!.text) ?? 0,
-        'category_id': category,
-        'condition': condition,
-        'image': image,
-      },
-          id: widget.product == null ? null : asInt(widget.product!['id']),
-          openingQty: int.tryParse(f['qty']!.text) ?? 0,
-          openingCost: Money.parse(f['cost']!.text));
-      if (!mounted) return;
-      toast(context, 'Product saved');
-      Navigator.of(context).pop();
-    } catch (e) {
-      toast(context, '$e', error: true);
-      setState(() => saving = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final isNew = widget.product == null;
-    String? catName;
-    for (final x in categories) {
-      if (asInt(x['id']) == category) catName = x['name'] as String;
-    }
-    return PageShell(
-      title: isNew ? 'New product' : 'Edit product',
-      children: [
-        CardBox(
-          child: Row(children: [
-            GestureDetector(
-              onTap: () async {
-                final r = await pickPhoto(context, folder: 'product_images', allowRemove: image != null);
-                if (r != null) setState(() => image = r.isEmpty ? null : r);
-              },
-              child: Stack(children: [
-                ProductThumb({'image': image, 'category': catName}, width: 92, height: 106),
-                Positioned(
-                  right: 4,
-                  bottom: 4,
-                  child: Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: const BoxDecoration(color: C.purple2, shape: BoxShape.circle),
-                    child: const Icon(Icons.photo_camera_rounded, color: Colors.white, size: 16),
-                  ),
-                ),
-              ]),
-            ),
-            const SizedBox(width: 14),
-            const Expanded(
-              child: Text('Product photo\nTap to take a photo or choose from gallery',
-                  style: TextStyle(color: C.muted, fontSize: 13, height: 1.4)),
-            ),
-          ]),
-        ),
-        CardBox(
-          child: Column(children: [
-            field(f['name']!, 'Product name *'),
-            field(f['variant']!, 'Variant (e.g. 256GB • Deep Purple)'),
-            Row(children: [
-              Expanded(child: field(f['brand']!, 'Brand')),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: DropdownButtonFormField<int?>(
-                    key: ValueKey('${categories.length}-$category'),
-                    value: categories.any((c) => asInt(c['id']) == category) ? category : null,
-                    isExpanded: true,
-                    decoration: const InputDecoration(labelText: 'Category'),
-                    items: [
-                      const DropdownMenuItem<int?>(value: null, child: Text('—')),
-                      for (final c in categories)
-                        DropdownMenuItem<int?>(value: asInt(c['id']), child: Text(c['name'] as String)),
-                    ],
-                    onChanged: (v) => setState(() => category = v),
-                  ),
-                ),
-              ),
-            ]),
-            Row(children: [
-              Expanded(child: field(f['price']!, 'Selling price ₹ *', number: true)),
-              const SizedBox(width: 10),
-              Expanded(child: field(f['mrp']!, 'MRP ₹ (for % OFF)', number: true)),
-            ]),
-            Row(children: [
-              Expanded(child: field(f['gst']!, 'GST %', number: true)),
-              const SizedBox(width: 10),
-              Expanded(child: field(f['low']!, 'Low-stock alert', number: true)),
-            ]),
-            Row(children: [
-              Expanded(child: field(f['sku']!, 'SKU / Barcode')),
-              const SizedBox(width: 10),
-              Expanded(child: field(f['hsn']!, 'HSN code')),
-            ]),
-            Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: DropdownButtonFormField<String>(
-                value: condition,
-                decoration: const InputDecoration(labelText: 'Condition'),
-                items: const [
-                  DropdownMenuItem(value: 'new', child: Text('New')),
-                  DropdownMenuItem(value: 'used', child: Text('Used')),
-                  DropdownMenuItem(value: 'refurbished', child: Text('Refurbished')),
-                ],
-                onChanged: (v) => setState(() => condition = v ?? 'new'),
-              ),
-            ),
-          ]),
-        ),
-        if (isNew)
-          CardBox(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Opening stock', style: TextStyle(fontWeight: FontWeight.w700)),
-              const SizedBox(height: 4),
-              const Text('Stock you already have. New stock should come through a Purchase.',
-                  style: TextStyle(color: C.muted, fontSize: 12.5)),
-              const SizedBox(height: 10),
-              Row(children: [
-                Expanded(child: field(f['qty']!, 'Quantity', number: true)),
-                const SizedBox(width: 10),
-                Expanded(child: field(f['cost']!, 'Cost per unit ₹', number: true)),
-              ]),
-            ]),
-          ),
-        const SizedBox(height: 16),
-        GradientButton(label: saving ? 'Saving…' : 'Save product', expand: true, fontSize: 16, onTap: _save),
-      ],
     );
   }
 }

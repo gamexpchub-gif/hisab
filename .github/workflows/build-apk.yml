@@ -24,13 +24,8 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Generate Android project (if missing) and apply branding
-        run: |
-          if [ ! -d android ]; then
-            flutter create --platforms=android --org com.gamexpchub --project-name hisab .
-          fi
-          sed -i 's/android:label="[^"]*"/android:label="GameX Hisab"/' android/app/src/main/AndroidManifest.xml
-          cp -r tool/android_res/* android/app/src/main/res/
+      - name: Prepare Android project (name, icons, camera permission)
+        run: bash tool/setup_android.sh
 
       - run: flutter pub get
 

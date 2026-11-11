@@ -480,6 +480,16 @@ class Books {
     });
   }
 
+  static Future<int> addCategory(String name) {
+    return _write((x) async {
+      final n = name.trim();
+      if (n.isEmpty) throw AccountingError('Category name is required');
+      final e = await x.query('categories', where: 'name = ? COLLATE NOCASE', whereArgs: [n]);
+      if (e.isNotEmpty) return asInt(e.first['id']);
+      return x.insert('categories', {'name': n});
+    });
+  }
+
   static Future<int> addExpenseHead(String name) {
     return _write((x) async {
       if (name.trim().isEmpty) throw AccountingError('Name is required');

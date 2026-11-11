@@ -13,6 +13,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:hisab/core/books.dart';
 import 'package:hisab/core/db.dart';
 import 'package:hisab/main.dart';
+import 'package:hisab/screens/product_form.dart';
 import 'package:hisab/ui/theme.dart';
 
 Future<void> _assetFont(String family, String asset) async {
@@ -44,7 +45,7 @@ void main() {
     await Books.loadDemo();
   });
 
-  for (final (name, index) in [('home', 0), ('dashboard', 1), ('products', 2), ('menu', 3)]) {
+  for (final (name, index) in [('home', 0), ('dashboard', 1), ('products', 2), ('menu', 3), ('add_product', -1)]) {
     testWidgets(name, (t) async {
       t.view.physicalSize = const Size(1080, 2340);
       t.view.devicePixelRatio = 2.75;
@@ -52,8 +53,17 @@ void main() {
       final key = GlobalKey();
       await t.pumpWidget(RepaintBoundary(
         key: key,
-        child: MaterialApp(debugShowCheckedModeBanner: false, theme: buildTheme(), home: Shell(initialIndex: index)),
+        child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: buildTheme(),
+          home: index >= 0 ? Shell(initialIndex: index) : const ProductForm(),
+        ),
       ));
+      if (index < 0) {
+        await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 300)));
+        await t.pump();
+        await t.enterText(find.byType(TextField).first, 'iPhone 15 Pro 8GB 256GB Black');
+      }
       // Each database query completes on a real isolate: keep letting real
       // time pass and pumping until no loading spinner is left.
       for (var i = 0; i < 400; i++) {

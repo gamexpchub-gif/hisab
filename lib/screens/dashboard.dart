@@ -122,7 +122,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final (from, to) = _dates;
-    final bottom = LiquidGlassNav.outerHeight(MediaQuery.of(context).padding.bottom) + 90;
+    final bottom = LiquidGlassNav.outerHeight(MediaQuery.of(context).padding.bottom, context) + 90;
     return Scaffold(
       backgroundColor: _bg,
       body: SafeArea(

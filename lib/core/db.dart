@@ -21,13 +21,16 @@ class AppDb {
     );
   }
 
-  static const schemaVersion = 2;
+  static const schemaVersion = 3;
 
   static Future<void> upgrade(Database db, int from, int to) async {
     if (from < 2) {
       await db.execute('ALTER TABLE products ADD COLUMN variant TEXT');
       await db.execute('ALTER TABLE products ADD COLUMN mrp INTEGER NOT NULL DEFAULT 0');
       await db.execute('ALTER TABLE products ADD COLUMN image TEXT');
+    }
+    if (from < 3) {
+      await db.execute('ALTER TABLE products ADD COLUMN warranty_months INTEGER NOT NULL DEFAULT 0');
     }
   }
 
@@ -69,7 +72,8 @@ class AppDb {
       gst_bp INTEGER NOT NULL DEFAULT 1800, cost INTEGER NOT NULL DEFAULT 0,
       price INTEGER NOT NULL DEFAULT 0, stock INTEGER NOT NULL DEFAULT 0,
       low_stock INTEGER NOT NULL DEFAULT 2, condition TEXT NOT NULL DEFAULT 'new',
-      created_at TEXT NOT NULL, variant TEXT, mrp INTEGER NOT NULL DEFAULT 0, image TEXT)''',
+      created_at TEXT NOT NULL, variant TEXT, mrp INTEGER NOT NULL DEFAULT 0, image TEXT,
+      warranty_months INTEGER NOT NULL DEFAULT 0)''',
     '''CREATE TABLE customers (
       id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, phone TEXT, email TEXT,
       address TEXT, gstin TEXT, opening INTEGER NOT NULL DEFAULT 0,

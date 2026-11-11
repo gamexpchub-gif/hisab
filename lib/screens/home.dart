@@ -826,10 +826,10 @@ class NewSaleFab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final r = BorderRadius.circular(p(32));
+    final r = BorderRadius.circular(p(40));
     return Container(
-      width: p(199),
-      height: p(70),
+      width: p(240),
+      height: p(84),
       decoration: BoxDecoration(
         borderRadius: r,
         gradient: const LinearGradient(
@@ -839,7 +839,8 @@ class NewSaleFab extends StatelessWidget {
         ),
         border: Border.all(color: const Color(0x40FFFFFF), width: 1),
         boxShadow: const [
-          BoxShadow(color: Color(0x803D13D7), blurRadius: 22, offset: Offset(0, 10), spreadRadius: -6),
+          BoxShadow(color: Color(0x803D13D7), blurRadius: 26, offset: Offset(0, 12), spreadRadius: -6),
+          BoxShadow(color: Color(0x40FFFFFF), blurRadius: 0, offset: Offset(0, -1)),
         ],
       ),
       child: Material(
@@ -848,10 +849,10 @@ class NewSaleFab extends StatelessWidget {
           borderRadius: r,
           onTap: onTap,
           child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Icon(Icons.add_rounded, size: p(46), color: Colors.white),
-            SizedBox(width: p(12)),
+            Icon(Icons.add_rounded, size: p(54), color: Colors.white),
+            SizedBox(width: p(14)),
             Text('New sale',
-                style: TextStyle(fontSize: fs(12.8), fontWeight: FontWeight.w500, color: Colors.white, height: 1.0)),
+                style: TextStyle(fontSize: fs(14.5), fontWeight: FontWeight.w600, color: Colors.white, height: 1.0)),
           ]),
         ),
       ),
