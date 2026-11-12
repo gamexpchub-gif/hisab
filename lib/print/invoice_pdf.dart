@@ -518,8 +518,8 @@ class _Builder {
     pw.Widget cell(String text, {pw.Alignment a = pw.Alignment.topRight, pw.Font? font, PdfColor? color, double size = 7.6}) =>
         pw.Container(
           alignment: a,
-          padding: pw.EdgeInsets.symmetric(horizontal: 4 * s, vertical: 6 * s),
-          child: pw.Text(text, style: t(size, font: font, color: color ?? ink)),
+          padding: pw.EdgeInsets.symmetric(horizontal: 3 * s, vertical: 6 * s),
+          child: pw.Text(text, maxLines: 1, style: t(size, font: font, color: color ?? ink)),
         );
     pw.Widget tag(String k, String v, PdfColor kc, PdfColor bg) => pw.Padding(
           padding: pw.EdgeInsets.only(top: 3 * s),
@@ -537,10 +537,10 @@ class _Builder {
     final widths = <int, pw.TableColumnWidth>{
       0: pw.FixedColumnWidth(22 * s),
       1: const pw.FlexColumnWidth(),
-      if (o.hsn) 2: pw.FixedColumnWidth(42 * s),
+      if (o.hsn) 2: pw.FixedColumnWidth(46 * s),
     };
     var col = o.hsn ? 3 : 2;
-    for (final w in [30.0, 54.0, 56.0, if (_cgst) ...[28.0, 38.0, 38.0] else ...[26.0, 38.0], 58.0]) {
+    for (final w in [28.0, 58.0, 62.0, if (_cgst) ...[30.0, 50.0, 50.0] else ...[32.0, 52.0], 66.0]) {
       widths[col++] = pw.FixedColumnWidth(w * s);
     }
 
@@ -560,7 +560,7 @@ class _Builder {
       totalAll += taxable + tax;
       final serial = '${it['serial'] ?? ''}'.trim();
       final hsn = '${it['hsn'] ?? ''}'.trim();
-      String pct(double p) => p == p.roundToDouble() ? p.toStringAsFixed(2) : p.toStringAsFixed(2);
+      String pct(double p) => p == p.roundToDouble() ? p.toStringAsFixed(0) : p.toStringAsFixed(1);
       rows.add(pw.TableRow(
         verticalAlignment: pw.TableCellVerticalAlignment.top,
         decoration: pw.BoxDecoration(border: pw.Border(bottom: pw.BorderSide(color: line, width: .6))),
