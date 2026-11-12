@@ -115,7 +115,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ]),
       ),
       CardBox(
-        child: SwitchListTile.adaptive(
+        child: Material(
+          color: Colors.transparent,
+          child: SwitchListTile.adaptive(
           contentPadding: EdgeInsets.zero,
           value: oppId,
           onChanged: (v) async {
@@ -126,6 +128,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           title: const Text('Opportunity ID on sales', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
           subtitle: const Text('Adds a field under the IMEI in New sale and prints it on the bill',
               style: TextStyle(color: C.muted, fontSize: 12.5)),
+        ),
         ),
       ),
       CardBox(child: Column(children: [for (final e in keys.entries) field(ctrls[e.key]!, e.value, maxLines: e.key == 'terms' ? 5 : 1)])),

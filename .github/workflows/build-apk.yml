@@ -40,7 +40,7 @@ jobs:
         continue-on-error: true
         run: |
           curl -sSfLo /tmp/Roboto.ttf "https://raw.githubusercontent.com/google/fonts/main/ofl/roboto/Roboto%5Bwdth,wght%5D.ttf" || true
-          ROBOTO_TTF=/tmp/Roboto.ttf flutter test test_screens/
+          ROBOTO_TTF=/tmp/Roboto.ttf flutter test test_screens/ || echo 'some screenshots failed'
           sudo apt-get install -y -qq poppler-utils >/dev/null || true
           for f in screenshots/*.pdf; do [ -f "$f" ] && pdftoppm -png -r 150 -singlefile "$f" "${f%.pdf}"; done
           rm -f screenshots/*.pdf

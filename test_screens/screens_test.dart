@@ -160,6 +160,12 @@ void main() {
         final out = File('screenshots/$name.png')..createSync(recursive: true);
         out.writeAsBytesSync(png!.buffer.asUint8List());
       });
+      // let pending database work finish so no timer outlives the test
+      await t.pumpWidget(const SizedBox());
+      for (var i = 0; i < 20; i++) {
+        await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+        await t.pump(const Duration(seconds: 1));
+      }
     });
   }
 }

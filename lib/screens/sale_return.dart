@@ -390,7 +390,9 @@ class _ReturnPickSaleState extends State<ReturnPickSale> {
                   Container(
                     margin: const EdgeInsets.only(bottom: 10),
                     decoration: _card(),
-                    child: ListTile(
+                    child: Material(
+                      color: Colors.transparent,
+                      child: ListTile(
                       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
                       leading: _avatar(s['customer'] as String?, s['photo'] as String?, size: 44),
@@ -401,6 +403,7 @@ class _ReturnPickSaleState extends State<ReturnPickSale> {
                       trailing: Text(Money.rs(asInt(s['total'])), style: _j(14, FontWeight.w800, _ink)),
                       onTap: () => Navigator.of(context)
                           .pushReplacement(MaterialPageRoute(builder: (_) => SaleReturnForm(saleId: asInt(s['id'])))),
+                    ),
                     ),
                   ),
               ],
@@ -568,7 +571,9 @@ class _SaleReturnFormState extends State<SaleReturnForm> {
                         _chip(r, reason == r, () => setState(() => reason = r)),
                     ]),
                     const SizedBox(height: 10),
-                    SwitchListTile.adaptive(
+                    Material(
+                      color: Colors.transparent,
+                      child: SwitchListTile.adaptive(
                       contentPadding: EdgeInsets.zero,
                       value: restock,
                       activeColor: _purple,
@@ -576,6 +581,7 @@ class _SaleReturnFormState extends State<SaleReturnForm> {
                       title: Text(restock ? 'Put back in stock' : 'Damaged — write off', style: _j(13.5, FontWeight.w700, _ink)),
                       subtitle: Text(restock ? 'Units are added back to inventory' : 'Stock stays the same; cost stays as loss',
                           style: _j(11.5, FontWeight.w500, _muted)),
+                    ),
                     ),
                   ]),
                   const SizedBox(height: 14),

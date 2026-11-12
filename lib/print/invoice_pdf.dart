@@ -186,7 +186,7 @@ Future<Uint8List> buildInvoicePdf(InvoiceData d, PrintOptions o, {PdfPageFormat?
   final doc = pw.Document(
     title: '${o.title} ${d.sale['number']}',
     author: d.settings['business_name'] ?? 'GameX Pc Hub',
-    theme: pw.ThemeData.withFont(base: fonts.regular, bold: fonts.bold),
+    theme: pw.ThemeData.withFont(base: fonts.regular, bold: fonts.bold, italic: fonts.regular, boldItalic: fonts.bold),
   );
   final b = _Builder(d, o, fonts, logo == null ? null : pw.MemoryImage(logo));
   final fmt = format ?? o.format;
@@ -791,6 +791,8 @@ class _Builder {
                     '&tn=${Uri.encodeComponent('${d.sale['number']}')}',
                 width: 78 * s,
                 height: 78 * s,
+                drawText: false,
+                textStyle: pw.TextStyle(font: f.regular),
                 color: c(0xFF0D1240, 0x00),
               ),
               pw.SizedBox(height: 4 * s),
@@ -879,6 +881,8 @@ class _Builder {
               data: 'upi://pay?pa=$upi&pn=${Uri.encodeComponent(shop)}&am=${Money.edit(due)}&cu=INR',
               width: 90 * s,
               height: 90 * s,
+              drawText: false,
+              textStyle: pw.TextStyle(font: f.regular),
             ),
           ),
           pw.Center(child: pw.Text('Scan to pay $upi', style: r(7))),
