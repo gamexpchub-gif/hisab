@@ -6,9 +6,7 @@ import '../core/money.dart';
 import '../ui/photo.dart';
 import '../ui/theme.dart';
 import '../ui/widgets.dart';
-import 'purchase_form.dart';
-import 'sale_form.dart';
-import 'sale_return.dart';
+import 'sale_view.dart';
 
 export 'purchases_book.dart';
 export 'sale_view.dart';
