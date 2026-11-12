@@ -8,6 +8,7 @@ import '../ui/theme.dart';
 import '../ui/widgets.dart';
 import 'purchase_form.dart';
 import 'sale_form.dart';
+import 'sale_return.dart';
 
 export 'purchases_book.dart';
 export 'sales_book.dart';
@@ -92,6 +93,18 @@ class SaleView extends StatelessWidget {
                 TotalLine('Profit on this invoice', Money.rs(profit), color: profit >= 0 ? C.green : C.red),
                 if (s['note'] != null) TotalLine('Note', s['note'] as String),
               ]),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size.fromHeight(50),
+                foregroundColor: const Color(0xFFE0245E),
+                side: const BorderSide(color: Color(0xFFFFC2D0)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
+              ),
+              onPressed: () => open(context, SaleReturnForm(saleId: id)),
+              icon: const Icon(Icons.assignment_return_rounded),
+              label: const Text('Return items from this sale'),
             ),
           ],
         );

@@ -21,7 +21,7 @@ class AppDb {
     );
   }
 
-  static const schemaVersion = 7;
+  static const schemaVersion = 8;
 
   static Future<void> upgrade(Database db, int from, int to) async {
     if (from < 2) {
@@ -59,6 +59,11 @@ class AppDb {
       await db.execute("UPDATE accounts SET card_type = 'cash' WHERE code = '1000'");
       await db.execute("UPDATE accounts SET card_type = 'upi' WHERE code = '1020'");
     }
+    if (from < 8) {
+      await db.execute(_saleReturns);
+      await db.execute(_saleReturnItems);
+      await db.execute("INSERT OR IGNORE INTO accounts (code, name, type, kind, is_system) VALUES ('4300', 'Sale Return Charges', 'income', NULL, 1)");
+    }
   }
 
   static Future<void> configure(Database db) async {
@@ -77,6 +82,19 @@ class AppDb {
   static const _salePayments = '''CREATE TABLE sale_payments (
       id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id INTEGER NOT NULL REFERENCES sales(id),
       account_id INTEGER NOT NULL REFERENCES accounts(id), amount INTEGER NOT NULL)''';
+
+  static const _saleReturns = '''CREATE TABLE sale_returns (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, number TEXT NOT NULL UNIQUE, date TEXT NOT NULL,
+      sale_id INTEGER NOT NULL REFERENCES sales(id), customer_id INTEGER REFERENCES customers(id),
+      value INTEGER NOT NULL, refund INTEGER NOT NULL, deduction INTEGER NOT NULL, cost INTEGER NOT NULL,
+      account_id INTEGER REFERENCES accounts(id), restock INTEGER NOT NULL DEFAULT 1, reason TEXT,
+      note TEXT, created_at TEXT NOT NULL)''';
+
+  static const _saleReturnItems = '''CREATE TABLE sale_return_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, return_id INTEGER NOT NULL REFERENCES sale_returns(id),
+      sale_item_id INTEGER NOT NULL REFERENCES sale_items(id), product_id INTEGER NOT NULL,
+      name TEXT NOT NULL, qty INTEGER NOT NULL, value INTEGER NOT NULL, tax INTEGER NOT NULL,
+      unit_cost INTEGER NOT NULL, serial TEXT)''';
 
   static const _cashLends = '''CREATE TABLE cash_lends (
       id INTEGER PRIMARY KEY AUTOINCREMENT, number TEXT NOT NULL UNIQUE, kind TEXT NOT NULL,
@@ -161,6 +179,8 @@ class AppDb {
     _salePayments,
     _cashLends,
     _partyDues,
+    _saleReturns,
+    _saleReturnItems,
     '''CREATE TABLE transfers (
       id INTEGER PRIMARY KEY AUTOINCREMENT, number TEXT NOT NULL UNIQUE, date TEXT NOT NULL,
       from_id INTEGER NOT NULL REFERENCES accounts(id), to_id INTEGER NOT NULL REFERENCES accounts(id),
@@ -186,6 +206,7 @@ class AppDb {
     ['4000', 'Sales', 'income', null],
     ['4100', 'Service & Repair Income', 'income', null],
     ['4200', 'Other Income', 'income', null],
+    ['4300', 'Sale Return Charges', 'income', null],
     ['5000', 'Cost of Goods Sold', 'expense', null],
     ['6000', 'Shop Rent', 'expense', 'expense'],
     ['6010', 'Electricity Bill', 'expense', 'expense'],

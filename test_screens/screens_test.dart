@@ -21,6 +21,7 @@ import 'package:hisab/screens/parties.dart';
 import 'package:hisab/screens/product_form.dart';
 import 'package:hisab/screens/purchase_pos.dart';
 import 'package:hisab/screens/sale_pos.dart';
+import 'package:hisab/screens/sale_return.dart';
 import 'package:hisab/ui/theme.dart';
 
 Future<void> _assetFont(String family, String asset) async {
@@ -52,7 +53,7 @@ void main() {
     await Books.loadDemo();
   });
 
-  for (final (name, index) in [('home', 0), ('dashboard', 1), ('products', 2), ('menu', 3), ('add_product', -1), ('new_sale', -2), ('new_purchase', -3), ('ledgers', -4), ('customer_profile', -5), ('expenses', -6), ('customers', -7), ('sales', -8), ('bank', -9), ('add_card', -10), ('purchases', -11), ('supplier_profile', -12)]) {
+  for (final (name, index) in [('home', 0), ('dashboard', 1), ('products', 2), ('menu', 3), ('add_product', -1), ('new_sale', -2), ('new_purchase', -3), ('ledgers', -4), ('customer_profile', -5), ('expenses', -6), ('customers', -7), ('sales', -8), ('bank', -9), ('add_card', -10), ('purchases', -11), ('supplier_profile', -12), ('sale_returns', -13), ('sale_return_form', -14)]) {
     testWidgets(name, (t) async {
       t.view.physicalSize = const Size(1080, 2340);
       t.view.devicePixelRatio = 2.75;
@@ -87,7 +88,11 @@ void main() {
                                                       ? const PurchasesScreen()
                                                       : index == -12
                                                           ? const PartyView(type: 'supplier', id: 1)
-                                                          : const Scaffold(
+                                                          : index == -13
+                                                              ? const SaleReturnsScreen()
+                                                              : index == -14
+                                                                  ? const SaleReturnForm(saleId: 7)
+                                                                  : const Scaffold(
                                                       backgroundColor: Color(0xFF8A8FAD),
                                                       body: Align(alignment: Alignment.bottomCenter, child: AccountSheet()),
                                                     ),

@@ -261,6 +261,41 @@ void main() {
     expect(asInt(supplied.single['qty']), 2);
   });
 
+  test('sale return: refund less than value, the rest is profit, stock comes back', () async {
+    final c = await Books.saveParty('customer', {'name': 'Return Test'});
+    final p = await Books.saveProduct({'name': 'Phone X', 'gst_bp': 0, 'price': 1000000}, openingQty: 2, openingCost: 800000);
+    final acc = await Books.moneyAccounts();
+    final cash = asInt(acc[0]['id']);
+    final sale = await Books.createSale(items: [ItemIn(p, 1, 1000000)], customerId: c, paid: 1000000, accountId: cash);
+    final before = await Books.profitLoss(ymd(DateTime.now()), ymd(DateTime.now()));
+    final lines = await Books.returnable(sale);
+    expect(lines.single.left, 1);
+    expect(lines.single.unitValue, 1000000);
+    await Books.createSaleReturn(saleId: sale, qty: {asInt(lines.single.item['id']): 1}, refund: 900000, accountId: cash);
+    expect(await Books.balance(cash, 'asset'), 100000);
+    expect(asInt((await Books.query('SELECT stock FROM products WHERE id = ?', [p])).first['stock']), 2);
+    final after = await Books.profitLoss(ymd(DateTime.now()), ymd(DateTime.now()));
+    // sale profit 2,000 is reversed; the 1,000 kept stays as profit
+    expect(after.netProfit, before.netProfit - 200000 + 100000);
+    expect((await Books.returnable(sale)).single.left, 0);
+    expect(() => Books.createSaleReturn(saleId: sale, qty: {asInt(lines.single.item['id']): 1}, refund: 0, accountId: cash),
+        throwsA(isA<AccountingError>()));
+    expect((await Books.saleReturns()).single['deduction'], 100000);
+    await expectBalanced();
+  });
+
+  test('sale return adjusted against customer due', () async {
+    final c = await Books.saveParty('customer', {'name': 'Due Return'});
+    final p = await Books.saveProduct({'name': 'Earbuds', 'gst_bp': 1800, 'price': 200000}, openingQty: 3, openingCost: 100000);
+    final sale = await Books.createSale(items: [ItemIn(p, 2, 200000)], customerId: c, paid: 0);
+    expect(await Books.partyBalance('customer', c), 472000);
+    final l = (await Books.returnable(sale)).single;
+    await Books.createSaleReturn(saleId: sale, qty: {asInt(l.item['id']): 1}, refund: 236000, restock: false);
+    expect(await Books.partyBalance('customer', c), 236000);
+    expect(asInt((await Books.query('SELECT stock FROM products WHERE id = ?', [p])).first['stock']), 1);
+    await expectBalanced();
+  });
+
   test('demo data loads and balances', () async {
     await Books.loadDemo();
     await expectBalanced();

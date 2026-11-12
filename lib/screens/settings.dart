@@ -5,6 +5,7 @@ import '../ui/theme.dart';
 import '../ui/widgets.dart';
 import 'forms.dart';
 import '../ui/photo.dart';
+import 'sale_return.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -75,6 +76,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: Text('Profile photo\nTap to change', style: TextStyle(color: C.muted, height: 1.4)),
           ),
           const Icon(Icons.photo_camera_rounded, color: C.purple2),
+        ]),
+      ),
+      CardBox(
+        onTap: () => open(context, const SaleReturnsScreen()),
+        child: Row(children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              gradient: const LinearGradient(colors: [Color(0xFFFF6B8B), Color(0xFFE0245E)]),
+              boxShadow: const [BoxShadow(color: Color(0x55E0245E), blurRadius: 12, offset: Offset(0, 5), spreadRadius: -4)],
+            ),
+            child: const Icon(Icons.assignment_return_rounded, color: Colors.white),
+          ),
+          const SizedBox(width: 14),
+          const Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Sale return', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+              SizedBox(height: 2),
+              Text('Take goods back · refund less & keep the charge as profit',
+                  style: TextStyle(color: C.muted, fontSize: 12.5)),
+            ]),
+          ),
+          const Icon(Icons.chevron_right_rounded, color: C.muted),
         ]),
       ),
       CardBox(child: Column(children: [for (final e in keys.entries) field(ctrls[e.key]!, e.value)])),

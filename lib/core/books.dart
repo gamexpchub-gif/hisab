@@ -48,6 +48,7 @@ const cashCode = '1000',
     gstOutCode = '2100',
     obeCode = '3900',
     salesCode = '4000',
+    returnChargesCode = '4300',
     cogsCode = '5000';
 
 class Books {
@@ -395,6 +396,116 @@ class Books {
       return id;
     });
   }
+
+  /// What each line of a sale can still be returned: qty left and the value
+  /// (after the invoice discount, with GST) of one unit.
+  static Future<List<ReturnLine>> returnable(int saleId) async {
+    final sale = (await query('SELECT * FROM sales WHERE id = ?', [saleId]));
+    if (sale.isEmpty) return const [];
+    final subtotal = asInt(sale.first['subtotal']), discount = asInt(sale.first['discount']);
+    final items = await query(
+        'SELECT i.*, IFNULL((SELECT SUM(r.qty) FROM sale_return_items r WHERE r.sale_item_id = i.id), 0) AS returned '
+        'FROM sale_items i WHERE i.sale_id = ? ORDER BY i.id',
+        [saleId]);
+    return [
+      for (final i in items)
+        ReturnLine(i, asInt(i['qty']) - asInt(i['returned']),
+            subtotal == 0 ? 0 : asInt(i['amount']) - (discount * asInt(i['amount']) / subtotal).round()),
+    ];
+  }
+
+  /// Takes goods back from a sale. [qty] maps sale_items.id → units returned.
+  /// The customer gets [refund] (≤ the goods' value) from [accountId], or it
+  /// is adjusted against their due when [accountId] is null; whatever is kept
+  /// back is booked as "Sale Return Charges" income (profit). [restock] puts
+  /// the units back in stock; otherwise they are written off.
+  static Future<int> createSaleReturn({
+    required int saleId,
+    required Map<int, int> qty,
+    required int refund,
+    int? accountId,
+    bool restock = true,
+    String? reason,
+    String? note,
+    String? date,
+  }) async {
+    final lines = await returnable(saleId);
+    return _write((x) async {
+      final when = date ?? ymd(DateTime.now());
+      final sale = (await x.query('sales', where: 'id = ?', whereArgs: [saleId])).first;
+      final customerId = sale['customer_id'] == null ? null : asInt(sale['customer_id']);
+      var salesPart = 0, taxPart = 0, cost = 0;
+      final rows = <Rec>[];
+      for (final l in lines) {
+        final q = qty[asInt(l.item['id'])] ?? 0;
+        if (q <= 0) continue;
+        if (q > l.left) throw AccountingError('Only ${l.left} × ${l.item['name']} can be returned');
+        final soldQty = asInt(l.item['qty']);
+        final v = (l.netAmount * q / soldQty).round();
+        final t = (asInt(l.item['tax']) * q / soldQty).round();
+        final c = asInt(l.item['unit_cost']) * q;
+        salesPart += v;
+        taxPart += t;
+        cost += c;
+        rows.add({
+          'sale_item_id': l.item['id'],
+          'product_id': l.item['product_id'],
+          'name': l.item['name'],
+          'qty': q,
+          'value': v,
+          'tax': t,
+          'unit_cost': asInt(l.item['unit_cost']),
+          'serial': l.item['serial'],
+        });
+      }
+      if (rows.isEmpty) throw AccountingError('Choose at least one item to return');
+      final value = salesPart + taxPart;
+      if (refund < 0 || refund > value) throw AccountingError('Refund must be between ₹0 and ${Money.rs(value)}');
+      if (accountId == null && customerId == null && refund > 0) {
+        throw AccountingError('Walk-in customer — choose the account the refund is paid from');
+      }
+      final deduction = value - refund;
+      final number = await _nextNumber(x, 'sale_returns', 'RET');
+      final id = await x.insert('sale_returns', {
+        'number': number,
+        'date': when,
+        'sale_id': saleId,
+        'customer_id': customerId,
+        'value': value,
+        'refund': refund,
+        'deduction': deduction,
+        'cost': restock ? cost : 0,
+        'account_id': accountId,
+        'restock': restock ? 1 : 0,
+        'reason': reason,
+        'note': note,
+        'created_at': _now(),
+      });
+      for (final r in rows) {
+        await x.insert('sale_return_items', {...r, 'return_id': id});
+        if (restock) await x.rawUpdate('UPDATE products SET stock = stock + ? WHERE id = ?', [r['qty'], r['product_id']]);
+      }
+      await post(x, 'sale_return', id, when, 'Sale return $number against ${sale['number']}', [
+        JL(await accountId_(x, salesCode), salesPart, 0),
+        JL(await accountId_(x, gstOutCode), taxPart, 0),
+        if (refund > 0)
+          accountId != null ? JL(accountId, 0, refund) : JL(await accountId_(x, arCode), 0, refund, 'customer', customerId),
+        if (deduction > 0) JL(await accountId_(x, returnChargesCode), 0, deduction),
+        if (restock && cost > 0) JL(await accountId_(x, inventoryCode), cost, 0),
+        if (restock && cost > 0) JL(await accountId_(x, cogsCode), 0, cost),
+      ]);
+      await _log(x, 'sale', 'Sale return ${sale['number']}${deduction > 0 ? ' · kept ${Money.rs(deduction)}' : ''}', number, refund);
+      return id;
+    });
+  }
+
+  static Future<List<Rec>> saleReturns() => query(
+      'SELECT r.*, s.number AS sale_number, c.name AS customer, c.phone AS phone, c.photo AS photo, a.name AS account, '
+      '(SELECT GROUP_CONCAT(i.name, \' · \') FROM sale_return_items i WHERE i.return_id = r.id) AS items, '
+      '(SELECT IFNULL(SUM(i.qty), 0) FROM sale_return_items i WHERE i.return_id = r.id) AS qty, '
+      '(SELECT GROUP_CONCAT(i.serial, \' \') FROM sale_return_items i WHERE i.return_id = r.id AND i.serial IS NOT NULL) AS serials '
+      'FROM sale_returns r JOIN sales s ON s.id = r.sale_id LEFT JOIN customers c ON c.id = r.customer_id '
+      'LEFT JOIN accounts a ON a.id = r.account_id ORDER BY r.date DESC, r.id DESC');
 
   static Future<int> createTransfer({
     required int fromId,
@@ -1537,7 +1648,7 @@ class Books {
         paid: 6000000,
         accountId: upi,
         date: ago(1));
-    await createSale(
+    final priyaSale = await createSale(
         items: [ItemIn(ids[3], 1, 5999900), ItemIn(ids[6], 1, 149900)],
         customerId: priya,
         paid: 6000000,
@@ -1564,6 +1675,10 @@ class Books {
         items: [ItemIn(ids[6], 10, 85000)], supplierId: sup, paid: 850000, accountId: card, date: ago(33), billNo: 'KMD/921');
     await createExpense(headId: asInt(heads[0]['id']), amount: 350000, accountId: card, date: ago(8), note: 'Shop electricity');
     await createTransfer(fromId: card, toId: cash, amount: 500000, date: ago(2), note: 'ATM cash on card');
+    final charger = (await returnable(priyaSale)).firstWhere((l) => asInt(l.item['product_id']) == ids[6]);
+    final worth = charger.unitValue;
+    await createSaleReturn(
+        saleId: priyaSale, qty: {asInt(charger.item['id']): 1}, refund: worth - worth ~/ 10, reason: 'Changed mind');
   }
 }
 
@@ -1621,6 +1736,16 @@ class Analytics {
     required this.recentSales,
   });
   int change(int Function(PeriodTotals p) f) => Books.pctChange(f(cur), f(prev));
+}
+
+class ReturnLine {
+  final Rec item; // the sale_items row
+  final int left; // units that can still be returned
+  final int netAmount; // line amount after the invoice discount, before GST
+  ReturnLine(this.item, this.left, this.netAmount);
+  int get soldQty => asInt(item['qty']);
+  /// Value of one returned unit including GST.
+  int get unitValue => soldQty == 0 ? 0 : ((netAmount + asInt(item['tax'])) / soldQty).round();
 }
 
 class CardStatus {
