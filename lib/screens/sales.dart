@@ -11,6 +11,7 @@ import 'sale_form.dart';
 import 'sale_return.dart';
 
 export 'purchases_book.dart';
+export 'sale_view.dart';
 export 'sales_book.dart';
 
 class SaleRow extends StatelessWidget {
@@ -37,80 +38,6 @@ class _DocData {
   final List<Rec> items;
   final Map<String, String> settings;
   _DocData(this.doc, this.items, this.settings);
-}
-
-class SaleView extends StatelessWidget {
-  final int id;
-  const SaleView({super.key, required this.id});
-
-  Future<_DocData?> _load() async {
-    final d = await Books.query(
-        'SELECT s.*, c.name AS customer, c.phone, c.address, c.gstin, a.name AS account FROM sales s '
-        'LEFT JOIN customers c ON c.id = s.customer_id LEFT JOIN accounts a ON a.id = s.account_id WHERE s.id = ?',
-        [id]);
-    if (d.isEmpty) return null;
-    return _DocData(d.first, await Books.query('SELECT * FROM sale_items WHERE sale_id = ?', [id]), await Books.settings());
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Live<_DocData?>(
-      load: _load,
-      builder: (context, data) {
-        if (data == null) return const PageShell(title: 'Invoice', children: [EmptyState('Not found')]);
-        final s = data.doc;
-        final due = asInt(s['total']) - asInt(s['paid']);
-        final profit = asInt(s['subtotal']) - asInt(s['discount']) - asInt(s['cogs']);
-        return PageShell(
-          title: 'Invoice ${s['number']}',
-          subtitle: prettyDate(s['date'] as String),
-          action: RoundIcon(
-            icon: Icons.copy_rounded,
-            onTap: () {
-              Clipboard.setData(ClipboardData(text: invoiceText(data.settings, s, data.items)));
-              toast(context, 'Invoice copied — paste it in WhatsApp');
-            },
-          ),
-          children: [
-            _DocCard(
-              settings: data.settings,
-              partyLabel: 'Bill to',
-              partyName: (s['customer'] as String?) ?? 'Walk-in customer',
-              partyLines: [s['phone'], s['address'], s['gstin'] != null ? 'GSTIN ${s['gstin']}' : null],
-              items: data.items,
-              totals: [
-                ('Subtotal', Money.rs(asInt(s['subtotal']))),
-                if (asInt(s['discount']) > 0) ('Discount', '− ${Money.rs(asInt(s['discount']))}'),
-                ('GST', Money.rs(asInt(s['tax']))),
-              ],
-              total: asInt(s['total']),
-              paid: asInt(s['paid']),
-              paidVia: s['account'] as String?,
-            ),
-            CardBox(
-              child: Column(children: [
-                TotalLine('Balance due', Money.rs(due), bold: true, color: due > 0 ? C.red : C.green),
-                TotalLine('Profit on this invoice', Money.rs(profit), color: profit >= 0 ? C.green : C.red),
-                if (s['note'] != null) TotalLine('Note', s['note'] as String),
-              ]),
-            ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size.fromHeight(50),
-                foregroundColor: const Color(0xFFE0245E),
-                side: const BorderSide(color: Color(0xFFFFC2D0)),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
-              ),
-              onPressed: () => open(context, SaleReturnForm(saleId: id)),
-              icon: const Icon(Icons.assignment_return_rounded),
-              label: const Text('Return items from this sale'),
-            ),
-          ],
-        );
-      },
-    );
-  }
 }
 
 class PurchaseView extends StatelessWidget {

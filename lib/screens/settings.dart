@@ -22,6 +22,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     'address': 'Shop address',
     'gstin': 'GSTIN',
     'upi_id': 'UPI ID for QR payments (e.g. shop@okaxis)',
+    'phonepe': 'PhonePe number (bill)',
+    'state': 'State (e.g. West Bengal)',
+    'pin': 'PIN code',
+    'bank_name': 'Bank name (bill)',
+    'bank_branch': 'Bank branch (bill)',
+    'bank_acc': 'Bank account number (bill)',
+    'bank_ifsc': 'IFSC code (bill)',
+    'invoice_banner': 'Bill banner line',
+    'terms': 'Bill terms & conditions (one per line)',
   };
   final ctrls = <String, TextEditingController>{};
   String? photo;
@@ -103,7 +112,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const Icon(Icons.chevron_right_rounded, color: C.muted),
         ]),
       ),
-      CardBox(child: Column(children: [for (final e in keys.entries) field(ctrls[e.key]!, e.value)])),
+      CardBox(child: Column(children: [for (final e in keys.entries) field(ctrls[e.key]!, e.value, maxLines: e.key == 'terms' ? 5 : 1)])),
       const SizedBox(height: 14),
       GradientButton(
         label: 'Save',

@@ -5,6 +5,7 @@ import 'package:hisab/core/books.dart';
 import 'package:hisab/core/db.dart';
 import 'package:hisab/core/money.dart';
 import 'package:hisab/core/smart.dart';
+import 'package:hisab/print/invoice_pdf.dart' show amountInWords;
 import 'package:hisab/screens/sales_book.dart' show matchSale, matchDoc;
 
 Future<void> freshDb() async {
@@ -294,6 +295,12 @@ void main() {
     expect(await Books.partyBalance('customer', c), 236000);
     expect(asInt((await Books.query('SELECT stock FROM products WHERE id = ?', [p])).first['stock']), 1);
     await expectBalanced();
+  });
+
+  test('amount in words (Indian system)', () {
+    expect(amountInWords(2000000), 'TWENTY THOUSAND RUPEES ONLY');
+    expect(amountInWords(12345678950), 'TWELVE CRORE THIRTY FOUR LAKH FIFTY SIX THOUSAND SEVEN HUNDRED EIGHTY NINE RUPEES AND FIFTY PAISE ONLY');
+    expect(amountInWords(10100), 'ONE HUNDRED ONE RUPEES ONLY');
   });
 
   test('demo data loads and balances', () async {

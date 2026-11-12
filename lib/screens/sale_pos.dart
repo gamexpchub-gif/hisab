@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../core/books.dart';
 import '../core/money.dart';
+import '../print/print_screen.dart';
 import '../ui/widgets.dart';
 import 'parties.dart';
 import 'product_form.dart';
@@ -1661,10 +1662,25 @@ class SaleSuccessScreen extends StatelessWidget {
                 ]),
               ),
               const SizedBox(height: 18),
+              Row(children: [
+                Expanded(
+                  child: _action(Icons.print_rounded, 'Print bill', const [Color(0xFF6B35EE), Color(0xFF4318D2)],
+                      () => quickPrint(context, saleId)),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _action(Icons.tune_rounded, 'Custom print', const [Color(0xFFFF8A3D), Color(0xFFE0245E)],
+                      () => open(context, PrintStudio(saleId: saleId))),
+                ),
+              ]),
+              const SizedBox(height: 10),
+              _action(Icons.picture_as_pdf_rounded, 'Share PDF bill', const [Color(0xFF38BDF8), Color(0xFF0E7490)],
+                  () => shareInvoicePdf(context, saleId)),
+              const SizedBox(height: 10),
               _action(Icons.send_rounded, 'Send invoice on WhatsApp', const [Color(0xFF25D366), Color(0xFF128C7E)],
                   () => _whatsApp(context, s, d.$2, d.$3)),
               const SizedBox(height: 10),
-              _action(Icons.receipt_long_rounded, 'View invoice', const [Color(0xFF7B4DFF), Color(0xFF4318D2)],
+              _action(Icons.receipt_long_rounded, 'View invoice', const [Color(0xFF1B2163), Color(0xFF3F5BEA)],
                   () => Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => SaleView(id: saleId)))),
               const SizedBox(height: 10),
               _action(Icons.add_shopping_cart_rounded, 'Start a new sale', const [Color(0xFF38BDF8), Color(0xFF2563EB)],

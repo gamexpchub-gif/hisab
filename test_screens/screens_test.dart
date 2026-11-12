@@ -22,6 +22,7 @@ import 'package:hisab/screens/product_form.dart';
 import 'package:hisab/screens/purchase_pos.dart';
 import 'package:hisab/screens/sale_pos.dart';
 import 'package:hisab/screens/sale_return.dart';
+import 'package:hisab/print/invoice_pdf.dart';
 import 'package:hisab/ui/theme.dart';
 
 Future<void> _assetFont(String family, String asset) async {
@@ -51,9 +52,30 @@ void main() {
             version: AppDb.schemaVersion, onConfigure: AppDb.configure, onCreate: AppDb.create, singleInstance: false));
     AppDb.useDatabase(db);
     await Books.loadDemo();
+    for (final e in {
+      'business_name': 'GameX Pc Hub',
+      'tagline': 'Computer · Gaming · Accessories · Mobiles',
+      'address': 'Kaliachak Choudhary Market, Near Registry Office, Kaliachak, Malda — PIN 732201, West Bengal',
+      'phone': '+91 86535 68180',
+      'upi_id': '0946411127@ybl',
+      'gstin': '19HAGPM5934J1Z3',
+      'bank_branch': 'Kaliachak',
+    }.entries) {
+      await Books.setSetting(e.key, e.value);
+    }
   });
 
-  for (final (name, index) in [('home', 0), ('dashboard', 1), ('products', 2), ('menu', 3), ('add_product', -1), ('new_sale', -2), ('new_purchase', -3), ('ledgers', -4), ('customer_profile', -5), ('expenses', -6), ('customers', -7), ('sales', -8), ('bank', -9), ('add_card', -10), ('purchases', -11), ('supplier_profile', -12), ('sale_returns', -13), ('sale_return_form', -14)]) {
+  for (final (name, paper) in [('bill_a4', 'a4'), ('bill_80mm', '80mm')]) {
+    test(name, () async {
+      final d = await InvoiceData.load(6);
+      final bytes = await buildInvoicePdf(d!, PrintOptions(paper: paper));
+      Directory('screenshots').createSync(recursive: true);
+      File('screenshots/$name.pdf').writeAsBytesSync(bytes);
+      expect(bytes.length, greaterThan(1000));
+    });
+  }
+
+  for (final (name, index) in [('home', 0), ('dashboard', 1), ('products', 2), ('menu', 3), ('add_product', -1), ('new_sale', -2), ('new_purchase', -3), ('ledgers', -4), ('customer_profile', -5), ('expenses', -6), ('customers', -7), ('sales', -8), ('bank', -9), ('add_card', -10), ('purchases', -11), ('supplier_profile', -12), ('sale_returns', -13), ('sale_return_form', -14), ('invoice_view', -15), ('sale_complete', -16)]) {
     testWidgets(name, (t) async {
       t.view.physicalSize = const Size(1080, 2340);
       t.view.devicePixelRatio = 2.75;
@@ -92,6 +114,10 @@ void main() {
                                                               ? const SaleReturnsScreen()
                                                               : index == -14
                                                                   ? const SaleReturnForm(saleId: 7)
+                                                                  : index == -15
+                                                                      ? const SaleView(id: 6)
+                                                                      : index == -16
+                                                                          ? const SaleSuccessScreen(saleId: 6)
                                                                   : const Scaffold(
                                                       backgroundColor: Color(0xFF8A8FAD),
                                                       body: Align(alignment: Alignment.bottomCenter, child: AccountSheet()),
