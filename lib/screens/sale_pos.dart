@@ -58,6 +58,7 @@ class _Line {
   int qty;
   int rate; // paise, before GST
   final serial = TextEditingController();
+  final opp = TextEditingController(); // opportunity / finance ID
   _Line(this.p, {this.qty = 1}) : rate = asInt(p['price']);
   int get id => asInt(p['id']);
   int get stock => asInt(p['stock']);
@@ -74,7 +75,8 @@ class _Split {
 
 class SaleForm extends StatefulWidget {
   final int? customerId;
-  const SaleForm({super.key, this.customerId});
+  final int? editSaleId; // edit an existing sale in place
+  const SaleForm({super.key, this.customerId, this.editSaleId});
   @override
   State<SaleForm> createState() => _SaleFormState();
 }
@@ -130,13 +132,71 @@ class _SaleFormState extends State<SaleForm> {
         if (asInt(c['id']) == widget.customerId) customer = c;
       }
     }
+    if (widget.editSaleId != null && !_editLoaded) await _loadEdit(widget.editSaleId!);
     if (mounted) setState(() {});
   }
+
+  bool _editLoaded = false;
+
+  /// Fills the form from an existing sale. Its units count as in stock again.
+  Future<void> _loadEdit(int id) async {
+    final s = await Books.query('SELECT * FROM sales WHERE id = ?', [id]);
+    if (s.isEmpty) return;
+    _editLoaded = true;
+    final sale = s.first;
+    nextNo = '${sale['number']}';
+    date = '${sale['date']}';
+    note.text = '${sale['note'] ?? ''}';
+    roundOff = false;
+    discountPct = false;
+    discountCtrl.text = asInt(sale['discount']) > 0 ? Money.edit(asInt(sale['discount'])) : '';
+    final cid = sale['customer_id'];
+    customer = cid == null ? null : customers.where((c) => asInt(c['id']) == asInt(cid)).firstOrNull;
+    final items = await Books.query('SELECT * FROM sale_items WHERE sale_id = ? ORDER BY id', [id]);
+    final back = <int, int>{};
+    for (final i in items) {
+      back[asInt(i['product_id'])] = (back[asInt(i['product_id'])] ?? 0) + asInt(i['qty']);
+    }
+    products = [
+      for (final p in products) back.containsKey(asInt(p['id'])) ? {...p, 'stock': asInt(p['stock']) + back[asInt(p['id'])]!} : p,
+    ];
+    for (final i in items) {
+      final p = products.where((p) => asInt(p['id']) == asInt(i['product_id'])).firstOrNull;
+      if (p == null) continue;
+      final l = _Line(p, qty: asInt(i['qty']))..rate = asInt(i['rate']);
+      l.serial.text = '${i['serial'] ?? ''}';
+      l.opp.text = '${i['opp_id'] ?? ''}';
+      cart.add(l);
+    }
+    final pays = await Books.query('SELECT account_id, amount FROM sale_payments WHERE sale_id = ? ORDER BY id', [id]);
+    final total = asInt(sale['total']), paid = asInt(sale['paid']);
+    if (pays.length > 1) {
+      payMode = 'split';
+      for (final p in pays) {
+        final sp = _Split()..account = asInt(p['account_id']);
+        sp.ctrl.text = Money.edit(asInt(p['amount']));
+        splits.add(sp);
+      }
+    } else {
+      if (pays.isNotEmpty) account = asInt(pays.first['account_id']);
+      if (paid >= total) {
+        payMode = 'full';
+      } else {
+        payMode = 'due';
+        advancePct = -1;
+        advanceCtrl.text = paid > 0 ? Money.edit(paid) : '';
+      }
+    }
+  }
+
+  bool get editing => widget.editSaleId != null;
+  bool get oppEnabled => settings['opp_id_enabled'] == '1';
 
   @override
   void dispose() {
     for (final l in cart) {
       l.serial.dispose();
+      l.opp.dispose();
     }
     search.dispose();
     received.dispose();
@@ -341,7 +401,8 @@ class _SaleFormState extends State<SaleForm> {
     setState(() => saving = true);
     try {
       final id = await Books.createSale(
-        items: [for (final l in cart) ItemIn(l.id, l.qty, l.rate, l.serial.text)],
+        editId: widget.editSaleId,
+        items: [for (final l in cart) ItemIn(l.id, l.qty, l.rate, l.serial.text, oppEnabled ? l.opp.text : null)],
         customerId: customer == null ? null : asInt(customer!['id']),
         paid: paid,
         accountId: account,
@@ -355,6 +416,11 @@ class _SaleFormState extends State<SaleForm> {
       if (account != null) await Books.setSetting('last_pay_account', '$account');
       if (!mounted) return;
       HapticFeedback.heavyImpact();
+      if (editing) {
+        toast(context, 'Sale $nextNo updated');
+        Navigator.of(context).pop(true);
+        return;
+      }
       Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => SaleSuccessScreen(saleId: id, change: change)));
     } catch (e) {
       toast(context, '$e', error: true);
@@ -410,7 +476,7 @@ class _SaleFormState extends State<SaleForm> {
         const SizedBox(width: 12),
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('New Sale', style: _j(21, FontWeight.w800, _navy)),
+            Text(editing ? 'Edit Sale' : 'New Sale', style: _j(21, FontWeight.w800, _navy)),
             Row(children: [
               Text(nextNo.isEmpty ? 'Tax invoice' : '$nextNo · tax invoice', style: _j(12, FontWeight.w600, const Color(0xFF323B60))),
             ]),
@@ -793,6 +859,35 @@ class _SaleFormState extends State<SaleForm> {
                   IconButton(
                     icon: const Icon(Icons.qr_code_scanner_rounded, color: _purple, size: 20),
                     onPressed: () => _scanSerial(l),
+                  ),
+                ]),
+              ),
+            ),
+          if (oppEnabled && (isDevice || l.serial.text.isNotEmpty || l.opp.text.isNotEmpty))
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Container(
+                height: 40,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                decoration: BoxDecoration(
+                    color: const Color(0xFFF2FBF6), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFCDEEDB))),
+                child: Row(children: [
+                  const Icon(Icons.badge_rounded, size: 18, color: _green),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: l.opp,
+                      style: _j(12.5, FontWeight.w600, _ink),
+                      decoration: InputDecoration(
+                        isCollapsed: true,
+                        filled: false,
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        hintText: 'Opportunity ID (finance / EMI)',
+                        hintStyle: _j(12, FontWeight.w400, const Color(0xFFA3A7C2)),
+                      ),
+                    ),
                   ),
                 ]),
               ),
@@ -1458,7 +1553,7 @@ class _SaleFormState extends State<SaleForm> {
                   : Row(mainAxisSize: MainAxisSize.min, children: [
                       const Icon(Icons.check_circle_rounded, color: Colors.white),
                       const SizedBox(width: 8),
-                      Text('Complete sale', style: _j(15, FontWeight.w800, Colors.white)),
+                      Text(editing ? 'Update sale' : 'Complete sale', style: _j(15, FontWeight.w800, Colors.white)),
                     ]),
             ),
           ),

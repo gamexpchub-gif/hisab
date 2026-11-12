@@ -572,6 +572,8 @@ class _Builder {
               pw.Text('${it['name']}'.toUpperCase(), style: t(8, font: f.heavy, color: ink)),
               if (o.imei && serial.isNotEmpty) tag('IMEI', serial, c(0xFF2440C8, 0x33), blueSoft),
               if (o.hsn && hsn.isNotEmpty) tag('HSN', hsn, green, c(0xFFE6F6EC, 0xEE)),
+              if ('${it['opp_id'] ?? ''}'.trim().isNotEmpty)
+                tag('Opportunity ID', '${it['opp_id']}'.trim(), green, c(0xFFE6F6EC, 0xEE)),
             ]),
           ),
           if (o.hsn) cell(hsn.isEmpty ? '—' : hsn, a: pw.Alignment.topCenter, color: muted, size: 7),
@@ -858,6 +860,7 @@ class _Builder {
           pw.Text('${it['name']}', style: r(8, font: f.bold)),
           line2('  ${it['qty']} × ${rs(asInt(it['rate']))}', rs(asInt(it['amount']))),
           if (o.imei && '${it['serial'] ?? ''}'.trim().isNotEmpty) pw.Text('  IMEI: ${it['serial']}', style: r(7)),
+          if ('${it['opp_id'] ?? ''}'.trim().isNotEmpty) pw.Text('  Opportunity ID: ${it['opp_id']}', style: r(7)),
         ],
         dash(),
         line2('Subtotal', rs(asInt(sale['subtotal']))),

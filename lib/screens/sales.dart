@@ -6,6 +6,7 @@ import '../core/money.dart';
 import '../ui/photo.dart';
 import '../ui/theme.dart';
 import '../ui/widgets.dart';
+import 'purchase_form.dart';
 import 'sale_view.dart';
 
 export 'purchases_book.dart';
@@ -63,6 +64,7 @@ class PurchaseView extends StatelessWidget {
         return PageShell(
           title: 'Purchase ${p['number']}',
           subtitle: '${prettyDate(p['date'] as String)}${p['bill_no'] != null ? ' · Bill ${p['bill_no']}' : ''}',
+          action: RoundIcon(icon: Icons.edit_rounded, onTap: () => open(context, PurchaseForm(editPurchaseId: id))),
           children: [
             _DocCard(
               settings: data.settings,

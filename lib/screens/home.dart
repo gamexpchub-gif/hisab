@@ -55,7 +55,8 @@ class HomeData {
   final HomeMetrics m;
   final List<Rec> activity;
   final int alerts;
-  HomeData(this.settings, this.m, this.activity, this.alerts);
+  final List<Rec> sales;
+  HomeData(this.settings, this.m, this.activity, this.alerts, this.sales);
 }
 
 class HomeScreen extends StatelessWidget {
@@ -66,6 +67,7 @@ class HomeScreen extends StatelessWidget {
         await Books.homeMetrics(),
         await Books.activity(1),
         (await Books.notifications()).length,
+        (await Books.salesBook()).take(10).toList(),
       );
 
   @override
@@ -114,6 +116,8 @@ class HomeScreen extends StatelessWidget {
                     _side(_RecentActivity(d.activity)),
                     SizedBox(height: p(23)),
                     _side(const _GrowBanner()),
+                    SizedBox(height: p(30)),
+                    _side(_RecentSales(d.sales)),
                   ],
                 ),
               ),
@@ -857,5 +861,47 @@ class NewSaleFab extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+// ------------------------------------------------------------------ recent sales
+/// Latest sales at the bottom of Home — tap one to open its invoice
+/// (print, custom print, PDF, edit).
+class _RecentSales extends StatelessWidget {
+  final List<Rec> rows;
+  const _RecentSales(this.rows);
+
+  @override
+  Widget build(BuildContext context) {
+    final today = ymd(DateTime.now());
+    final todayTotal = rows.where((r) => r['date'] == today).fold<int>(0, (a, r) => a + asInt(r['total']));
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Row(children: [
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Recent Sales', style: _t(12.8, FontWeight.w700, _ink)),
+            SizedBox(height: p(8)),
+            Text(todayTotal > 0 ? 'Today ${Money.rs(todayTotal)} · tap to print or edit' : 'Tap a sale to print or edit',
+                style: _t(8.6, FontWeight.w500, _muted)),
+          ]),
+        ),
+        GestureDetector(
+          onTap: () => open(context, const SalesScreen()),
+          child: Container(
+            padding: EdgeInsets.symmetric(horizontal: p(22), vertical: p(10)),
+            decoration: BoxDecoration(color: const Color(0xFFF0ECFF), borderRadius: BorderRadius.circular(p(30))),
+            child: Text('View All', style: _t(10.4, FontWeight.w600, const Color(0xFF3427CF))),
+          ),
+        ),
+      ]),
+      SizedBox(height: p(16)),
+      if (rows.isEmpty)
+        Container(
+          decoration: _whiteCard(30),
+          padding: EdgeInsets.all(p(40)),
+          child: const EmptyState('No sales yet — tap New sale'),
+        ),
+      for (final s in rows) SaleCard(s: s),
+    ]);
   }
 }

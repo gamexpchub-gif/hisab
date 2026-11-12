@@ -21,7 +21,7 @@ class AppDb {
     );
   }
 
-  static const schemaVersion = 8;
+  static const schemaVersion = 9;
 
   static Future<void> upgrade(Database db, int from, int to) async {
     if (from < 2) {
@@ -63,6 +63,9 @@ class AppDb {
       await db.execute(_saleReturns);
       await db.execute(_saleReturnItems);
       await db.execute("INSERT OR IGNORE INTO accounts (code, name, type, kind, is_system) VALUES ('4300', 'Sale Return Charges', 'income', NULL, 1)");
+    }
+    if (from < 9) {
+      await db.execute('ALTER TABLE sale_items ADD COLUMN opp_id TEXT');
     }
   }
 
@@ -155,7 +158,7 @@ class AppDb {
       id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id INTEGER NOT NULL REFERENCES sales(id),
       product_id INTEGER NOT NULL REFERENCES products(id), name TEXT NOT NULL, qty INTEGER NOT NULL,
       rate INTEGER NOT NULL, gst_bp INTEGER NOT NULL, amount INTEGER NOT NULL, tax INTEGER NOT NULL,
-      unit_cost INTEGER NOT NULL, serial TEXT)''',
+      unit_cost INTEGER NOT NULL, serial TEXT, opp_id TEXT)''',
     '''CREATE TABLE purchases (
       id INTEGER PRIMARY KEY AUTOINCREMENT, number TEXT NOT NULL UNIQUE, bill_no TEXT, date TEXT NOT NULL,
       supplier_id INTEGER NOT NULL REFERENCES suppliers(id), subtotal INTEGER NOT NULL, tax INTEGER NOT NULL,

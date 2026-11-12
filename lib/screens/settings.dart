@@ -34,6 +34,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   };
   final ctrls = <String, TextEditingController>{};
   String? photo;
+  bool oppId = false;
 
   @override
   void initState() {
@@ -46,6 +47,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ctrls[k]!.text = s[k] ?? '';
       }
       photo = s['owner_photo'];
+      oppId = s['opp_id_enabled'] == '1';
       if (mounted) setState(() {});
     });
   }
@@ -111,6 +113,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const Icon(Icons.chevron_right_rounded, color: C.muted),
         ]),
+      ),
+      CardBox(
+        child: SwitchListTile.adaptive(
+          contentPadding: EdgeInsets.zero,
+          value: oppId,
+          onChanged: (v) async {
+            await Books.setSetting('opp_id_enabled', v ? '1' : '0');
+            setState(() => oppId = v);
+          },
+          secondary: const Icon(Icons.badge_rounded, color: C.green),
+          title: const Text('Opportunity ID on sales', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+          subtitle: const Text('Adds a field under the IMEI in New sale and prints it on the bill',
+              style: TextStyle(color: C.muted, fontSize: 12.5)),
+        ),
       ),
       CardBox(child: Column(children: [for (final e in keys.entries) field(ctrls[e.key]!, e.value, maxLines: e.key == 'terms' ? 5 : 1)])),
       const SizedBox(height: 14),

@@ -33,7 +33,8 @@ class ItemIn {
   final int qty;
   final int rate; // paise
   final String? serial;
-  const ItemIn(this.productId, this.qty, this.rate, [this.serial]);
+  final String? oppId; // opportunity / finance ID printed under the IMEI
+  const ItemIn(this.productId, this.qty, this.rate, [this.serial, this.oppId]);
 }
 
 typedef Rec = Map<String, Object?>;
@@ -151,9 +152,12 @@ class Books {
     String? date,
     String? note,
     List<MapEntry<int, int>>? splits, // account id → amount, for split payments
+    int? editId, // re-saves an existing sale in place (same number)
   }) {
     return _write((x) async {
       final when = date ?? ymd(DateTime.now());
+      String? oldNumber;
+      if (editId != null) oldNumber = await _unpostSale(x, editId);
       String? customerName;
       if (customerId != null) {
         final c = await x.query('customers', where: 'id = ?', whereArgs: [customerId]);
@@ -190,6 +194,7 @@ class Books {
           'tax': lineTax,
           'unit_cost': unitCost,
           'serial': (i.serial ?? '').trim().isEmpty ? null : i.serial!.trim(),
+          'opp_id': (i.oppId ?? '').trim().isEmpty ? null : i.oppId!.trim(),
         });
         await x.rawUpdate('UPDATE products SET stock = stock - ? WHERE id = ?', [i.qty, i.productId]);
         subtotal += amount;
@@ -207,8 +212,8 @@ class Books {
       }
       final money = parts.isNotEmpty ? parts.first.key : (accountId ?? await accountId_(x, cashCode));
       final payments = parts.isNotEmpty ? parts : [if (paidAmt > 0) MapEntry(money, paidAmt)];
-      final number = await _nextNumber(x, 'sales', 'INV');
-      final saleId = await x.insert('sales', {
+      final number = oldNumber ?? await _nextNumber(x, 'sales', 'INV');
+      final saleRow = {
         'number': number,
         'date': when,
         'customer_id': customerId,
@@ -220,8 +225,14 @@ class Books {
         'cogs': cogs,
         'account_id': money,
         'note': note,
-        'created_at': _now(),
-      });
+      };
+      final int saleId;
+      if (editId != null) {
+        await x.update('sales', saleRow, where: 'id = ?', whereArgs: [editId]);
+        saleId = editId;
+      } else {
+        saleId = await x.insert('sales', {...saleRow, 'created_at': _now()});
+      }
       for (final r in rows) {
         await x.insert('sale_items', {...r, 'sale_id': saleId});
       }
@@ -238,10 +249,73 @@ class Books {
         for (final p in payments) JL(p.key, p.value, 0),
         JL(ar, 0, paidAmt, 'customer', customerId),
       ]);
-      await _log(x, 'sale', 'New sale recorded', number, total);
+      await _log(x, 'sale', editId != null ? 'Sale edited' : 'New sale recorded', number, total);
       return saleId;
     });
   }
+
+  /// Removes a journal entry and its lines.
+  static Future<void> _unpost(DatabaseExecutor x, String sourceType, int sourceId) async {
+    final e = await x.query('journal_entries', columns: ['id'], where: 'source_type = ? AND source_id = ?', whereArgs: [sourceType, sourceId]);
+    for (final r in e) {
+      await x.delete('journal_lines', where: 'entry_id = ?', whereArgs: [r['id']]);
+      await x.delete('journal_entries', where: 'id = ?', whereArgs: [r['id']]);
+    }
+  }
+
+  /// Undoes a sale's effects (stock, items, payments, journal) so it can be
+  /// saved again with new details. Returns its invoice number.
+  static Future<String> _unpostSale(DatabaseExecutor x, int saleId) async {
+    final s = await x.query('sales', where: 'id = ?', whereArgs: [saleId]);
+    if (s.isEmpty) throw AccountingError('Sale not found');
+    final r = await x.rawQuery('SELECT COUNT(*) AS c FROM sale_returns WHERE sale_id = ?', [saleId]);
+    if (asInt(r.first['c']) > 0) throw AccountingError('This sale has returns — it can no longer be edited');
+    for (final i in await x.query('sale_items', where: 'sale_id = ?', whereArgs: [saleId])) {
+      await x.rawUpdate('UPDATE products SET stock = stock + ? WHERE id = ?', [i['qty'], i['product_id']]);
+    }
+    await x.delete('sale_items', where: 'sale_id = ?', whereArgs: [saleId]);
+    await x.delete('sale_payments', where: 'sale_id = ?', whereArgs: [saleId]);
+    await _unpost(x, 'sale', saleId);
+    return s.first['number'] as String;
+  }
+
+  /// Undoes a purchase (stock and average cost, items, journal). Fails when
+  /// the units have already been sold. Returns its number.
+  static Future<String> _unpostPurchase(DatabaseExecutor x, int purchaseId) async {
+    final b = await x.query('purchases', where: 'id = ?', whereArgs: [purchaseId]);
+    if (b.isEmpty) throw AccountingError('Purchase not found');
+    for (final i in await x.query('purchase_items', where: 'purchase_id = ?', whereArgs: [purchaseId])) {
+      final p = await _product(x, asInt(i['product_id']));
+      final stock = asInt(p['stock']), qty = asInt(i['qty']);
+      if (stock < qty) throw AccountingError('${p['name']}: $qty bought but only $stock left in stock — some are already sold');
+      final left = stock - qty;
+      final cost = left <= 0 ? asInt(p['cost']) : ((asInt(p['cost']) * stock - asInt(i['amount'])) / left).round();
+      await x.rawUpdate('UPDATE products SET stock = ?, cost = ? WHERE id = ?', [left, cost < 0 ? asInt(p['cost']) : cost, p['id']]);
+    }
+    await x.delete('purchase_items', where: 'purchase_id = ?', whereArgs: [purchaseId]);
+    await _unpost(x, 'purchase', purchaseId);
+    return b.first['number'] as String;
+  }
+
+  static Future<int> updateSale(int saleId,
+          {required List<ItemIn> items,
+          int? customerId,
+          int? paid,
+          int? accountId,
+          int discount = 0,
+          String? date,
+          String? note,
+          List<MapEntry<int, int>>? splits}) =>
+      createSale(
+          items: items,
+          customerId: customerId,
+          paid: paid,
+          accountId: accountId,
+          discount: discount,
+          date: date,
+          note: note,
+          splits: splits,
+          editId: saleId);
 
   // small alias so the long parameter name `accountId` above does not shadow the helper
   static Future<int> accountId_(DatabaseExecutor x, String code) => accountId(x, code);
@@ -256,9 +330,12 @@ class Books {
     String? billNo,
     String? note,
     String? billImage,
+    int? editId, // re-saves an existing purchase in place (same number)
   }) {
     return _write((x) async {
       final when = date ?? ymd(DateTime.now());
+      String? oldNumber;
+      if (editId != null) oldNumber = await _unpostPurchase(x, editId);
       final s = await x.query('suppliers', where: 'id = ?', whereArgs: [supplierId]);
       if (s.isEmpty) throw AccountingError('Select a supplier');
       final supplierName = s.first['name'] as String;
@@ -291,8 +368,8 @@ class Books {
       final total = subtotal + tax;
       if (paid < 0 || paid > total) throw AccountingError('Paid amount must be between 0 and the bill total');
       final money = accountId ?? await accountId_(x, cashCode);
-      final number = await _nextNumber(x, 'purchases', 'PUR');
-      final pid = await x.insert('purchases', {
+      final number = oldNumber ?? await _nextNumber(x, 'purchases', 'PUR');
+      final purchaseRow = {
         'number': number,
         'bill_no': billNo,
         'date': when,
@@ -304,8 +381,14 @@ class Books {
         'account_id': money,
         'note': note,
         'bill_image': billImage,
-        'created_at': _now(),
-      });
+      };
+      final int pid;
+      if (editId != null) {
+        await x.update('purchases', purchaseRow, where: 'id = ?', whereArgs: [editId]);
+        pid = editId;
+      } else {
+        pid = await x.insert('purchases', {...purchaseRow, 'created_at': _now()});
+      }
       for (final r in rows) {
         await x.insert('purchase_items', {...r, 'purchase_id': pid});
       }
@@ -317,7 +400,7 @@ class Books {
         JL(ap, paid, 0, 'supplier', supplierId),
         JL(money, 0, paid),
       ]);
-      await _log(x, 'purchase', 'Purchase from $supplierName', number, total);
+      await _log(x, 'purchase', editId != null ? 'Purchase edited — $supplierName' : 'Purchase from $supplierName', number, total);
       return pid;
     });
   }

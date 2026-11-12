@@ -9,6 +9,7 @@ import '../ui/photo.dart';
 import '../ui/widgets.dart';
 import 'parties.dart';
 import 'products.dart' show ProductThumb;
+import 'sale_form.dart';
 import 'sale_return.dart';
 import 'sales.dart' show invoiceText;
 
@@ -114,6 +115,20 @@ class SaleView extends StatelessWidget {
                   ),
                 ],
                 const SizedBox(height: 14),
+                if (d.returns.isEmpty) ...[
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(50),
+                      foregroundColor: const Color(0xFF4318D2),
+                      side: const BorderSide(color: Color(0xFFD5CCFF)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
+                    ),
+                    onPressed: () => open(context, SaleForm(editSaleId: id)),
+                    icon: const Icon(Icons.edit_rounded),
+                    label: Text('Edit this sale', style: _j(13.5, FontWeight.w800, const Color(0xFF4318D2))),
+                  ),
+                  const SizedBox(height: 10),
+                ],
                 OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(
                     minimumSize: const Size.fromHeight(50),
@@ -156,6 +171,10 @@ class SaleView extends StatelessWidget {
             Text('${d.sale['number']} · ${prettyDate('${d.sale['date']}')}', style: _j(12, FontWeight.w600, const Color(0xFF323B60))),
           ]),
         ),
+        if (d.returns.isEmpty) ...[
+          _round(Icons.edit_rounded, () => open(context, SaleForm(editSaleId: id))),
+          const SizedBox(width: 8),
+        ],
         _round(Icons.copy_rounded, () {
           Clipboard.setData(ClipboardData(text: invoiceText(d.settings, d.sale, d.items)));
           toast(context, 'Invoice copied');
@@ -351,6 +370,13 @@ class SaleView extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                       decoration: BoxDecoration(color: const Color(0xFFEEF1FF), borderRadius: BorderRadius.circular(8)),
                       child: Text('IMEI ${it['serial']}', style: _j(10.5, FontWeight.w800, const Color(0xFF2440C8))),
+                    ),
+                  if ('${it['opp_id'] ?? ''}'.trim().isNotEmpty)
+                    Container(
+                      margin: const EdgeInsets.only(top: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(color: const Color(0xFFE6F6EC), borderRadius: BorderRadius.circular(8)),
+                      child: Text('Opportunity ID ${it['opp_id']}', style: _j(10.5, FontWeight.w800, _green)),
                     ),
                 ]),
               ),

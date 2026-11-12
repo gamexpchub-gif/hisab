@@ -1089,18 +1089,28 @@ class _PartyViewState extends State<PartyView> {
             ]),
           ),
           Text(bill ? '+${Money.rs(up)}' : '−${Money.rs(down)}', style: _j(13.5, FontWeight.w800, bill ? _ink : _green)),
-          if (docNo != null) const Icon(Icons.chevron_right_rounded, color: Color(0xFFB9BCD6), size: 20),
+          if (docNo != null)
+            IconButton(
+              tooltip: 'Edit',
+              visualDensity: VisualDensity.compact,
+              onPressed: () => _openDoc(docNo, edit: true),
+              icon: const Icon(Icons.edit_rounded, color: _purple, size: 18),
+            ),
         ]),
       ),
     );
   }
 
-  Future<void> _openDoc(String no) async {
+  Future<void> _openDoc(String no, {bool edit = false}) async {
     final table = no.startsWith('INV') ? 'sales' : 'purchases';
     final r = await Books.query('SELECT id FROM $table WHERE number = ?', [no]);
     if (r.isEmpty || !mounted) return;
     final id = asInt(r.first['id']);
-    open(context, table == 'sales' ? SaleView(id: id) : PurchaseView(id: id));
+    if (edit) {
+      open(context, table == 'sales' ? SaleForm(editSaleId: id) : PurchaseForm(editPurchaseId: id));
+    } else {
+      open(context, table == 'sales' ? SaleView(id: id) : PurchaseView(id: id));
+    }
   }
 
   // ---------------------------------------------------------------- bottom actions

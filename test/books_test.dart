@@ -303,6 +303,40 @@ void main() {
     expect(amountInWords(10100), 'ONE HUNDRED ONE RUPEES ONLY');
   });
 
+  test('edit sale: items, payment and stock are replaced in place', () async {
+    final c = await Books.saveParty('customer', {'name': 'Edit Me'});
+    final a = await Books.saveProduct({'name': 'Phone A', 'gst_bp': 0, 'price': 1000000}, openingQty: 3, openingCost: 800000);
+    final b = await Books.saveProduct({'name': 'Phone B', 'gst_bp': 0, 'price': 500000}, openingQty: 3, openingCost: 400000);
+    final cash = asInt((await Books.moneyAccounts())[0]['id']);
+    final id = await Books.createSale(items: [ItemIn(a, 2, 1000000, 'IMEI1', 'OPP-7')], customerId: c, paid: 1000000, accountId: cash);
+    final number = (await Books.query('SELECT number FROM sales WHERE id = ?', [id])).first['number'];
+    expect((await Books.query('SELECT opp_id FROM sale_items WHERE sale_id = ?', [id])).first['opp_id'], 'OPP-7');
+    await Books.updateSale(id, items: [ItemIn(b, 1, 500000)], customerId: c, paid: 500000, accountId: cash);
+    final pa = (await Books.query('SELECT stock FROM products WHERE id = ?', [a])).first;
+    final pb = (await Books.query('SELECT stock FROM products WHERE id = ?', [b])).first;
+    expect(asInt(pa['stock']), 3);
+    expect(asInt(pb['stock']), 2);
+    final s = (await Books.query('SELECT * FROM sales WHERE id = ?', [id])).first;
+    expect(s['number'], number);
+    expect(asInt(s['total']), 500000);
+    expect(await Books.partyBalance('customer', c), 0);
+    expect(await Books.balance(cash, 'asset'), 500000);
+    expect(asInt((await Books.query("SELECT COUNT(*) AS n FROM journal_entries WHERE source_type = 'sale' AND source_id = ?", [id])).first['n']), 1);
+    await expectBalanced();
+  });
+
+  test('edit purchase replaces stock; refuses when units are already sold', () async {
+    final sup = await Books.saveParty('supplier', {'name': 'Edit Supplier'});
+    final p = await Books.saveProduct({'name': 'Cable', 'gst_bp': 0, 'price': 30000});
+    final pid = await Books.createPurchase(items: [ItemIn(p, 10, 10000)], supplierId: sup);
+    await Books.createPurchase(items: [ItemIn(p, 4, 12000)], supplierId: sup, editId: pid);
+    expect(asInt((await Books.query('SELECT stock FROM products WHERE id = ?', [p])).first['stock']), 4);
+    expect(await Books.partyBalance('supplier', sup), 48000);
+    await Books.createSale(items: [ItemIn(p, 3, 30000)]);
+    expect(() => Books.createPurchase(items: [ItemIn(p, 1, 12000)], supplierId: sup, editId: pid), throwsA(isA<AccountingError>()));
+    await expectBalanced();
+  });
+
   test('demo data loads and balances', () async {
     await Books.loadDemo();
     await expectBalanced();

@@ -80,7 +80,8 @@ class _PLine {
 
 class PurchaseForm extends StatefulWidget {
   final int? supplierId;
-  const PurchaseForm({super.key, this.supplierId});
+  final int? editPurchaseId; // edit an existing purchase in place
+  const PurchaseForm({super.key, this.supplierId, this.editPurchaseId});
   @override
   State<PurchaseForm> createState() => _PurchaseFormState();
 }
@@ -141,14 +142,49 @@ class _PurchaseFormState extends State<PurchaseForm> {
         if (asInt(s['id']) == widget.supplierId) supplier = s;
       }
     }
+    if (widget.editPurchaseId != null && !_editLoaded) await _loadEdit(widget.editPurchaseId!);
     if (mounted) setState(() {});
+  }
+
+  bool _editLoaded = false;
+  String editNumber = '';
+  bool get editing => widget.editPurchaseId != null;
+
+  Future<void> _loadEdit(int id) async {
+    final b = await Books.query('SELECT * FROM purchases WHERE id = ?', [id]);
+    if (b.isEmpty) return;
+    _editLoaded = true;
+    final bill = b.first;
+    editNumber = '${bill['number']}';
+    supplier = suppliers.where((s) => asInt(s['id']) == asInt(bill['supplier_id'])).firstOrNull;
+    date = '${bill['date']}';
+    billNo.text = '${bill['bill_no'] ?? ''}';
+    billImage = bill['bill_image'] as String?;
+    var n = '${bill['note'] ?? ''}';
+    if (n.startsWith('IGST (inter-state)')) {
+      interState = true;
+      n = n.replaceFirst('IGST (inter-state)', '').replaceFirst(RegExp(r'^\s*·\s*'), '');
+    }
+    note.text = n;
+    if (bill['account_id'] != null) account = asInt(bill['account_id']);
+    final total = asInt(bill['total']), paid = asInt(bill['paid']);
+    payMode = paid >= total ? 'full' : paid > 0 ? 'partial' : 'credit';
+    if (payMode == 'partial') paidCtrl.text = Money.edit(paid);
+    for (final i in await Books.query('SELECT * FROM purchase_items WHERE purchase_id = ? ORDER BY id', [id])) {
+      final p = products.where((p) => asInt(p['id']) == asInt(i['product_id'])).firstOrNull;
+      if (p == null) continue;
+      final l = _PLine(p, qty: asInt(i['qty']), rate: asInt(i['rate']), lastRate: lastRates[asInt(i['product_id'])]);
+      l.serial.text = '${i['serial'] ?? ''}';
+      lines.add(l);
+    }
   }
 
   Future<void> _checkBill() async {
     final s = supplier, b = billNo.text.trim();
     var dup = false;
     if (s != null && b.isNotEmpty) {
-      final r = await Books.query('SELECT id FROM purchases WHERE supplier_id = ? AND bill_no = ?', [asInt(s['id']), b]);
+      final r = await Books.query('SELECT id FROM purchases WHERE supplier_id = ? AND bill_no = ? AND id != ?',
+          [asInt(s['id']), b, widget.editPurchaseId ?? -1]);
       dup = r.isNotEmpty;
     }
     if (mounted && dup != duplicateBill) setState(() => duplicateBill = dup);
@@ -350,6 +386,7 @@ class _PurchaseFormState extends State<PurchaseForm> {
     setState(() => saving = true);
     try {
       final id = await Books.createPurchase(
+        editId: widget.editPurchaseId,
         items: [for (final l in lines) ItemIn(l.id, l.qty, l.rate, l.serial.text)],
         supplierId: asInt(supplier!['id']),
         paid: paid,
@@ -361,6 +398,11 @@ class _PurchaseFormState extends State<PurchaseForm> {
       );
       if (!mounted) return;
       HapticFeedback.heavyImpact();
+      if (editing) {
+        toast(context, 'Purchase $editNumber updated');
+        Navigator.of(context).pop(true);
+        return;
+      }
       Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => PurchaseSuccessScreen(purchaseId: id, before: before)));
     } catch (e) {
       toast(context, '$e', error: true);
@@ -411,7 +453,7 @@ class _PurchaseFormState extends State<PurchaseForm> {
         const SizedBox(width: 12),
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('New Purchase', style: _j(21, FontWeight.w800, _navy)),
+            Text(editing ? 'Edit Purchase $editNumber' : 'New Purchase', style: _j(21, FontWeight.w800, _navy)),
             Text('Supplier bill · stock in · payable', style: _j(12, FontWeight.w600, const Color(0xFF323B60))),
           ]),
         ),
@@ -1070,7 +1112,7 @@ class _PurchaseFormState extends State<PurchaseForm> {
                   : Row(mainAxisSize: MainAxisSize.min, children: [
                       const Icon(Icons.inventory_rounded, color: Colors.white),
                       const SizedBox(width: 8),
-                      Text('Save & stock in', style: _j(15, FontWeight.w800, Colors.white)),
+                      Text(editing ? 'Update purchase' : 'Save & stock in', style: _j(15, FontWeight.w800, Colors.white)),
                     ]),
             ),
           ),
