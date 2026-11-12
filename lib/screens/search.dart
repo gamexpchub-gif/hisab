@@ -21,12 +21,18 @@ class _SearchScreenState extends State<SearchScreen> {
     if (q.isEmpty) return [[], [], [], [], []];
     final like = '%$q%';
     return [
-      await Books.query('SELECT * FROM customers WHERE name LIKE ? OR IFNULL(phone,\'\') LIKE ? LIMIT 10', [like, like]),
-      await Books.recentSales(10, search: q),
       await Books.query(
-          'SELECT * FROM products WHERE name LIKE ? OR IFNULL(brand,\'\') LIKE ? OR IFNULL(sku,\'\') LIKE ? LIMIT 10',
+          'SELECT * FROM customers WHERE name LIKE ? OR IFNULL(phone,\'\') LIKE ? OR IFNULL(alt_phone,\'\') LIKE ? '
+          'OR IFNULL(address,\'\') LIKE ? LIMIT 10',
+          [like, like, like, like]),
+      [for (final s in await Books.salesBook()) if (matchSale(s, q) != null) s].take(15).toList(),
+      await Books.query(
+          'SELECT * FROM products WHERE name LIKE ? OR IFNULL(brand,\'\') LIKE ? OR IFNULL(sku,\'\') LIKE ? '
+          'OR IFNULL(variant,\'\') LIKE ? OR IFNULL(hsn,\'\') LIKE ? LIMIT 10',
+          [like, like, like, like, like]),
+      await Books.query(
+          'SELECT * FROM suppliers WHERE name LIKE ? OR IFNULL(phone,\'\') LIKE ? OR IFNULL(gstin,\'\') LIKE ? LIMIT 10',
           [like, like, like]),
-      await Books.query('SELECT * FROM suppliers WHERE name LIKE ? OR IFNULL(phone,\'\') LIKE ? LIMIT 10', [like, like]),
       await Books.query(
           'SELECT i.serial, s.id, s.number, s.date FROM sale_items i JOIN sales s ON s.id = i.sale_id WHERE i.serial LIKE ? LIMIT 10',
           [like]),
@@ -48,7 +54,7 @@ class _SearchScreenState extends State<SearchScreen> {
         onChanged: (v) => setState(() => q = v.trim()),
       ),
       Live<List<List<Rec>>>(
-        key: ValueKey(q),
+        reloadKey: q,
         load: _load,
         builder: (context, r) {
           final none = q.isNotEmpty && r.every((l) => l.isEmpty);

@@ -465,10 +465,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                   hintText: 'Search product or category...',
                   hintStyle: _j(10.1, FontWeight.w400, const Color(0xFF515673)),
                 ),
-                onSubmitted: (v) => setState(() => search = v.trim()),
-                onChanged: (v) {
-                  if (v.isEmpty && search.isNotEmpty) setState(() => search = '');
-                },
+                onChanged: (v) => setState(() => search = v.trim()),
               ),
             ),
             if (search.isNotEmpty)
