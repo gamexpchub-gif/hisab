@@ -2002,7 +2002,7 @@ class Books {
     await createPurchase(
         items: [ItemIn(ids[2], 4, 1900000)], supplierId: sup, paid: 4000000, accountId: bank, date: ago(20), billNo: 'KMD/889');
     await createSale(
-        items: [ItemIn(ids[0], 1, 8999900, '356789104455667')],
+        items: [ItemIn(ids[0], 1, 8999900, '356789104455660')],
         customerId: rahul,
         paid: 6000000,
         accountId: upi,
@@ -2050,7 +2050,7 @@ class Books {
         oppId: 'B447545100',
         loanNo: '4010CD0938',
         product: 'iPhone 14 Pro',
-        imei: '356789104455667',
+        imei: '356789104455660',
         price: 8999900,
         downPayment: 0);
     final first = (await emiInstallments(bajaj)).first;

@@ -6,6 +6,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../core/books.dart';
+import '../core/imei_smart.dart';
 import '../core/money.dart';
 import '../print/print_screen.dart';
 import '../ui/widgets.dart';
@@ -59,6 +60,8 @@ class _Line {
   int rate; // paise, before GST
   final serial = TextEditingController();
   final opp = TextEditingController(); // opportunity / finance ID
+  String? imeiWarn; // Smart IMEI warning for the typed / scanned number
+  String? imeiInfo; // Smart IMEI note (recognised model)
   _Line(this.p, {this.qty = 1}) : rate = asInt(p['price']);
   int get id => asInt(p['id']);
   int get stock => asInt(p['stock']);
@@ -101,6 +104,7 @@ class _SaleFormState extends State<SaleForm> {
   final advanceCtrl = TextEditingController();
   final splits = <_Split>[];
   bool showProfit = false;
+  String? cat; // category filter of the product strip
   bool saving = false;
   String nextNo = '';
 
@@ -278,29 +282,84 @@ class _SaleFormState extends State<SaleForm> {
   }
 
   Future<void> _scan() async {
-    final code = await BarcodeScannerScreen.scan(context, title: 'Scan product to add');
+    final code = await BarcodeScannerScreen.scan(context, title: 'Scan barcode or IMEI');
     if (code == null || !mounted) return;
-    for (final p in products) {
-      if ((p['sku'] as String?)?.trim() == code) {
-        _add(p);
-        return;
+    final c = SmartImei.clean(code);
+    if (!SmartImei.looksLikeImei(c)) {
+      for (final p in products) {
+        if ((p['sku'] as String?)?.trim() == code.trim()) {
+          _add(p);
+          return;
+        }
       }
     }
-    final add = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Product not found'),
-        content: Text('No product has barcode “$code”. Add it as a new product?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Add product')),
-        ],
-      ),
-    );
-    if (add == true && mounted) {
-      await open(context, const ProductForm());
-      _load();
+    await _addByImei(c);
+  }
+
+  /// Smart IMEI: recognise the device from its IMEI and add it to the cart.
+  Future<void> _addByImei(String code) async {
+    final m = await SmartImei.match(code);
+    if (!mounted) return;
+    final warn = m.warning();
+    if (warn != null) {
+      final go = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          icon: const Icon(Icons.warning_amber_rounded, color: _amber, size: 40),
+          title: Text(m.isImei ? 'Check this IMEI' : 'Check this serial'),
+          content: Text('${m.code}\n\n$warn'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+            TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Add anyway')),
+          ],
+        ),
+      );
+      if (go != true || !mounted) return;
     }
+    Rec? product = m.product == null ? null : products.where((p) => asInt(p['id']) == asInt(m.product!['id'])).firstOrNull;
+    if (product == null) {
+      product = await showModalBottomSheet<Rec>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => _PickProductSheet(products: products, code: m.code),
+      );
+      if (product == null || !mounted) return;
+    }
+    _add(product, serial: m.code);
+    final l = cart.lastWhere((x) => x.serial.text == m.code, orElse: () => cart.last);
+    l.imeiWarn = warn;
+    l.imeiInfo = switch (m.how) {
+      'exact' => 'Smart IMEI · from purchase ${m.boughtOn?['number'] ?? ''}',
+      'tac' => 'Smart IMEI · recognised model (seen ${m.tacSeen}×)',
+      _ => m.isImei ? 'Smart IMEI · new model learned' : null,
+    };
+    HapticFeedback.mediumImpact();
+    if (m.how != 'none') toast(context, '${product['name']} added · ${m.how == 'exact' ? 'exact device' : 'recognised by IMEI'}');
+    setState(() {});
+  }
+
+  /// Checks an IMEI typed into a cart line.
+  Future<void> _checkLineImei(_Line l) async {
+    final c = SmartImei.clean(l.serial.text);
+    if (c.isEmpty) {
+      setState(() => l.imeiWarn = l.imeiInfo = null);
+      return;
+    }
+    if (!SmartImei.looksLikeImei(c)) {
+      if (l.imeiWarn != null) setState(() => l.imeiWarn = null);
+      return;
+    }
+    final m = await SmartImei.match(c);
+    if (!mounted || SmartImei.clean(l.serial.text) != c) return;
+    setState(() {
+      l.imeiWarn = m.warning();
+      if (m.product != null && asInt(m.product!['id']) != l.id) {
+        l.imeiWarn ??= 'This IMEI belongs to ${m.product!['name']}';
+      }
+      l.imeiInfo = m.warning() == null && m.valid ? 'IMEI verified ✓' : null;
+    });
   }
 
   Future<void> _editRate(_Line l) async {
@@ -526,12 +585,581 @@ class _SaleFormState extends State<SaleForm> {
     return GestureDetector(
       onTap: _pickCustomer,
       child: Container(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: _card(),
         child: Row(children: [
           Container(
-            width: 48,
-            height: 48,
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              gradient: LinearGradient(
+                  colors: c == null ? const [Color(0xFFE2E8F0), Color(0xFFCBD5E1)] : const [Color(0xFF4FD8E0), Color(0xFF139DB0)]),
+            ),
+            alignment: Alignment.center,
+            child: c == null
+                ? const Icon(Icons.storefront_rounded, color: Color(0xFF475569))
+                : Text((c['name'] as String).isEmpty ? '?' : (c['name'] as String)[0].toUpperCase(),
+                    style: _j(20, FontWeight.w800, Colors.white)),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(c == null ? 'Walk-in customer' : c['name'] as String, style: _j(15, FontWeight.w800, _ink)),
+              const SizedBox(height: 2),
+              Text(
+                c == null
+                    ? 'Cash sale · tap to choose a customer'
+                    : [c['phone'] ?? '', if (limit > 0) 'limit ${Money.compact(limit)}'].where((e) => '$e'.isNotEmpty).join(' · '),
+                style: _j(11.5, FontWeight.w500, _muted),
+              ),
+            ]),
+          ),
+          if (c != null)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: cDue > 0 ? const Color(0xFFFDE4EA) : const Color(0xFFE3F7EC),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(cDue > 0 ? 'Due ${Money.compact(cDue)}' : 'No dues',
+                  style: _j(11, FontWeight.w800, cDue > 0 ? const Color(0xFFC8102E) : const Color(0xFF0E6E47))),
+            ),
+          const SizedBox(width: 4),
+          const Icon(Icons.unfold_more_rounded, color: Color(0xFFB9BCD6)),
+        ]),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------- search + quick picks
+  Widget _searchBar() => Row(children: [
+        Expanded(
+          child: Container(
+            height: 52,
+            decoration: _card(r: 26),
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: Row(children: [
+              const Icon(Icons.search_rounded, color: Color(0xFF2C3B8F)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextField(
+                  controller: search,
+                  style: _j(14, FontWeight.w600, _ink),
+                  decoration: InputDecoration(
+                    isCollapsed: true,
+                    filled: false,
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    hintText: 'Search product, brand or barcode',
+                    hintStyle: _j(13.5, FontWeight.w400, const Color(0xFF8A8FAD)),
+                  ),
+                ),
+              ),
+              if (search.text.isNotEmpty)
+                GestureDetector(onTap: search.clear, child: const Icon(Icons.close_rounded, color: _muted, size: 20)),
+            ]),
+          ),
+        ),
+        const SizedBox(width: 10),
+        GestureDetector(
+          onTap: _scan,
+          child: Container(
+            width: 52,
+            height: 52,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(colors: [Color(0xFF7B4DFF), Color(0xFF4318D2)]),
+              boxShadow: [BoxShadow(color: Color(0x664A17C9), blurRadius: 14, offset: Offset(0, 5), spreadRadius: -4)],
+            ),
+            child: const Icon(Icons.qr_code_scanner_rounded, color: Colors.white),
+          ),
+        ),
+      ]);
+
+  Widget _results() {
+    final q = search.text.trim().toLowerCase();
+    final r = products
+        .where((p) => [p['name'], p['brand'], p['sku'], p['variant'], p['category']]
+            .any((v) => v != null && '$v'.toLowerCase().contains(q)))
+        .take(8)
+        .toList();
+    return Container(
+      margin: const EdgeInsets.only(top: 10),
+      decoration: _card(),
+      child: r.isEmpty
+          ? Padding(
+              padding: const EdgeInsets.all(18),
+              child: Row(children: [
+                Expanded(child: Text('No product matches “${search.text}”', style: _j(13, FontWeight.w500, _muted))),
+                TextButton(
+                  onPressed: () async {
+                    await open(context, const ProductForm());
+                    _load();
+                  },
+                  child: const Text('Add product'),
+                ),
+              ]),
+            )
+          : Column(children: [
+              for (var i = 0; i < r.length; i++) ...[
+                if (i > 0) const Divider(height: 1, indent: 72, color: Color(0xFFEEF0F8)),
+                InkWell(
+                  onTap: () => _add(r[i]),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    child: Row(children: [
+                      ProductThumb(r[i], width: 46, height: 50),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(r[i]['name'] as String, maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(13.5, FontWeight.w700, _ink)),
+                          Text(
+                            [r[i]['variant'], 'Stock ${r[i]['stock']}'].where((e) => e != null && '$e'.isNotEmpty).join(' · '),
+                            style: _j(11, FontWeight.w500, asInt(r[i]['stock']) <= 0 ? _red : _muted),
+                          ),
+                        ]),
+                      ),
+                      Text(Money.rs(asInt(r[i]['price'])), style: _j(13.5, FontWeight.w800, const Color(0xFF1C1CA0))),
+                      const SizedBox(width: 8),
+                      const Icon(Icons.add_circle_rounded, color: _purple),
+                    ]),
+                  ),
+                ),
+              ],
+            ]),
+    );
+  }
+
+  /// Inline category chips + a sideways product strip (best sellers for "All").
+  Widget _quickPicks() {
+    final cats = <String>{for (final p in products) if ((p['category'] as String?)?.isNotEmpty == true) p['category'] as String}.toList()..sort();
+    final list = cat == null
+        ? (quick.isEmpty ? products.take(12).toList() : quick)
+        : (products.where((p) => p['category'] == cat).toList()..sort((a, b) => asInt(b['stock']).compareTo(asInt(a['stock']))));
+    IconData icon(String c) {
+      final l = c.toLowerCase();
+      if (l.contains('mobile')) return Icons.smartphone_rounded;
+      if (l.contains('laptop')) return Icons.laptop_mac_rounded;
+      if (l.contains('tablet')) return Icons.tablet_mac_rounded;
+      if (l.contains('desktop') || l.contains('pc')) return Icons.desktop_windows_rounded;
+      if (l.contains('access')) return Icons.headphones_rounded;
+      return Icons.category_rounded;
+    }
+
+    Widget chip(String? c, String label, IconData i) {
+      final on = cat == c;
+      return GestureDetector(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          setState(() => cat = c);
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          margin: const EdgeInsets.only(right: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+          decoration: BoxDecoration(
+            gradient: on ? const LinearGradient(colors: [Color(0xFF6B35EE), Color(0xFF4318D2)]) : null,
+            color: on ? null : Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: on ? null : Border.all(color: const Color(0xFFE9EAF5)),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(i, size: 14, color: on ? Colors.white : _purple),
+            const SizedBox(width: 5),
+            Text(label, style: _j(11.5, FontWeight.w700, on ? Colors.white : _ink)),
+          ]),
+        ),
+      );
+    }
+
+    if (products.isEmpty) return const SizedBox();
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        SizedBox(
+          height: 34,
+          child: ListView(scrollDirection: Axis.horizontal, children: [
+            chip(null, 'Best sellers', Icons.bolt_rounded),
+            for (final c in cats) chip(c, c, icon(c)),
+          ]),
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          height: 112,
+          child: list.isEmpty
+              ? Center(child: Text('No products in $cat', style: _j(12, FontWeight.w600, _muted)))
+              : ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: list.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                  itemBuilder: (context, i) {
+                    final p = list[i];
+                    final stock = asInt(p['stock']);
+                    return GestureDetector(
+                      onTap: () => _add(p),
+                      child: Container(
+                        width: 92,
+                        padding: const EdgeInsets.fromLTRB(6, 6, 6, 6),
+                        decoration: _card(r: 16),
+                        child: Column(children: [
+                          Stack(children: [
+                            ProductThumb(p, width: 50, height: 50),
+                            Positioned(
+                              right: 0,
+                              top: 0,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: stock <= 0 ? _red : stock <= asInt(p['low_stock']) ? _amber : _green,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text('$stock', style: _j(9, FontWeight.w800, Colors.white)),
+                              ),
+                            ),
+                          ]),
+                          const SizedBox(height: 5),
+                          Text(p['name'] as String, maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(10.5, FontWeight.w700, _ink)),
+                          Text(Money.compact(asInt(p['price'])), style: _j(11, FontWeight.w800, _purple)),
+                        ]),
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ]),
+    );
+  }
+
+  // ---------------------------------------------------------------- cart
+  void _add(Rec p, {String? serial}) {
+    HapticFeedback.selectionClick();
+    final existing = cart.where((l) => l.id == asInt(p['id']) && serial == null).toList();
+    setState(() {
+      if (existing.isNotEmpty) {
+        existing.first.qty++;
+      } else {
+        final l = _Line(p);
+        if (serial != null) l.serial.text = serial;
+        cart.add(l);
+      }
+      search.clear();
+    });
+    final inCart = cart.where((l) => l.id == asInt(p['id'])).fold<int>(0, (a, l) => a + l.qty);
+    if (inCart > asInt(p['stock'])) toast(context, 'Only ${p['stock']} × ${p['name']} in stock', error: true);
+  }
+
+  Future<void> _scan() async {
+    final code = await BarcodeScannerScreen.scan(context, title: 'Scan barcode or IMEI');
+    if (code == null || !mounted) return;
+    final c = SmartImei.clean(code);
+    if (!SmartImei.looksLikeImei(c)) {
+      for (final p in products) {
+        if ((p['sku'] as String?)?.trim() == code.trim()) {
+          _add(p);
+          return;
+        }
+      }
+    }
+    await _addByImei(c);
+  }
+
+  /// Smart IMEI: recognise the device from its IMEI and add it to the cart.
+  Future<void> _addByImei(String code) async {
+    final m = await SmartImei.match(code);
+    if (!mounted) return;
+    final warn = m.warning();
+    if (warn != null) {
+      final go = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          icon: const Icon(Icons.warning_amber_rounded, color: _amber, size: 40),
+          title: Text(m.isImei ? 'Check this IMEI' : 'Check this serial'),
+          content: Text('${m.code}\n\n$warn'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+            TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Add anyway')),
+          ],
+        ),
+      );
+      if (go != true || !mounted) return;
+    }
+    Rec? product = m.product == null ? null : products.where((p) => asInt(p['id']) == asInt(m.product!['id'])).firstOrNull;
+    if (product == null) {
+      product = await showModalBottomSheet<Rec>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => _PickProductSheet(products: products, code: m.code),
+      );
+      if (product == null || !mounted) return;
+    }
+    _add(product, serial: m.code);
+    final l = cart.lastWhere((x) => x.serial.text == m.code, orElse: () => cart.last);
+    l.imeiWarn = warn;
+    l.imeiInfo = switch (m.how) {
+      'exact' => 'Smart IMEI · from purchase ${m.boughtOn?['number'] ?? ''}',
+      'tac' => 'Smart IMEI · recognised model (seen ${m.tacSeen}×)',
+      _ => m.isImei ? 'Smart IMEI · new model learned' : null,
+    };
+    HapticFeedback.mediumImpact();
+    if (m.how != 'none') toast(context, '${product['name']} added · ${m.how == 'exact' ? 'exact device' : 'recognised by IMEI'}');
+    setState(() {});
+  }
+
+  /// Checks an IMEI typed into a cart line.
+  Future<void> _checkLineImei(_Line l) async {
+    final c = SmartImei.clean(l.serial.text);
+    if (c.isEmpty) {
+      setState(() => l.imeiWarn = l.imeiInfo = null);
+      return;
+    }
+    if (!SmartImei.looksLikeImei(c)) {
+      if (l.imeiWarn != null) setState(() => l.imeiWarn = null);
+      return;
+    }
+    final m = await SmartImei.match(c);
+    if (!mounted || SmartImei.clean(l.serial.text) != c) return;
+    setState(() {
+      l.imeiWarn = m.warning();
+      if (m.product != null && asInt(m.product!['id']) != l.id) {
+        l.imeiWarn ??= 'This IMEI belongs to ${m.product!['name']}';
+      }
+      l.imeiInfo = m.warning() == null && m.valid ? 'IMEI verified ✓' : null;
+    });
+  }
+
+  Future<void> _editRate(_Line l) async {
+    final c = TextEditingController(text: Money.edit(l.rate));
+    final r = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Price for ${l.p['name']}'),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          TextField(
+            controller: c,
+            autofocus: true,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(prefixText: '₹ ', labelText: 'Rate per unit (before GST)'),
+          ),
+          const SizedBox(height: 8),
+          Text('MRP ${Money.rs(asInt(l.p['mrp']))} · list price ${Money.rs(asInt(l.p['price']))}',
+              style: _j(12, FontWeight.w500, _muted)),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, c.text), child: const Text('Set price')),
+        ],
+      ),
+    );
+    if (r == null) return;
+    try {
+      setState(() => l.rate = Money.parse(r));
+    } catch (_) {
+      if (mounted) toast(context, 'Enter a valid amount', error: true);
+    }
+  }
+
+  Future<void> _scanSerial(_Line l) async {
+    final code = await BarcodeScannerScreen.scan(context, title: 'Scan IMEI / serial');
+    if (code != null) setState(() => l.serial.text = code);
+  }
+
+  // ---------------------------------------------------------------- customer
+  Future<void> _pickCustomer() async {
+    final r = await showModalBottomSheet<Object>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _CustomerSheet(customers: customers, dues: dues),
+    );
+    if (r == 'walkin') {
+      setState(() => customer = null);
+    } else if (r == 'new') {
+      await open(context, const PartyForm(type: 'customer'));
+      await _load();
+      if (customers.isNotEmpty) {
+        final newest = [...customers]..sort((a, b) => asInt(b['id']).compareTo(asInt(a['id'])));
+        setState(() => customer = newest.first);
+      }
+    } else if (r is Map<String, Object?>) {
+      setState(() => customer = r);
+    }
+  }
+
+  // ---------------------------------------------------------------- charge
+  Future<void> _charge() async {
+    if (saving) return;
+    if (cart.isEmpty) {
+      toast(context, 'Add at least one product', error: true);
+      return;
+    }
+    if (payMode == 'split' && splitSum > total) {
+      toast(context, 'Split amounts are ₹${Money.inr(splitSum - total)} more than the bill', error: true);
+      return;
+    }
+    if (payMode == 'split' && splits.any((sp) => sp.account == null && _parse(sp.ctrl) > 0)) {
+      toast(context, 'Choose an account for every split amount', error: true);
+      return;
+    }
+    if (due > 0 && customer == null) {
+      toast(context, 'Select a customer to give credit (₹${Money.inr(due)} due)', error: true);
+      return;
+    }
+    if (customer != null && due > 0) {
+      final limit = asInt(customer!['credit_limit']);
+      final after = (dues[asInt(customer!['id'])] ?? 0) + due;
+      if (limit > 0 && after > limit) {
+        final ok = await showDialog<bool>(
+          context: context,
+          builder: (c) => AlertDialog(
+            title: const Text('Credit limit crossed'),
+            content: Text('${customer!['name']} will owe ${Money.rs(after)}, above the limit of ${Money.rs(limit)}. Continue?'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+              TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Continue')),
+            ],
+          ),
+        );
+        if (ok != true) return;
+      }
+    }
+    setState(() => saving = true);
+    try {
+      final id = await Books.createSale(
+        editId: widget.editSaleId,
+        items: [for (final l in cart) ItemIn(l.id, l.qty, l.rate, l.serial.text, oppEnabled ? l.opp.text : null)],
+        customerId: customer == null ? null : asInt(customer!['id']),
+        paid: paid,
+        accountId: account,
+        discount: discount,
+        date: date,
+        note: note.text.trim().isEmpty ? null : note.text.trim(),
+        splits: payMode == 'split'
+            ? [for (final sp in splits) if (sp.account != null && _parse(sp.ctrl) > 0) MapEntry(sp.account!, _parse(sp.ctrl))]
+            : null,
+      );
+      if (account != null) await Books.setSetting('last_pay_account', '$account');
+      if (!mounted) return;
+      HapticFeedback.heavyImpact();
+      if (editing) {
+        toast(context, 'Sale $nextNo updated');
+        Navigator.of(context).pop(true);
+        return;
+      }
+      Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => SaleSuccessScreen(saleId: id, change: change)));
+    } catch (e) {
+      toast(context, '$e', error: true);
+      setState(() => saving = false);
+    }
+  }
+
+  Rec? get _account {
+    for (final a in accounts) {
+      if (asInt(a['id']) == account) return a;
+    }
+    return null;
+  }
+
+  // ================================================================== UI
+  @override
+  Widget build(BuildContext context) {
+    final safe = MediaQuery.of(context).padding.bottom;
+    return Scaffold(
+      backgroundColor: _bg,
+      body: Stack(children: [
+        SafeArea(
+          bottom: false,
+          child: ListView(
+            padding: EdgeInsets.fromLTRB(16, 8, 16, 150 + safe),
+            children: [
+              _header(),
+              const SizedBox(height: 14),
+              _customerCard(),
+              const SizedBox(height: 14),
+              _searchBar(),
+              if (search.text.trim().isNotEmpty) _results() else _quickPicks(),
+              const SizedBox(height: 14),
+              _cartCard(),
+              if (cart.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                _billCard(),
+                const SizedBox(height: 14),
+                _paymentCard(),
+                const SizedBox(height: 14),
+                _noteField(),
+              ],
+            ],
+          ),
+        ),
+        Positioned(left: 0, right: 0, bottom: 0, child: _checkoutBar(safe)),
+      ]),
+    );
+  }
+
+  Widget _header() => Row(children: [
+        _round(Icons.arrow_back_rounded, () => Navigator.of(context).pop()),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(editing ? 'Edit Sale' : 'New Sale', style: _j(21, FontWeight.w800, _navy)),
+            Row(children: [
+              Text(nextNo.isEmpty ? 'Tax invoice' : '$nextNo · tax invoice', style: _j(12, FontWeight.w600, const Color(0xFF323B60))),
+            ]),
+          ]),
+        ),
+        GestureDetector(
+          onTap: () async {
+            final d = await showDatePicker(
+              context: context,
+              initialDate: DateTime.parse(date),
+              firstDate: DateTime(2015),
+              lastDate: DateTime.now().add(const Duration(days: 1)),
+            );
+            if (d != null) setState(() => date = ymd(d));
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+            decoration: _card(r: 16),
+            child: Row(children: [
+              const Icon(Icons.event_rounded, size: 16, color: _purple),
+              const SizedBox(width: 6),
+              Text(date == ymd(DateTime.now()) ? 'Today' : prettyDate(date), style: _j(12.5, FontWeight.w700, _ink)),
+            ]),
+          ),
+        ),
+      ]);
+
+  Widget _round(IconData icon, VoidCallback onTap) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 44,
+          height: 44,
+          decoration: const BoxDecoration(
+            shape: BoxShape.circle,
+            color: Colors.white,
+            boxShadow: [BoxShadow(color: Color(0x262A2F7A), blurRadius: 14, offset: Offset(0, 5), spreadRadius: -4)],
+          ),
+          child: Icon(icon, color: _ink, size: 22),
+        ),
+      );
+
+  // ---------------------------------------------------------------- customer card
+  Widget _customerCard() {
+    final c = customer;
+    final cDue = c == null ? 0 : dues[asInt(c['id'])] ?? 0;
+    final limit = c == null ? 0 : asInt(c['credit_limit']);
+    return GestureDetector(
+      onTap: _pickCustomer,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: _card(),
+        child: Row(children: [
+          Container(
+            width: 42,
+            height: 42,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(16),
               gradient: LinearGradient(
@@ -739,10 +1367,10 @@ class _SaleFormState extends State<SaleForm> {
         ]),
         if (cart.isEmpty)
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: 18),
+            padding: const EdgeInsets.symmetric(vertical: 10),
             child: Center(
               child: Column(children: [
-                Image.asset('assets/home/cart.png', width: 96, height: 92),
+                Image.asset('assets/home/cart.png', width: 64, height: 60),
                 const SizedBox(height: 8),
                 Text('Cart is empty', style: _j(14, FontWeight.w800, _ink)),
                 Text('Search, scan a barcode or tap a best seller', style: _j(12, FontWeight.w500, _muted)),
@@ -844,6 +1472,8 @@ class _SaleFormState extends State<SaleForm> {
                   Expanded(
                     child: TextField(
                       controller: l.serial,
+                      onChanged: (_) => _checkLineImei(l),
+                      keyboardType: TextInputType.text,
                       style: _j(12.5, FontWeight.w600, _ink),
                       decoration: InputDecoration(
                         isCollapsed: true,
@@ -862,6 +1492,19 @@ class _SaleFormState extends State<SaleForm> {
                   ),
                 ]),
               ),
+            ),
+          if (l.imeiWarn != null || l.imeiInfo != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 5, left: 4),
+              child: Row(children: [
+                Icon(l.imeiWarn != null ? Icons.warning_amber_rounded : Icons.verified_rounded,
+                    size: 14, color: l.imeiWarn != null ? _red : _green),
+                const SizedBox(width: 5),
+                Expanded(
+                  child: Text(l.imeiWarn ?? l.imeiInfo!,
+                      style: _j(11, FontWeight.w700, l.imeiWarn != null ? _red : _green)),
+                ),
+              ]),
             ),
           if (oppEnabled && (isDevice || l.serial.text.isNotEmpty || l.opp.text.isNotEmpty))
             Padding(
@@ -1819,4 +2462,75 @@ class SaleSuccessScreen extends StatelessWidget {
           ]),
         ),
       );
+}
+
+
+/// "Which product is this device?" — shown for an IMEI the app hasn't seen.
+class _PickProductSheet extends StatefulWidget {
+  final List<Rec> products;
+  final String code;
+  const _PickProductSheet({required this.products, required this.code});
+  @override
+  State<_PickProductSheet> createState() => _PickProductSheetState();
+}
+
+class _PickProductSheetState extends State<_PickProductSheet> {
+  String q = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final l = q.toLowerCase();
+    final rows = widget.products
+        .where((p) => q.isEmpty || [p['name'], p['brand'], p['variant'], p['category']].any((v) => v != null && '$v'.toLowerCase().contains(l)))
+        .take(40)
+        .toList();
+    return Container(
+      height: MediaQuery.of(context).size.height * .78,
+      decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Column(children: [
+        const SizedBox(height: 10),
+        Container(width: 44, height: 5, decoration: BoxDecoration(color: const Color(0xFFD5D8EA), borderRadius: BorderRadius.circular(3))),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(18, 14, 18, 6),
+          child: Row(children: [
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(color: const Color(0xFFEDE7FF), borderRadius: BorderRadius.circular(14)),
+              child: const Icon(Icons.smartphone_rounded, color: _purple),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Which product is this?', style: _j(17, FontWeight.w800, _navy)),
+                Text('New model for ${widget.code} — the app will remember it', style: _j(11.5, FontWeight.w600, _muted)),
+              ]),
+            ),
+          ]),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+          child: TextField(
+            autofocus: true,
+            onChanged: (v) => setState(() => q = v.trim()),
+            decoration: const InputDecoration(hintText: 'Search product', prefixIcon: Icon(Icons.search_rounded)),
+          ),
+        ),
+        Expanded(
+          child: ListView(children: [
+            for (final p in rows)
+              ListTile(
+                leading: ProductThumb(p, width: 40, height: 44),
+                title: Text('${p['name']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(13.5, FontWeight.w700, _ink)),
+                subtitle: Text([p['variant'], 'Stock ${p['stock']}'].where((e) => e != null && '$e'.isNotEmpty).join(' · '),
+                    style: _j(11, FontWeight.w500, _muted)),
+                trailing: Text(Money.rs(asInt(p['price'])), style: _j(13, FontWeight.w800, _purple)),
+                onTap: () => Navigator.pop(context, p),
+              ),
+          ]),
+        ),
+      ]),
+    );
+  }
 }

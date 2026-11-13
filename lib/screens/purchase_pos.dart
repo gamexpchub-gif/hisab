@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../core/books.dart';
+import '../core/imei_smart.dart';
 import '../core/money.dart';
 import '../ui/photo.dart';
 import '../ui/widgets.dart';
@@ -232,11 +233,25 @@ class _PurchaseFormState extends State<PurchaseForm> {
   }
 
   Future<void> _scanProduct() async {
-    final code = await BarcodeScannerScreen.scan(context, title: 'Scan product barcode');
+    final code = await BarcodeScannerScreen.scan(context, title: 'Scan barcode or IMEI');
     if (code == null || !mounted) return;
     for (final p in products) {
       if ((p['sku'] as String?)?.trim() == code) {
         _add(p);
+        return;
+      }
+    }
+    // Smart IMEI: a device of a model bought or sold before is recognised
+    if (SmartImei.looksLikeImei(code)) {
+      final m = await SmartImei.match(code);
+      if (!mounted) return;
+      final w = m.warning(selling: false);
+      if (w != null) toast(context, w, error: true);
+      final p = m.product == null ? null : products.where((x) => asInt(x['id']) == asInt(m.product!['id'])).firstOrNull;
+      if (p != null) {
+        _add(p, serial: m.code);
+        HapticFeedback.mediumImpact();
+        toast(context, '${p['name']} added · recognised by IMEI');
         return;
       }
     }
@@ -268,6 +283,10 @@ class _PurchaseFormState extends State<PurchaseForm> {
         toast(context, 'IMEI $code is already on this bill', error: true);
         continue;
       }
+      final sm = await SmartImei.match(code);
+      if (!mounted) break;
+      final w = sm.warning(selling: false);
+      if (w != null) toast(context, '$code · $w', error: true);
       setState(() {
         if (l.serial.text.isEmpty && l.qty == 1 && added == 0) {
           l.serial.text = code;

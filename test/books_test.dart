@@ -4,6 +4,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:hisab/core/books.dart';
 import 'package:hisab/core/db.dart';
 import 'package:hisab/core/money.dart';
+import 'package:hisab/core/imei_smart.dart';
 import 'package:hisab/core/smart.dart';
 import 'package:hisab/print/invoice_pdf.dart' show amountInWords;
 import 'package:hisab/screens/sales_book.dart' show matchSale, matchDoc;
@@ -415,6 +416,31 @@ void main() {
     await Books.deleteParty('supplier', sup);
     expect(await Books.query('SELECT * FROM customers WHERE id = ?', [c]), isEmpty);
     await expectBalanced();
+  });
+
+  test('Smart IMEI: check digit, model from TAC, duplicates', () async {
+    expect(SmartImei.luhn('490154203237518'), isTrue);
+    expect(SmartImei.luhn('490154203237519'), isFalse);
+    final sup = await Books.saveParty('supplier', {'name': 'TAC Supplier'});
+    final p = await Books.saveProduct({'name': 'Vivo Y28 8/128', 'gst_bp': 0, 'price': 1500000});
+    await Books.createPurchase(items: [ItemIn(p, 1, 1200000, '490154203237518')], supplierId: sup);
+    // exact device bought earlier
+    var m = await SmartImei.match('490154203237518');
+    expect(m.how, 'exact');
+    expect(asInt(m.product!['id']), p);
+    expect(m.warning(), isNull);
+    expect(m.warning(selling: false), contains('Already purchased'));
+    // another unit of the same model (same first 8 digits)
+    m = await SmartImei.match('490154209999991');
+    expect(m.how, 'tac');
+    expect(asInt(m.product!['id']), p);
+    // once sold, selling it again is flagged
+    await Books.createSale(items: [ItemIn(p, 1, 1500000, '490154203237518')]);
+    m = await SmartImei.match('490154203237518');
+    expect(m.warning(), contains('Already sold'));
+    // unknown model
+    m = await SmartImei.match('111111111111116');
+    expect(m.product, isNull);
   });
 
   test('demo data loads and balances', () async {
