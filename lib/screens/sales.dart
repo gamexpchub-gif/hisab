@@ -64,7 +64,11 @@ class PurchaseView extends StatelessWidget {
         return PageShell(
           title: 'Purchase ${p['number']}',
           subtitle: '${prettyDate(p['date'] as String)}${p['bill_no'] != null ? ' · Bill ${p['bill_no']}' : ''}',
-          action: RoundIcon(icon: Icons.edit_rounded, onTap: () => open(context, PurchaseForm(editPurchaseId: id))),
+          action: Row(mainAxisSize: MainAxisSize.min, children: [
+            RoundIcon(icon: Icons.edit_rounded, onTap: () => open(context, PurchaseForm(editPurchaseId: id))),
+            const SizedBox(width: 8),
+            RoundIcon(icon: Icons.delete_outline_rounded, onTap: () => deletePurchaseFlow(context, p)),
+          ]),
           children: [
             _DocCard(
               settings: data.settings,
@@ -185,3 +189,14 @@ String invoiceText(Map<String, String> st, Rec s, List<Rec> items) {
   b.writeln('Thank you for shopping with us!');
   return b.toString();
 }
+
+/// Confirms and deletes a purchase bill (its units leave stock).
+Future<void> deletePurchaseFlow(BuildContext context, Rec p, {bool popAfter = true}) => runDelete(
+      context,
+      title: 'Delete ${p['number']}?',
+      message: 'The units of this bill leave stock'
+          '${asInt(p['paid']) > 0 ? ', the ${Money.rs(asInt(p['paid']))} paid comes back to your account' : ''}'
+          ' and the supplier\'s balance is corrected. Not possible if some units were already sold.',
+      action: () => Books.deletePurchase(asInt(p['id'])),
+      popAfter: popAfter,
+    );

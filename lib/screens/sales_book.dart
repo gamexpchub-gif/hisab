@@ -7,7 +7,7 @@ import '../ui/contact.dart';
 import '../ui/photo.dart';
 import '../ui/widgets.dart';
 import 'sale_form.dart';
-import 'sales.dart' show SaleView;
+import 'sales.dart' show SaleView, deleteSaleFlow;
 import 'scanner.dart';
 
 // =============================================================================
@@ -452,6 +452,7 @@ class SaleCard extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(22),
           onTap: () => open(context, SaleView(id: asInt(s['id']))),
+          onLongPress: () => _options(context),
           child: Padding(
             padding: const EdgeInsets.all(12),
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -550,6 +551,44 @@ class SaleCard extends StatelessWidget {
             ]),
           ),
         ),
+      ),
+    );
+  }
+
+  void _options(BuildContext context) {
+    HapticFeedback.mediumImpact();
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (c) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const SizedBox(height: 8),
+          ListTile(title: Text('${s['number']}', style: _j(15, FontWeight.w800, _ink)), subtitle: Text(Money.rs(asInt(s['total'])))),
+          ListTile(
+            leading: const Icon(Icons.receipt_long_rounded),
+            title: const Text('Open invoice'),
+            onTap: () {
+              Navigator.pop(c);
+              open(context, SaleView(id: asInt(s['id'])));
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.edit_rounded),
+            title: const Text('Edit sale'),
+            onTap: () {
+              Navigator.pop(c);
+              open(context, SaleForm(editSaleId: asInt(s['id'])));
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.delete_outline_rounded, color: _red),
+            title: const Text('Delete sale', style: TextStyle(color: _red)),
+            onTap: () {
+              Navigator.pop(c);
+              deleteSaleFlow(context, s, popAfter: false);
+            },
+          ),
+        ]),
       ),
     );
   }

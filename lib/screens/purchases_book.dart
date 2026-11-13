@@ -8,7 +8,7 @@ import '../ui/photo.dart';
 import '../ui/widgets.dart';
 import 'parties.dart';
 import 'purchase_form.dart';
-import 'sales.dart' show PurchaseView;
+import 'sales.dart' show PurchaseView, deletePurchaseFlow;
 import 'sales_book.dart' show matchDoc, SaleMatch;
 import 'scanner.dart';
 
@@ -498,6 +498,7 @@ class PurchaseCard extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(22),
           onTap: () => open(context, PurchaseView(id: asInt(p['id']))),
+          onLongPress: () => _options(context),
           child: Padding(
             padding: const EdgeInsets.all(12),
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -609,6 +610,44 @@ class PurchaseCard extends StatelessWidget {
             ]),
           ),
         ),
+      ),
+    );
+  }
+
+  void _options(BuildContext context) {
+    HapticFeedback.mediumImpact();
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (c) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const SizedBox(height: 8),
+          ListTile(title: Text('${p['number']}', style: _j(15, FontWeight.w800, _ink)), subtitle: Text(Money.rs(asInt(p['total'])))),
+          ListTile(
+            leading: const Icon(Icons.receipt_long_rounded),
+            title: const Text('Open bill'),
+            onTap: () {
+              Navigator.pop(c);
+              open(context, PurchaseView(id: asInt(p['id'])));
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.edit_rounded),
+            title: const Text('Edit purchase'),
+            onTap: () {
+              Navigator.pop(c);
+              open(context, PurchaseForm(editPurchaseId: asInt(p['id'])));
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.delete_outline_rounded, color: _red),
+            title: const Text('Delete purchase', style: TextStyle(color: _red)),
+            onTap: () {
+              Navigator.pop(c);
+              deletePurchaseFlow(context, p, popAfter: false);
+            },
+          ),
+        ]),
       ),
     );
   }

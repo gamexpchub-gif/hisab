@@ -384,6 +384,39 @@ void main() {
     expect(await Books.imeiLookup('99999999'), isEmpty);
   });
 
+  test('delete sale, purchase, return and parties keeps the books right', () async {
+    final sup = await Books.saveParty('supplier', {'name': 'Del Supplier'});
+    final c = await Books.saveParty('customer', {'name': 'Del Customer'}, opening: 50000);
+    final p = await Books.saveProduct({'name': 'Del Phone', 'gst_bp': 0, 'price': 1000000});
+    final cash = asInt((await Books.moneyAccounts())[0]['id']);
+    final pur = await Books.createPurchase(items: [ItemIn(p, 3, 800000)], supplierId: sup, paid: 800000, accountId: cash);
+    final sale = await Books.createSale(items: [ItemIn(p, 1, 1000000)], customerId: c, paid: 400000, accountId: cash);
+    Future<int> st() async => asInt((await Books.query('SELECT stock FROM products WHERE id = ?', [p])).first['stock']);
+    expect(await st(), 2);
+    // party with bills cannot be deleted
+    expect(await Books.partyLinks('customer', c), isNotEmpty);
+    expect(() => Books.deleteParty('customer', c), throwsA(isA<AccountingError>()));
+    // a sale with a return must lose the return first
+    final line = (await Books.returnable(sale)).single;
+    final ret = await Books.createSaleReturn(saleId: sale, qty: {asInt(line.item['id']): 1}, refund: 900000, accountId: cash);
+    expect(await st(), 3);
+    expect(() => Books.deleteSale(sale), throwsA(isA<AccountingError>()));
+    await Books.deleteSaleReturn(ret);
+    expect(await st(), 2);
+    await Books.deleteSale(sale);
+    expect(await st(), 3);
+    expect(await Books.partyBalance('customer', c), 50000);
+    // purchase can be deleted once nothing from it is sold
+    await Books.deletePurchase(pur);
+    expect(await st(), 0);
+    expect(await Books.balance(cash, 'asset'), 0);
+    expect(await Books.partyBalance('supplier', sup), 0);
+    await Books.deleteParty('customer', c);
+    await Books.deleteParty('supplier', sup);
+    expect(await Books.query('SELECT * FROM customers WHERE id = ?', [c]), isEmpty);
+    await expectBalanced();
+  });
+
   test('demo data loads and balances', () async {
     await Books.loadDemo();
     await expectBalanced();

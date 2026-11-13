@@ -163,7 +163,7 @@ class SaleView extends StatelessWidget {
     );
   }
 
-  Widget _round(IconData icon, VoidCallback onTap) => GestureDetector(
+  Widget _round(IconData icon, VoidCallback onTap, {Color color = _ink}) => GestureDetector(
         onTap: onTap,
         child: Container(
           width: 44,
@@ -173,7 +173,7 @@ class SaleView extends StatelessWidget {
             color: Colors.white,
             boxShadow: [BoxShadow(color: Color(0x262A2F7A), blurRadius: 14, offset: Offset(0, 5), spreadRadius: -4)],
           ),
-          child: Icon(icon, color: _ink, size: 21),
+          child: Icon(icon, color: color, size: 21),
         ),
       );
 
@@ -194,6 +194,8 @@ class SaleView extends StatelessWidget {
           Clipboard.setData(ClipboardData(text: invoiceText(d.settings, d.sale, d.items)));
           toast(context, 'Invoice copied');
         }),
+        const SizedBox(width: 8),
+        _round(Icons.delete_outline_rounded, () => deleteSaleFlow(context, d.sale), color: _red),
       ]);
 
   Widget _hero(BuildContext context, _ViewData d) {
@@ -466,4 +468,24 @@ class SaleView extends StatelessWidget {
             ),
         ]),
       );
+}
+
+/// Confirms and deletes a sale (stock back, payments and journal removed).
+Future<void> deleteSaleFlow(BuildContext context, Rec sale, {bool popAfter = true}) async {
+  final paid = asInt(sale['paid']);
+  final r = await Books.query('SELECT COUNT(*) AS c FROM sale_returns WHERE sale_id = ?', [sale['id']]);
+  if (!context.mounted) return;
+  if (asInt(r.first['c']) > 0) {
+    toast(context, 'This sale has returns — delete the returns first (Settings → Sale return)', error: true);
+    return;
+  }
+  await runDelete(
+    context,
+    title: 'Delete ${sale['number']}?',
+    message: 'The items go back to stock'
+        '${paid > 0 ? ', the ${Money.rs(paid)} received is taken out of your accounts' : ''}'
+        ' and the customer\'s due is corrected. This cannot be undone.',
+    action: () => Books.deleteSale(asInt(sale['id'])),
+    popAfter: popAfter,
+  );
 }

@@ -1,6 +1,7 @@
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../core/books.dart';
 import '../core/money.dart';
@@ -641,4 +642,42 @@ class _CubePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _CubePainter old) => old.color != color || old.gradient != gradient;
+}
+
+/// Red "are you sure" dialog for deletes. Returns true when confirmed.
+Future<bool> confirmDelete(BuildContext context, String title, String message) async {
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (c) => AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
+      icon: const Icon(Icons.delete_forever_rounded, color: Color(0xFFDC4545), size: 42),
+      title: Text(title, textAlign: TextAlign.center),
+      content: Text(message, textAlign: TextAlign.center),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: const Color(0xFFDC4545)),
+          onPressed: () => Navigator.pop(c, true),
+          child: const Text('Delete'),
+        ),
+      ],
+    ),
+  );
+  return ok == true;
+}
+
+/// Runs a delete with confirmation; shows the result and pops the page when
+/// [popAfter] is set.
+Future<void> runDelete(BuildContext context,
+    {required String title, required String message, required Future<void> Function() action, bool popAfter = true}) async {
+  if (!await confirmDelete(context, title, message)) return;
+  try {
+    await action();
+    if (!context.mounted) return;
+    HapticFeedback.mediumImpact();
+    toast(context, 'Deleted');
+    if (popAfter) Navigator.of(context).pop();
+  } catch (e) {
+    if (context.mounted) toast(context, '$e', error: true);
+  }
 }

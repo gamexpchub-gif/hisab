@@ -300,6 +300,88 @@ class Books {
     return b.first['number'] as String;
   }
 
+  // ------------------------------------------------------------ deletes
+  /// Deletes a sale: stock comes back, its payments and journal entry are
+  /// removed. Not allowed while the sale has returns (delete those first).
+  static Future<void> deleteSale(int saleId) {
+    return _write((x) async {
+      final number = await _unpostSale(x, saleId);
+      await x.update('emi_plans', {'sale_id': null}, where: 'sale_id = ?', whereArgs: [saleId]);
+      await x.delete('sales', where: 'id = ?', whereArgs: [saleId]);
+      await _log(x, 'sale', 'Sale deleted', number);
+    });
+  }
+
+  /// Deletes a purchase bill and takes its units out of stock. Refused when
+  /// some of those units were already sold.
+  static Future<void> deletePurchase(int purchaseId) {
+    return _write((x) async {
+      final number = await _unpostPurchase(x, purchaseId);
+      await x.delete('purchases', where: 'id = ?', whereArgs: [purchaseId]);
+      await _log(x, 'purchase', 'Purchase deleted', number);
+    });
+  }
+
+  /// Deletes a sale return: the refund and return charge are reversed and
+  /// restocked units leave stock again.
+  static Future<void> deleteSaleReturn(int returnId) {
+    return _write((x) async {
+      final r = await x.query('sale_returns', where: 'id = ?', whereArgs: [returnId]);
+      if (r.isEmpty) throw AccountingError('Return not found');
+      final items = await x.query('sale_return_items', where: 'return_id = ?', whereArgs: [returnId]);
+      if (asInt(r.first['restock']) == 1) {
+        for (final i in items) {
+          final p = await _product(x, asInt(i['product_id']));
+          if (asInt(p['stock']) < asInt(i['qty'])) {
+            throw AccountingError('${p['name']} from this return is already sold again — it can no longer be deleted');
+          }
+          await x.rawUpdate('UPDATE products SET stock = stock - ? WHERE id = ?', [i['qty'], i['product_id']]);
+        }
+      }
+      await x.delete('sale_return_items', where: 'return_id = ?', whereArgs: [returnId]);
+      await _unpost(x, 'sale_return', returnId);
+      await x.delete('sale_returns', where: 'id = ?', whereArgs: [returnId]);
+      await _log(x, 'sale', 'Sale return deleted', r.first['number'] as String?);
+    });
+  }
+
+  /// What still points at a customer / supplier (bills, payments, lends,
+  /// EMI plans). Empty means the party can be deleted.
+  static Future<List<String>> partyLinks(String type, int id) async {
+    final isC = type == 'customer';
+    Future<int> n(String sql, List<Object?> a) async => asInt((await query(sql, a)).first['c']);
+    final out = <String>[];
+    final bills = await n('SELECT COUNT(*) AS c FROM ${isC ? 'sales WHERE customer_id' : 'purchases WHERE supplier_id'} = ?', [id]);
+    if (bills > 0) out.add('$bills ${isC ? 'sale' : 'purchase'}${bills == 1 ? '' : 's'}');
+    final pays = await n('SELECT COUNT(*) AS c FROM payments WHERE party_type = ? AND party_id = ?', [type, id]);
+    if (pays > 0) out.add('$pays payment${pays == 1 ? '' : 's'}');
+    final lends = await n('SELECT COUNT(*) AS c FROM cash_lends WHERE party_type = ? AND party_id = ?', [type, id]);
+    if (lends > 0) out.add('$lends cash entr${lends == 1 ? 'y' : 'ies'}');
+    if (isC) {
+      final emi = await n('SELECT COUNT(*) AS c FROM emi_plans WHERE customer_id = ?', [id]);
+      if (emi > 0) out.add('$emi EMI plan${emi == 1 ? '' : 's'}');
+    }
+    return out;
+  }
+
+  /// Deletes a customer / supplier that has no bills, payments, cash entries
+  /// or EMI plans (its opening balance and due dates go with it).
+  static Future<void> deleteParty(String type, int id) async {
+    final links = await partyLinks(type, id);
+    if (links.isNotEmpty) {
+      throw AccountingError('This ${type == 'customer' ? 'customer' : 'supplier'} has ${links.join(', ')} — delete those first');
+    }
+    await _write((x) async {
+      final table = type == 'customer' ? 'customers' : 'suppliers';
+      final p = await x.query(table, where: 'id = ?', whereArgs: [id]);
+      if (p.isEmpty) throw AccountingError('Not found');
+      await _unpost(x, 'opening_$type', id);
+      await x.delete('party_dues', where: 'party_type = ? AND party_id = ?', whereArgs: [type, id]);
+      await x.delete(table, where: 'id = ?', whereArgs: [id]);
+      await _log(x, type == 'customer' ? 'receipt' : 'payment', '${type == 'customer' ? 'Customer' : 'Supplier'} deleted: ${p.first['name']}');
+    });
+  }
+
   static Future<int> updateSale(int saleId,
           {required List<ItemIn> items,
           int? customerId,

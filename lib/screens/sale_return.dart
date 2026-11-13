@@ -260,6 +260,28 @@ class _ReturnCard extends StatelessWidget {
                   Text('− ${Money.rs(asInt(r['refund']))}', style: _j(15, FontWeight.w800, _red)),
                   Text('refund', style: _j(10.5, FontWeight.w600, _muted)),
                 ]),
+                PopupMenuButton<String>(
+                  padding: EdgeInsets.zero,
+                  icon: const Icon(Icons.more_vert_rounded, color: _muted),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  onSelected: (v) {
+                    if (v == 'open') open(context, SaleView(id: asInt(r['sale_id'])));
+                    if (v == 'delete') {
+                      runDelete(
+                        context,
+                        title: 'Delete ${r['number']}?',
+                        message: 'The refund of ${Money.rs(asInt(r['refund']))} and the return charge are reversed'
+                            '${restock ? ' and the units leave stock again' : ''}. The sale counts as not returned.',
+                        action: () => Books.deleteSaleReturn(asInt(r['id'])),
+                        popAfter: false,
+                      );
+                    }
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(value: 'open', child: Text('Open invoice')),
+                    PopupMenuItem(value: 'delete', child: Text('Delete return', style: TextStyle(color: _red))),
+                  ],
+                ),
               ]),
               const SizedBox(height: 10),
               Container(

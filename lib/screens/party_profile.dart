@@ -154,7 +154,34 @@ class _PartyViewState extends State<PartyView> {
           ]),
         ),
         _round(Icons.edit_rounded, () => open(context, PartyForm(type: widget.type, party: d.party))),
+        const SizedBox(width: 8),
+        _round(Icons.delete_outline_rounded, () => _delete(d)),
       ]);
+
+  Future<void> _delete(_ProfileData d) async {
+    final links = await Books.partyLinks(widget.type, widget.id);
+    if (!mounted) return;
+    if (links.isNotEmpty) {
+      await showDialog<void>(
+        context: context,
+        builder: (c) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
+          icon: const Icon(Icons.block_rounded, color: _red, size: 40),
+          title: Text("Can't delete ${d.party['name']}"),
+          content: Text('This ${isC ? 'customer' : 'supplier'} still has ${links.join(', ')}. '
+              'Delete those first, or keep the ${isC ? 'customer' : 'supplier'} so your books stay correct.'),
+          actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('OK'))],
+        ),
+      );
+      return;
+    }
+    await runDelete(
+      context,
+      title: 'Delete ${d.party['name']}?',
+      message: 'The ${isC ? 'customer' : 'supplier'}, their opening balance and due dates will be removed. This cannot be undone.',
+      action: () => Books.deleteParty(widget.type, widget.id),
+    );
+  }
 
   Widget _round(IconData icon, VoidCallback onTap) => GestureDetector(
         onTap: onTap,
