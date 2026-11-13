@@ -550,16 +550,16 @@ void main() {
 
   test('Analytics: totals, buckets, comparison and AI lines', () async {
     for (final p in ['today', 'week', 'month', 'year']) {
-      final a = await Analytics.load(p);
+      final a = await ProAnalytics.load(p);
       expect(a.buckets, isNotEmpty);
       expect(a.buckets.fold<int>(0, (s, b) => s + b.sales), a.sales);
       expect(a.ai, isNotEmpty);
     }
-    final w = await Analytics.load('week');
+    final w = await ProAnalytics.load('week');
     expect(w.buckets.length, 7);
-    final t = await Analytics.load('today');
+    final t = await ProAnalytics.load('today');
     expect(t.buckets.length, 8);
-    final c = await Analytics.load('custom', from: '2025-01-01', to: '2025-12-31');
+    final c = await ProAnalytics.load('custom', from: '2025-01-01', to: '2025-12-31');
     expect(c.buckets.length, 12);
   });
 

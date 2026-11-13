@@ -340,10 +340,12 @@ class _LoanFormState extends State<LoanForm> {
   void initState() {
     super.initState();
     Books.moneyAccounts().then((a) {
-      if (mounted) setState(() {
-        accounts = a;
-        account = a.isEmpty ? null : asInt(a.first['id']);
-      });
+      if (mounted) {
+        setState(() {
+          accounts = a;
+          account = a.isEmpty ? null : asInt(a.first['id']);
+        });
+      }
     });
   }
 
@@ -867,7 +869,7 @@ class _PaySheetState extends State<_PaySheet> {
   late final (int, int) s = Loans.suggest(widget.l);
   late final principal = TextEditingController(text: Money.edit(s.$1));
   late final interest = TextEditingController(text: s.$2 == 0 ? '' : Money.edit(s.$2));
-  int? account = asInt(widget.l['account_id']);
+  late int? account = asInt(widget.l['account_id']);
   List<Rec> accounts = [];
   String date = ymd(DateTime.now());
   bool saving = false;

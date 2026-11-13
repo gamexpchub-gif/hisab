@@ -45,9 +45,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Live<Analytics>(
+    return Live<ProAnalytics>(
       key: ValueKey('$period$from$to'),
-      load: () => Analytics.load(period, from: from, to: to),
+      load: () => ProAnalytics.load(period, from: from, to: to),
       builder: (context, a) => PageShell(
         title: 'Pro Analytics',
         subtitle: '${prettyDate(a.from)}${a.from == a.to ? '' : ' – ${prettyDate(a.to)}'} · AI analysis',
@@ -103,7 +103,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   // ------------------------------------------------------------ period chips
-  Widget _periods(Analytics a) {
+  Widget _periods(ProAnalytics a) {
     Widget chip(String id, String l) {
       final on = period == id;
       return GestureDetector(
@@ -154,7 +154,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   // ------------------------------------------------------------ hero
-  Widget _hero(Analytics a) {
+  Widget _hero(ProAnalytics a) {
     final ch = Books.pctChange(a.sales, a.pSales);
     return Container(
       padding: const EdgeInsets.all(18),
@@ -205,7 +205,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       );
 
   // ------------------------------------------------------------ KPI grid
-  Widget _kpis(Analytics a) {
+  Widget _kpis(ProAnalytics a) {
     final items = [
       ('Purchase', a.purchases, Books.pctChange(a.purchases, a.pPurchases), Icons.shopping_bag_rounded, _cPurch, false),
       ('Gross lav', a.gross, Books.pctChange(a.gross, a.pGross), Icons.trending_up_rounded, _cProfit, false),
@@ -285,7 +285,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         ]),
       );
 
-  Widget _chart(Analytics a) {
+  Widget _chart(ProAnalytics a) {
     final labels = a.buckets.map((b) => b.label).toList();
     final series = switch (chart) {
       'profit' => [
@@ -313,7 +313,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         ],
       ]);
 
-  Widget _aiCard(Analytics a) => Container(
+  Widget _aiCard(ProAnalytics a) => Container(
         margin: const EdgeInsets.only(top: 12),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
@@ -336,7 +336,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         ]),
       );
 
-  Widget _moneyGrid(Analytics a) {
+  Widget _moneyGrid(ProAnalytics a) {
     final rows = [
       ('Cash', a.cash, Icons.payments_rounded, _green),
       ('Bank', a.bank, Icons.account_balance_rounded, _cColl),
@@ -472,7 +472,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     ]);
   }
 
-  Widget _pl(Analytics a) {
+  Widget _pl(ProAnalytics a) {
     Widget row(String l, int v, {bool bold = false, Color? c}) => Padding(
           padding: const EdgeInsets.symmetric(vertical: 4),
           child: Row(children: [

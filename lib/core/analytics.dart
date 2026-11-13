@@ -18,7 +18,7 @@ class Share {
 
 /// Everything the analytics page shows for a period, with the same-length
 /// period before it for comparison, and an AI reading of the numbers.
-class Analytics {
+class ProAnalytics {
   final String period, from, to, prevFrom, prevTo;
   final List<Bucket> buckets = [];
   // period totals (and previous period)
@@ -29,7 +29,7 @@ class Analytics {
   int receivable = 0, payable = 0, cash = 0, bank = 0, upi = 0, card = 0, loans = 0, capital = 0, stock = 0;
   final List<Share> topProducts = [], categories = [], expenseHeads = [], topCustomers = [], topSuppliers = [], payModes = [], debtors = [];
   final List<String> ai = [];
-  Analytics(this.period, this.from, this.to, this.prevFrom, this.prevTo);
+  ProAnalytics(this.period, this.from, this.to, this.prevFrom, this.prevTo);
 
   int get avgBill => bills == 0 ? 0 : sales ~/ bills;
   int get margin => sales == 0 ? 0 : (gross * 100 / sales).round();
@@ -67,9 +67,9 @@ class Analytics {
 
   static Future<int> _v(String sql, List<Object?> a) async => asInt((await Books.query(sql, a)).first['v']);
 
-  static Future<Analytics> load(String period, {String? from, String? to}) async {
+  static Future<ProAnalytics> load(String period, {String? from, String? to}) async {
     final r = range(period, from: from, to: to);
-    final a = Analytics(period, r[0], r[1], r[2], r[3]);
+    final a = ProAnalytics(period, r[0], r[1], r[2], r[3]);
     final f = DateTime.parse(a.from), e = DateTime.parse(a.to);
     final days = e.difference(f).inDays + 1;
 
