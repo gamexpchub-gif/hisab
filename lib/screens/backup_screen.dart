@@ -1,12 +1,11 @@
 import 'dart:io';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:share_plus/share_plus.dart';
 
 import '../core/backup.dart';
 import '../core/books.dart';
+import '../core/native_files.dart';
 import '../core/money.dart';
 import '../ui/widgets.dart';
 
@@ -101,7 +100,7 @@ class _BackupScreenState extends State<BackupScreen> {
   }
 
   Future<void> _share(File f) async {
-    await Share.shareXFiles([XFile(f.path, mimeType: 'application/zip')],
+    await NativeFiles.share(f,
         subject: 'GameX Hisab backup', text: 'GameX Hisab backup — keep this file safe (Google Drive / email).');
   }
 
@@ -155,10 +154,9 @@ class _BackupScreenState extends State<BackupScreen> {
 
   Future<void> _pickAndRestore() async {
     try {
-      final r = await FilePicker.platform.pickFiles(type: FileType.any);
-      final path = r?.files.single.path;
-      if (path == null) return;
-      await _restore(File(path));
+      final f = await NativeFiles.pick();
+      if (f == null) return;
+      await _restore(f);
     } catch (e) {
       if (mounted) toast(context, '$e', error: true);
     }

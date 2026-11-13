@@ -32,6 +32,9 @@ if [ -f android/app/build.gradle.kts ]; then
   if ! grep -q 'desugar_jdk_libs' "$G"; then
     printf '\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n' >> "$G"
   fi
+  if ! grep -q 'androidx.core:core' "$G"; then
+    printf '\ndependencies {\n    implementation("androidx.core:core:1.13.1")\n}\n' >> "$G"
+  fi
 elif [ -f android/app/build.gradle ]; then
   G=android/app/build.gradle
   if ! grep -q 'coreLibraryDesugaringEnabled' "$G"; then
@@ -40,14 +43,24 @@ elif [ -f android/app/build.gradle ]; then
   if ! grep -q 'desugar_jdk_libs' "$G"; then
     printf "\ndependencies {\n    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'\n}\n" >> "$G"
   fi
+  if ! grep -q 'androidx.core:core' "$G"; then
+    printf "\ndependencies {\n    implementation 'androidx.core:core:1.13.1'\n}\n" >> "$G"
+  fi
 fi
 # App lock (local_auth): biometric permission and a FragmentActivity.
 if ! grep -q 'android.permission.USE_BIOMETRIC' "$MANIFEST"; then
   sed -i 's|<application|<uses-permission android:name="android.permission.USE_BIOMETRIC"/>\n    <application|' "$MANIFEST"
 fi
-for MA in $(find android/app/src/main -name 'MainActivity.kt' -o -name 'MainActivity.java'); do
-  sed -i 's/io\.flutter\.embedding\.android\.FlutterActivity\b/io.flutter.embedding.android.FlutterFragmentActivity/; s/\bFlutterActivity()/FlutterFragmentActivity()/; s/extends FlutterActivity\b/extends FlutterFragmentActivity/' "$MA"
-done
+# MainActivity: FlutterFragmentActivity (fingerprint) + the file share / pick
+# channel used by Backup & Restore.
+MA=$(find android/app/src/main -name 'MainActivity.kt' | head -1)
+if [ -n "$MA" ]; then
+  PKG=$(grep -m1 '^package ' "$MA" | sed 's/^package //')
+  sed "s/__PACKAGE__/$PKG/" tool/android/MainActivity.kt > "$MA"
+fi
+if ! grep -q 'androidx.core.content.FileProvider' "$MANIFEST"; then
+  sed -i 's|</application>|    <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.files" android:exported="false" android:grantUriPermissions="true">\n            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/gamex_file_paths" />\n        </provider>\n    </application>|' "$MANIFEST"
+fi
 
 # Gradle defaults to an 8 GB heap, which gets the build killed on machines
 # with less RAM ("Gradle build daemon disappeared unexpectedly").
