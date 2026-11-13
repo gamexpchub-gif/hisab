@@ -1,8 +1,19 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+import '../core/imei_smart.dart';
+
 /// Full-screen barcode / QR / IMEI scanner. Pops with the scanned text.
+///
+/// - The camera fills the whole screen; the scan frame sits in the middle.
+/// - HD camera stream so the thin, dense IMEI barcodes on boxes are read.
+/// - Pinch or slide to zoom, tap to focus, torch, front/back camera.
+/// - A box usually has several barcodes (IMEI 1, IMEI 2, EAN): when more
+///   than one is seen, each is listed with its type so the right one is
+///   picked; a single code is taken at once.
 class BarcodeScannerScreen extends StatefulWidget {
   final String title;
   const BarcodeScannerScreen({super.key, this.title = 'Scan barcode'});
@@ -16,38 +27,69 @@ class BarcodeScannerScreen extends StatefulWidget {
 
 class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> with SingleTickerProviderStateMixin {
   final controller = MobileScannerController(
-    detectionSpeed: DetectionSpeed.noDuplicates,
-    formats: const [
-      BarcodeFormat.ean13,
-      BarcodeFormat.ean8,
-      BarcodeFormat.upcA,
-      BarcodeFormat.upcE,
-      BarcodeFormat.code128,
-      BarcodeFormat.code39,
-      BarcodeFormat.code93,
-      BarcodeFormat.codabar,
-      BarcodeFormat.itf,
-      BarcodeFormat.qrCode,
-      BarcodeFormat.dataMatrix,
-    ],
+    detectionSpeed: DetectionSpeed.normal,
+    detectionTimeoutMs: 350,
+    cameraResolution: const Size(1920, 1080),
+    autoZoom: true,
   );
   late final AnimationController laser = AnimationController(vsync: this, duration: const Duration(milliseconds: 1600))
     ..repeat(reverse: true);
   bool torch = false;
   bool done = false;
+  double zoom = 0;
+  double _pinchStart = 0;
+
+  /// Codes seen recently: value → (format, last seen).
+  final seen = <String, (BarcodeFormat, DateTime)>{};
+  Timer? settle;
 
   @override
   void dispose() {
+    settle?.cancel();
     laser.dispose();
     controller.dispose();
     super.dispose();
   }
 
-  void _found(String code) {
+  void _finish(String code) {
     if (done || code.trim().isEmpty) return;
     done = true;
     HapticFeedback.heavyImpact();
     Navigator.of(context).pop(code.trim());
+  }
+
+  void _detect(BarcodeCapture capture) {
+    if (done) return;
+    final now = DateTime.now();
+    var added = false;
+    for (final b in capture.barcodes) {
+      final v = (b.rawValue ?? '').trim();
+      if (v.isEmpty) continue;
+      if (!seen.containsKey(v)) added = true;
+      seen[v] = (b.format, now);
+    }
+    if (!added) return;
+    HapticFeedback.selectionClick();
+    // wait a moment so every barcode on a box is collected, then decide
+    settle?.cancel();
+    settle = Timer(const Duration(milliseconds: 650), () {
+      if (!mounted || done) return;
+      if (seen.length == 1) {
+        _finish(seen.keys.first);
+      } else {
+        setState(() {});
+      }
+    });
+    setState(() {});
+  }
+
+  String _kind(String v, BarcodeFormat f) {
+    final c = SmartImei.clean(v);
+    if (SmartImei.looksLikeImei(c)) return SmartImei.luhn(c) ? 'IMEI ✓' : 'IMEI ?';
+    if (f == BarcodeFormat.qrCode) return 'QR';
+    if (f == BarcodeFormat.ean13 || f == BarcodeFormat.ean8 || f == BarcodeFormat.upcA || f == BarcodeFormat.upcE) return 'Box barcode';
+    if (RegExp(r'^[A-Z0-9]{8,14}$').hasMatch(v)) return 'Serial / SN';
+    return 'Code';
   }
 
   Future<void> _manual() async {
@@ -55,11 +97,12 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> with Single
     final r = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Enter code manually'),
+        title: const Text('Type the code'),
         content: TextField(
           controller: c,
           autofocus: true,
-          decoration: const InputDecoration(hintText: 'Barcode / SKU / IMEI'),
+          keyboardType: TextInputType.visiblePassword,
+          decoration: const InputDecoration(hintText: 'Barcode / SKU / IMEI (*#06#)'),
           onSubmitted: (v) => Navigator.pop(ctx, v),
         ),
         actions: [
@@ -68,106 +111,192 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> with Single
         ],
       ),
     );
-    if (r != null) _found(r);
+    if (r != null) _finish(r);
+  }
+
+  void _setZoom(double v) {
+    zoom = v.clamp(0.0, 1.0).toDouble();
+    controller.setZoomScale(zoom);
+    setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.sizeOf(context);
-    final frameW = size.width * .78;
-    final frameH = frameW * .62;
-    final frame = Rect.fromCenter(center: Offset(size.width / 2, size.height / 2), width: frameW, height: frameH);
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(children: [
-        Positioned.fill(
-          child: MobileScanner(
-            controller: controller,
-            fit: BoxFit.cover,
-            // only codes inside the frame in the middle are read
-            scanWindow: frame,
-            onDetect: (capture) {
-              for (final b in capture.barcodes) {
-                final v = b.rawValue;
-                if (v != null && v.isNotEmpty) {
-                  _found(v);
-                  break;
-                }
-              }
+    final mq = MediaQuery.of(context);
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light,
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: LayoutBuilder(builder: (context, box) {
+          final w = box.maxWidth, h = box.maxHeight;
+          final frameW = w * .82;
+          final frameH = frameW * .6;
+          final frame = Rect.fromCenter(center: Offset(w / 2, h * .47), width: frameW, height: frameH);
+          final codes = seen.entries.toList()..sort((a, b) => b.value.$2.compareTo(a.value.$2));
+          return GestureDetector(
+            onScaleStart: (_) => _pinchStart = zoom,
+            onScaleUpdate: (d) {
+              if (d.pointerCount < 2) return;
+              _setZoom(_pinchStart + (d.scale - 1) * .5);
             },
-          ),
-        ),
-        // dimmed surroundings + glowing frame corners
-        Positioned.fill(child: CustomPaint(painter: _FramePainter(frame))),
-        // laser line
-        AnimatedBuilder(
-          animation: laser,
-          builder: (context, _) => Positioned(
-            left: frame.left + 14,
-            width: frame.width - 28,
-            top: frame.top + 10 + (frame.height - 20) * Curves.easeInOut.transform(laser.value),
-            height: 3,
-            child: Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(2),
-                gradient: const LinearGradient(colors: [Color(0x007B5CFF), Color(0xFF9F7BFF), Color(0x007B5CFF)]),
-                boxShadow: const [BoxShadow(color: Color(0xCC7B5CFF), blurRadius: 12, spreadRadius: 1)],
+            child: Stack(children: [
+              // the camera fills the whole screen
+              SizedBox(
+                width: w,
+                height: h,
+                child: MobileScanner(
+                  controller: controller,
+                  fit: BoxFit.cover,
+                  tapToFocus: true,
+                  onDetect: _detect,
+                ),
               ),
-            ),
-          ),
-        ),
-        SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(children: [
-              _glassBtn(Icons.arrow_back_rounded, () => Navigator.of(context).pop()),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(widget.title,
-                    style: const TextStyle(fontFamily: 'Jakarta', color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700)),
+              Positioned.fill(child: IgnorePointer(child: CustomPaint(painter: _FramePainter(frame, seen.isNotEmpty)))),
+              // laser line inside the frame
+              AnimatedBuilder(
+                animation: laser,
+                builder: (context, _) => Positioned(
+                  left: frame.left + 16,
+                  width: frame.width - 32,
+                  top: frame.top + 12 + (frame.height - 24) * Curves.easeInOut.transform(laser.value),
+                  height: 2.5,
+                  child: IgnorePointer(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(2),
+                        gradient: LinearGradient(colors: [
+                          const Color(0x007B5CFF),
+                          seen.isNotEmpty ? const Color(0xFF34D399) : const Color(0xFF9F7BFF),
+                          const Color(0x007B5CFF),
+                        ]),
+                        boxShadow: [
+                          BoxShadow(
+                              color: seen.isNotEmpty ? const Color(0xCC34D399) : const Color(0xCC7B5CFF), blurRadius: 12, spreadRadius: 1),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
               ),
-              _glassBtn(torch ? Icons.flash_on_rounded : Icons.flash_off_rounded, () {
-                controller.toggleTorch();
-                setState(() => torch = !torch);
-              }),
-              const SizedBox(width: 10),
-              _glassBtn(Icons.cameraswitch_rounded, () => controller.switchCamera()),
+              // top bar
+              Positioned(
+                left: 0,
+                right: 0,
+                top: 0,
+                child: Container(
+                  padding: EdgeInsets.fromLTRB(14, mq.padding.top + 10, 14, 14),
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                        begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xAA000000), Color(0x00000000)]),
+                  ),
+                  child: Row(children: [
+                    _glassBtn(Icons.arrow_back_rounded, () => Navigator.of(context).pop()),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(widget.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontFamily: 'Jakarta', color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700)),
+                    ),
+                    _glassBtn(torch ? Icons.flash_on_rounded : Icons.flash_off_rounded, () {
+                      controller.toggleTorch();
+                      setState(() => torch = !torch);
+                    }),
+                    const SizedBox(width: 10),
+                    _glassBtn(Icons.cameraswitch_rounded, () => controller.switchCamera()),
+                  ]),
+                ),
+              ),
+              // hint under the frame
+              Positioned(
+                left: 24,
+                right: 24,
+                top: frame.bottom + 18,
+                child: IgnorePointer(
+                  child: Text(
+                    seen.isEmpty
+                        ? 'Hold the barcode or IMEI label inside the frame · tap to focus · pinch to zoom'
+                        : codes.length > 1
+                            ? '${codes.length} codes found — tap the one you need'
+                            : 'Reading…',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontFamily: 'Jakarta', color: Color(0xEEFFFFFF), fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+              // bottom: zoom, found codes, type instead
+              Positioned(
+                left: 16,
+                right: 16,
+                bottom: mq.padding.bottom + 18,
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  if (codes.length > 1)
+                    Container(
+                      constraints: BoxConstraints(maxHeight: h * .3),
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(color: const Color(0xEE14164A), borderRadius: BorderRadius.circular(20)),
+                      child: ListView(shrinkWrap: true, padding: EdgeInsets.zero, children: [
+                        for (final e in codes)
+                          ListTile(
+                            dense: true,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                            leading: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: _kind(e.key, e.value.$1).startsWith('IMEI') ? const Color(0xFF34D399) : const Color(0xFF7B5CFF),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(_kind(e.key, e.value.$1),
+                                  style: const TextStyle(fontFamily: 'Jakarta', color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800)),
+                            ),
+                            title: Text(e.key,
+                                style: const TextStyle(
+                                    fontFamily: 'Jakarta', color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: .5)),
+                            trailing: const Icon(Icons.check_circle_rounded, color: Colors.white),
+                            onTap: () => _finish(e.key),
+                          ),
+                      ]),
+                    ),
+                  Row(children: [
+                    const Icon(Icons.zoom_out_rounded, color: Colors.white70, size: 20),
+                    Expanded(
+                      child: SliderTheme(
+                        data: SliderTheme.of(context).copyWith(
+                          activeTrackColor: const Color(0xFF9F7BFF),
+                          inactiveTrackColor: const Color(0x55FFFFFF),
+                          thumbColor: Colors.white,
+                          trackHeight: 3,
+                        ),
+                        child: Slider(value: zoom, onChanged: _setZoom),
+                      ),
+                    ),
+                    const Icon(Icons.zoom_in_rounded, color: Colors.white70, size: 20),
+                  ]),
+                  const SizedBox(height: 8),
+                  GestureDetector(
+                    onTap: _manual,
+                    child: Container(
+                      height: 52,
+                      decoration: BoxDecoration(
+                        color: const Color(0x33FFFFFF),
+                        borderRadius: BorderRadius.circular(26),
+                        border: Border.all(color: const Color(0x66FFFFFF)),
+                      ),
+                      child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                        Icon(Icons.keyboard_rounded, color: Colors.white),
+                        SizedBox(width: 10),
+                        Text('Type code instead',
+                            style: TextStyle(fontFamily: 'Jakarta', color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700)),
+                      ]),
+                    ),
+                  ),
+                ]),
+              ),
             ]),
-          ),
-        ),
-        Positioned(
-          left: 0,
-          right: 0,
-          top: frame.bottom + 22,
-          child: const Text(
-            'Point the camera at a barcode, QR code or IMEI label',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontFamily: 'Jakarta', color: Color(0xDDFFFFFF), fontSize: 13.5, fontWeight: FontWeight.w500),
-          ),
-        ),
-        Positioned(
-          left: 24,
-          right: 24,
-          bottom: MediaQuery.of(context).padding.bottom + 30,
-          child: GestureDetector(
-            onTap: _manual,
-            child: Container(
-              height: 54,
-              decoration: BoxDecoration(
-                color: const Color(0x33FFFFFF),
-                borderRadius: BorderRadius.circular(27),
-                border: Border.all(color: const Color(0x66FFFFFF)),
-              ),
-              child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                Icon(Icons.keyboard_rounded, color: Colors.white),
-                SizedBox(width: 10),
-                Text('Type code instead',
-                    style: TextStyle(fontFamily: 'Jakarta', color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700)),
-              ]),
-            ),
-          ),
-        ),
-      ]),
+          );
+        }),
+      ),
     );
   }
 
@@ -188,7 +317,8 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> with Single
 
 class _FramePainter extends CustomPainter {
   final Rect frame;
-  _FramePainter(this.frame);
+  final bool found;
+  _FramePainter(this.frame, this.found);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -197,9 +327,9 @@ class _FramePainter extends CustomPainter {
       ..fillType = PathFillType.evenOdd
       ..addRect(Offset.zero & size)
       ..addRRect(rr);
-    canvas.drawPath(dim, Paint()..color = const Color(0x99000000));
+    canvas.drawPath(dim, Paint()..color = const Color(0x8C000000));
     final corner = Paint()
-      ..color = const Color(0xFF9F7BFF)
+      ..color = found ? const Color(0xFF34D399) : const Color(0xFF9F7BFF)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 5
       ..strokeCap = StrokeCap.round;
@@ -224,5 +354,5 @@ class _FramePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _FramePainter old) => old.frame != frame;
+  bool shouldRepaint(covariant _FramePainter old) => old.frame != frame || old.found != found;
 }
