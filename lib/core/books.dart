@@ -6,6 +6,8 @@ import 'package:sqflite/sqflite.dart';
 import 'db.dart';
 import 'money.dart';
 
+part 'loans.dart';
+
 /// Double-entry accounting engine.
 ///
 /// Every business document (sale, purchase, receipt, payment, expense,
@@ -2067,6 +2069,40 @@ class Books {
         product: 'MacBook Air M1',
         price: 6099800,
         downPayment: 4999800);
+    // money brought in: a bank loan (2 EMIs paid), a family loan, partner capital
+    final sbiLoan = await Loans.create(
+        kind: 'loan',
+        source: 'bank',
+        lender: 'SBI Business Loan',
+        principal: 30000000,
+        accountId: bank,
+        rateBp: 1100,
+        months: 24,
+        date: ymd(addMonths(now, -3)),
+        purpose: 'Stock for festive season');
+    for (var i = 0; i < 2; i++) {
+      final l = (await Loans.get(sbiLoan))!;
+      final (pr, intr) = Loans.suggest(l);
+      await Loans.pay(sbiLoan, principal: pr, interest: intr, accountId: bank, date: l['next_due'] as String);
+    }
+    await Loans.create(
+        kind: 'loan',
+        source: 'family',
+        lender: 'Mama (Uncle)',
+        phone: '9800011122',
+        principal: 5000000,
+        accountId: cash,
+        months: 10,
+        interestType: 'none',
+        date: ymd(now.subtract(const Duration(days: 20))));
+    await Loans.create(
+        kind: 'investment',
+        source: 'investor',
+        lender: 'Partner — Arif',
+        principal: 20000000,
+        accountId: upi,
+        date: ymd(addMonths(now, -5)),
+        purpose: 'Shop interior & laptops');
   }
 }
 

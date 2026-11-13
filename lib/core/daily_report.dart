@@ -57,6 +57,13 @@ class DailyReport {
       r.tomorrow.add({'name': e['name'], 'amount': asInt(e['left']), 'what': 'EMI', 'late': '${e['due_date']}'.compareTo(t) < 0});
     }
 
+    for (final l in await Loans.list()) {
+      final next = l['next_due'] as String?;
+      if (next != null && next.compareTo(tm) <= 0) {
+        r.tomorrow.add({'name': l['lender'], 'amount': asInt(l['next_emi']), 'what': 'loan EMI dite hobe', 'late': next.compareTo(t) < 0});
+      }
+    }
+
     // reorder: what sells and will run out within a week
     final since = ymd(d.subtract(const Duration(days: 30)));
     for (final p in await Books.query(

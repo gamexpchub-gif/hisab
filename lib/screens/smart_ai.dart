@@ -10,6 +10,7 @@ import '../ui/contact.dart';
 import '../ui/widgets.dart';
 import 'daily_report_screen.dart';
 import 'emi.dart';
+import 'loans.dart';
 import 'party_profile.dart';
 import 'products.dart';
 import 'sale_view.dart';
@@ -23,6 +24,7 @@ TextStyle _j(double s, FontWeight w, Color c) => TextStyle(fontFamily: 'Jakarta'
   final icon = switch (i.kind) {
     'due' || 'collect' => Icons.currency_rupee_rounded,
     'emi' => Icons.calendar_month_rounded,
+    'loan' => Icons.request_quote_rounded,
     'warranty' => Icons.verified_user_rounded,
     'stock' => Icons.inventory_2_rounded,
     'dead' => Icons.hourglass_bottom_rounded,
@@ -52,6 +54,8 @@ void openInsight(BuildContext context, Insight i) {
       open(context, ProductView(id: id));
     case 'emi' when id != null:
       open(context, EmiPlanView(id: id));
+    case 'loan' when id != null:
+      open(context, LoanView(id: id));
     case 'sale' when id != null:
       open(context, SaleView(id: id));
     case 'low':

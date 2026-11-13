@@ -34,6 +34,8 @@ import 'package:hisab/core/export_book.dart';
 import 'package:hisab/screens/gst_export.dart';
 import 'package:hisab/screens/smart_ai.dart';
 import 'package:hisab/screens/daily_report_screen.dart';
+import 'package:hisab/screens/analytics.dart';
+import 'package:hisab/screens/loans.dart';
 import 'package:hisab/ui/theme.dart';
 
 Future<void> _assetFont(String family, String asset) async {
@@ -103,7 +105,7 @@ void main() {
     });
   }
 
-  for (final (name, index) in [('home', 0), ('dashboard', 1), ('products', 2), ('menu', 3), ('add_product', -1), ('new_sale', -2), ('new_purchase', -3), ('ledgers', -4), ('customer_profile', -5), ('expenses', -6), ('customers', -7), ('sales', -8), ('bank', -9), ('add_card', -10), ('purchases', -11), ('supplier_profile', -12), ('sale_returns', -13), ('sale_return_form', -14), ('invoice_view', -15), ('sale_complete', -16), ('emi', -17), ('emi_plan', -18), ('imei', -19), ('backup', -20), ('security', -21), ('lock', -22), ('login', -23), ('account', -24), ('smart_ai', -25), ('gst_report', -26), ('excel_export', -27), ('daily_report', -28)]) {
+  for (final (name, index) in [('home', 0), ('dashboard', 1), ('products', 2), ('menu', 3), ('add_product', -1), ('new_sale', -2), ('new_purchase', -3), ('ledgers', -4), ('customer_profile', -5), ('expenses', -6), ('customers', -7), ('sales', -8), ('bank', -9), ('add_card', -10), ('purchases', -11), ('supplier_profile', -12), ('sale_returns', -13), ('sale_return_form', -14), ('invoice_view', -15), ('sale_complete', -16), ('emi', -17), ('emi_plan', -18), ('imei', -19), ('backup', -20), ('security', -21), ('lock', -22), ('login', -23), ('account', -24), ('smart_ai', -25), ('gst_report', -26), ('excel_export', -27), ('daily_report', -28), ('analytics', -29), ('loans', -30), ('loan_view', -31), ('loan_form', -32)]) {
     testWidgets(name, (t) async {
       t.view.physicalSize = const Size(1080, 2340);
       t.view.devicePixelRatio = 2.75;
@@ -170,6 +172,14 @@ void main() {
                                                                                                                       ? const ExportScreen()
                                                                                                                       : index == -28
                                                                                                                           ? const DailyReportScreen()
+                                                                                                                          : index == -29
+                                                                                                                              ? const AnalyticsScreen()
+                                                                                                                              : index == -30
+                                                                                                                                  ? const LoansScreen()
+                                                                                                                                  : index == -31
+                                                                                                                                      ? const LoanView(id: 1)
+                                                                                                                                      : index == -32
+                                                                                                                                          ? const LoanForm()
                                                                   : const Scaffold(
                                                       backgroundColor: Color(0xFF8A8FAD),
                                                       body: Align(alignment: Alignment.bottomCenter, child: AccountSheet()),

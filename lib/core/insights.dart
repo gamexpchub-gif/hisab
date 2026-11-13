@@ -103,6 +103,22 @@ class Insights {
       ));
     }
 
+    // 2b · our own loan EMIs due (bank / person)
+    for (final l in await Loans.list()) {
+      final next = l['next_due'] as String?;
+      if (next == null || next.compareTo(ymd(t0.add(const Duration(days: 2)))) > 0) continue;
+      final over = next.compareTo(today) < 0;
+      out.add(Insight(
+        over || next == today ? 'urgent' : 'warn',
+        'loan',
+        'Loan EMI ${Money.rs(asInt(l['next_emi']))} — ${l['lender']}',
+        '${over ? 'Late! ' : ''}Tarikh ${prettyDate(next)} · account-e taka rakhun',
+        amount: asInt(l['next_emi']),
+        target: 'loan',
+        targetId: asInt(l['id']),
+      ));
+    }
+
     // 3 · old dues with no promised date
     final bal = await Books.partyBalances('customer');
     final dated = {for (final d in await Books.dues(partyType: null)) if (d['party_type'] == 'customer') asInt(d['party_id'])};

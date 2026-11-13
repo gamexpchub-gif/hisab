@@ -26,6 +26,8 @@ import 'sales.dart';
 import 'search.dart';
 import 'settings.dart';
 import 'smart_ai.dart';
+import 'analytics.dart';
+import 'loans.dart';
 import 'daily_report_screen.dart';
 
 const _bg = Color(0xFFF6F7FC);
@@ -96,6 +98,8 @@ class _MenuScreenState extends State<MenuScreen> {
       ('Smart AI', [
         _Item('Smart Business AI', 'Aaj ki korben: baki, EMI, stock, lav — auto suggestion', Icons.auto_awesome_rounded,
             const [Color(0xFF7B3FF2), Color(0xFF1B1F6B)], () => go(const SmartAiScreen())),
+        _Item('Pro Analytics', 'Chart: bikri, lav, baki, cash, bank, loan — aaj/mash/bochor', Icons.query_stats_rounded,
+            const [Color(0xFFF472B6), Color(0xFF7B3FF2)], () => go(const AnalyticsScreen())),
         _Item('Daily AI Report', 'Rat-e auto report: bikri, lav, kal ke debe, order list', Icons.summarize_rounded,
             const [Color(0xFF6AA5FF), Color(0xFF1A47C8)], () => go(const DailyReportScreen())),
       ]),
@@ -108,6 +112,8 @@ class _MenuScreenState extends State<MenuScreen> {
             const [Color(0xFFFF7A7A), Color(0xFFDC4545)], () => go(const ExpensesScreen())),
         _Item('Cash & Bank', 'Cash, SBI, UPI · transfers', Icons.account_balance_rounded,
             const [Color(0xFFFF5C7A), Color(0xFFD81E4A)], () => go(const BankScreen()), badge: Money.compact(d.money)),
+        _Item('Loans & Investment', 'Bank/person loan, partner capital, EMI, sud', Icons.request_quote_rounded,
+            const [Color(0xFF0F1240), Color(0xFF6B35EE)], () => go(const LoansScreen())),
         _Item('EMI / Kisti', 'Finance & shop instalments, reminders', Icons.calendar_month_rounded,
             const [Color(0xFF2DD4BF), Color(0xFF0E7490)], () => go(const EmiScreen())),
       ]),

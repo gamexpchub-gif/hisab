@@ -7,6 +7,7 @@ import 'package:hisab/core/money.dart';
 import 'package:hisab/core/imei_smart.dart';
 import 'package:hisab/core/insights.dart';
 import 'package:hisab/core/daily_report.dart';
+import 'package:hisab/core/analytics.dart';
 import 'package:hisab/core/gst_report.dart';
 import 'package:hisab/core/xlsx.dart';
 import 'package:hisab/core/smart.dart';
@@ -512,6 +513,54 @@ void main() {
     expect(r.reorder.any((x) => x['name'] == 'Report Phone'), isTrue);
     expect(r.text('GameX'), contains('Report Customer'));
     expect(r.headline(), contains('Bikri'));
+  });
+
+  test('Loans: EMI maths, receive, repay with interest, close, delete', () async {
+    // 1,00,000 at 12% for 12 months (reducing) → 8,885 EMI
+    expect(Loans.emi(10000000, 1200, 12, 'reducing'), 888488);
+    expect(Loans.emi(1200000, 0, 12, 'none'), 100000);
+    expect(Loans.emi(10000000, 1200, 12, 'flat'), 933333);
+    final cash = asInt((await Books.moneyAccounts()).first['id']);
+    final before = await Books.balance(cash, 'asset');
+    final id = await Loans.create(kind: 'loan', source: 'bank', lender: 'Test Bank', principal: 10000000, accountId: cash, rateBp: 1200, months: 12);
+    expect(await Books.balance(cash, 'asset') - before, 10000000);
+    var l = (await Loans.get(id))!;
+    final s = Loans.schedule(l);
+    expect(s.length, 12);
+    expect(s.last.balance, 0);
+    expect(s.fold<int>(0, (a, r) => a + r.principal), 10000000);
+    final (pr, it) = Loans.suggest(l);
+    expect(it, 100000); // 1% of 1,00,000 for the first month
+    expect(pr + it, 888488);
+    await Loans.pay(id, principal: pr, interest: it, accountId: cash);
+    l = (await Loans.get(id))!;
+    expect(asInt(l['outstanding']), 10000000 - pr);
+    expect(asInt(l['paid_n']), 1);
+    expect(await Books.balanceByCode('6100'), greaterThanOrEqualTo(it));
+    await expectBalanced();
+    await Loans.pay(id, principal: asInt(l['outstanding']), accountId: cash);
+    expect((await Loans.get(id))!['status'], 'closed');
+    final inv = await Loans.create(kind: 'investment', source: 'owner', lender: 'Owner', principal: 5000000, accountId: cash);
+    expect(await Books.balanceByCode('3000'), greaterThanOrEqualTo(5000000));
+    await Loans.delete(inv);
+    await Loans.delete(id);
+    expect(await Books.balance(cash, 'asset'), before);
+    await expectBalanced();
+  });
+
+  test('Analytics: totals, buckets, comparison and AI lines', () async {
+    for (final p in ['today', 'week', 'month', 'year']) {
+      final a = await Analytics.load(p);
+      expect(a.buckets, isNotEmpty);
+      expect(a.buckets.fold<int>(0, (s, b) => s + b.sales), a.sales);
+      expect(a.ai, isNotEmpty);
+    }
+    final w = await Analytics.load('week');
+    expect(w.buckets.length, 7);
+    final t = await Analytics.load('today');
+    expect(t.buckets.length, 8);
+    final c = await Analytics.load('custom', from: '2025-01-01', to: '2025-12-31');
+    expect(c.buckets.length, 12);
   });
 
   test('demo data loads and balances', () async {

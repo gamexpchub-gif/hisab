@@ -31,7 +31,7 @@ class AppDb {
     );
   }
 
-  static const schemaVersion = 11;
+  static const schemaVersion = 12;
 
   static Future<void> upgrade(Database db, int from, int to) async {
     if (from < 2) {
@@ -84,6 +84,12 @@ class AppDb {
     if (from < 11) {
       await db.execute(_imeiModels);
     }
+    if (from < 12) {
+      await db.execute(_loans);
+      await db.execute(_loanPayments);
+      await db.execute("INSERT OR IGNORE INTO accounts (code, name, type, kind, is_system) VALUES ('2500', 'Loans & Borrowings', 'liability', NULL, 1)");
+      await db.execute("INSERT OR IGNORE INTO accounts (code, name, type, kind, is_system) VALUES ('6100', 'Loan Interest', 'expense', NULL, 1)");
+    }
   }
 
   static Future<void> configure(Database db) async {
@@ -131,6 +137,20 @@ class AppDb {
   /// Phone models learned from IMEIs (first 8 digits = TAC).
   static const _imeiModels = '''CREATE TABLE imei_models (
       tac TEXT PRIMARY KEY, product_id INTEGER, name TEXT, brand TEXT, source TEXT, updated_at TEXT)''';
+
+  /// Money brought into the business: loans (bank, NBFC, person) and
+  /// investments (owner / partner capital).
+  static const _loans = '''CREATE TABLE loans (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, number TEXT NOT NULL UNIQUE, kind TEXT NOT NULL, source TEXT NOT NULL,
+      lender TEXT NOT NULL, phone TEXT, principal INTEGER NOT NULL, rate_bp INTEGER NOT NULL DEFAULT 0,
+      interest_type TEXT NOT NULL DEFAULT 'reducing', months INTEGER NOT NULL DEFAULT 0, emi INTEGER NOT NULL DEFAULT 0,
+      start_date TEXT NOT NULL, first_due TEXT, account_id INTEGER REFERENCES accounts(id), purpose TEXT, note TEXT,
+      status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL)''';
+
+  static const _loanPayments = '''CREATE TABLE loan_payments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, loan_id INTEGER NOT NULL REFERENCES loans(id), number TEXT NOT NULL UNIQUE,
+      date TEXT NOT NULL, principal INTEGER NOT NULL, interest INTEGER NOT NULL DEFAULT 0,
+      account_id INTEGER NOT NULL REFERENCES accounts(id), note TEXT, created_at TEXT NOT NULL)''';
 
   static const _cashLends = '''CREATE TABLE cash_lends (
       id INTEGER PRIMARY KEY AUTOINCREMENT, number TEXT NOT NULL UNIQUE, kind TEXT NOT NULL,
@@ -220,6 +240,8 @@ class AppDb {
     _emiPlans,
     _emiInstallments,
     _imeiModels,
+    _loans,
+    _loanPayments,
     '''CREATE TABLE transfers (
       id INTEGER PRIMARY KEY AUTOINCREMENT, number TEXT NOT NULL UNIQUE, date TEXT NOT NULL,
       from_id INTEGER NOT NULL REFERENCES accounts(id), to_id INTEGER NOT NULL REFERENCES accounts(id),
@@ -239,6 +261,7 @@ class AppDb {
     ['1300', 'GST Input Credit', 'asset', null],
     ['2000', 'Accounts Payable', 'liability', null],
     ['2100', 'GST Output Payable', 'liability', null],
+    ['2500', 'Loans & Borrowings', 'liability', null],
     ['3000', 'Owner Capital', 'equity', null],
     ['3100', 'Owner Drawings', 'equity', null],
     ['3900', 'Opening Balance Equity', 'equity', null],
@@ -247,6 +270,7 @@ class AppDb {
     ['4200', 'Other Income', 'income', null],
     ['4300', 'Sale Return Charges', 'income', null],
     ['5000', 'Cost of Goods Sold', 'expense', null],
+    ['6100', 'Loan Interest', 'expense', null],
     ['6000', 'Shop Rent', 'expense', 'expense'],
     ['6010', 'Electricity Bill', 'expense', 'expense'],
     ['6020', 'Staff Salary', 'expense', 'expense'],
