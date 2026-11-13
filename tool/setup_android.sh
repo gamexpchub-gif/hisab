@@ -41,6 +41,14 @@ elif [ -f android/app/build.gradle ]; then
     printf "\ndependencies {\n    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'\n}\n" >> "$G"
   fi
 fi
+# App lock (local_auth): biometric permission and a FragmentActivity.
+if ! grep -q 'android.permission.USE_BIOMETRIC' "$MANIFEST"; then
+  sed -i 's|<application|<uses-permission android:name="android.permission.USE_BIOMETRIC"/>\n    <application|' "$MANIFEST"
+fi
+for MA in $(find android/app/src/main -name 'MainActivity.kt' -o -name 'MainActivity.java'); do
+  sed -i 's/io\.flutter\.embedding\.android\.FlutterActivity\b/io.flutter.embedding.android.FlutterFragmentActivity/; s/\bFlutterActivity()/FlutterFragmentActivity()/; s/extends FlutterActivity\b/extends FlutterFragmentActivity/' "$MA"
+done
+
 # Gradle defaults to an 8 GB heap, which gets the build killed on machines
 # with less RAM ("Gradle build daemon disappeared unexpectedly").
 PROPS=android/gradle.properties

@@ -5,7 +5,9 @@ import '../ui/theme.dart';
 import '../ui/widgets.dart';
 import 'forms.dart';
 import '../ui/photo.dart';
+import 'backup_screen.dart';
 import 'sale_return.dart';
+import 'security.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -87,6 +89,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: Text('Profile photo\nTap to change', style: TextStyle(color: C.muted, height: 1.4)),
           ),
           const Icon(Icons.photo_camera_rounded, color: C.purple2),
+        ]),
+      ),
+      CardBox(
+        onTap: () => open(context, const BackupScreen()),
+        child: Row(children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              gradient: const LinearGradient(colors: [Color(0xFF34D399), Color(0xFF0F8C58)]),
+            ),
+            child: const Icon(Icons.cloud_upload_rounded, color: Colors.white),
+          ),
+          const SizedBox(width: 14),
+          const Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Backup & Restore', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+              SizedBox(height: 2),
+              Text('Database + photos · Google Drive · daily auto backup', style: TextStyle(color: C.muted, fontSize: 12.5)),
+            ]),
+          ),
+          const Icon(Icons.chevron_right_rounded, color: C.muted),
+        ]),
+      ),
+      CardBox(
+        onTap: () => open(context, const SecurityScreen()),
+        child: Row(children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              gradient: const LinearGradient(colors: [Color(0xFF6B35EE), Color(0xFF1B2163)]),
+            ),
+            child: const Icon(Icons.lock_rounded, color: Colors.white),
+          ),
+          const SizedBox(width: 14),
+          const Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Security', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+              SizedBox(height: 2),
+              Text('App lock with PIN and fingerprint', style: TextStyle(color: C.muted, fontSize: 12.5)),
+            ]),
+          ),
+          const Icon(Icons.chevron_right_rounded, color: C.muted),
         ]),
       ),
       CardBox(

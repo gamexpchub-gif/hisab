@@ -10,6 +10,16 @@ class AppDb {
   /// Tests inject an in-memory database here.
   static void useDatabase(Database db) => _db = db;
 
+  /// Path of the database file on the phone.
+  static Future<String> path() async => p.join(await getDatabasesPath(), 'hisab.db');
+
+  /// Closes the database (backup / restore); the next query reopens it.
+  static Future<void> close() async {
+    final d = _db;
+    _db = null;
+    await d?.close();
+  }
+
   static Future<Database> _open() async {
     final dir = await getDatabasesPath();
     return openDatabase(
@@ -21,7 +31,7 @@ class AppDb {
     );
   }
 
-  static const schemaVersion = 9;
+  static const schemaVersion = 10;
 
   static Future<void> upgrade(Database db, int from, int to) async {
     if (from < 2) {
@@ -67,6 +77,10 @@ class AppDb {
     if (from < 9) {
       await db.execute('ALTER TABLE sale_items ADD COLUMN opp_id TEXT');
     }
+    if (from < 10) {
+      await db.execute(_emiPlans);
+      await db.execute(_emiInstallments);
+    }
   }
 
   static Future<void> configure(Database db) async {
@@ -98,6 +112,18 @@ class AppDb {
       sale_item_id INTEGER NOT NULL REFERENCES sale_items(id), product_id INTEGER NOT NULL,
       name TEXT NOT NULL, qty INTEGER NOT NULL, value INTEGER NOT NULL, tax INTEGER NOT NULL,
       unit_cost INTEGER NOT NULL, serial TEXT)''';
+
+  static const _emiPlans = '''CREATE TABLE emi_plans (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id INTEGER REFERENCES sales(id),
+      customer_id INTEGER NOT NULL REFERENCES customers(id), kind TEXT NOT NULL, financer TEXT,
+      opp_id TEXT, loan_no TEXT, product TEXT, imei TEXT, price INTEGER NOT NULL DEFAULT 0,
+      down_payment INTEGER NOT NULL DEFAULT 0, emi INTEGER NOT NULL, months INTEGER NOT NULL,
+      start_date TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', note TEXT, created_at TEXT NOT NULL)''';
+
+  static const _emiInstallments = '''CREATE TABLE emi_installments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, plan_id INTEGER NOT NULL REFERENCES emi_plans(id),
+      n INTEGER NOT NULL, due_date TEXT NOT NULL, amount INTEGER NOT NULL,
+      paid_amount INTEGER NOT NULL DEFAULT 0, paid_on TEXT, payment_id INTEGER, account_id INTEGER)''';
 
   static const _cashLends = '''CREATE TABLE cash_lends (
       id INTEGER PRIMARY KEY AUTOINCREMENT, number TEXT NOT NULL UNIQUE, kind TEXT NOT NULL,
@@ -184,6 +210,8 @@ class AppDb {
     _partyDues,
     _saleReturns,
     _saleReturnItems,
+    _emiPlans,
+    _emiInstallments,
     '''CREATE TABLE transfers (
       id INTEGER PRIMARY KEY AUTOINCREMENT, number TEXT NOT NULL UNIQUE, date TEXT NOT NULL,
       from_id INTEGER NOT NULL REFERENCES accounts(id), to_id INTEGER NOT NULL REFERENCES accounts(id),

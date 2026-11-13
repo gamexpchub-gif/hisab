@@ -9,6 +9,7 @@ import '../ui/photo.dart';
 import '../ui/widgets.dart';
 import 'parties.dart';
 import 'products.dart' show ProductThumb;
+import 'emi.dart';
 import 'sale_form.dart';
 import 'sale_return.dart';
 import 'sales.dart' show invoiceText;
@@ -115,6 +116,20 @@ class SaleView extends StatelessWidget {
                   ),
                 ],
                 const SizedBox(height: 14),
+                if (d.sale['customer_id'] != null) ...[
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(50),
+                      foregroundColor: const Color(0xFF0E7490),
+                      side: const BorderSide(color: Color(0xFFB5E4E0)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
+                    ),
+                    onPressed: () => open(context, EmiForm(saleId: id)),
+                    icon: const Icon(Icons.calendar_month_rounded),
+                    label: Text('Create EMI / kisti plan', style: _j(13.5, FontWeight.w800, const Color(0xFF0E7490))),
+                  ),
+                  const SizedBox(height: 10),
+                ],
                 if (d.returns.isEmpty) ...[
                   OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(

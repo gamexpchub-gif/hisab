@@ -337,6 +337,53 @@ void main() {
     await expectBalanced();
   });
 
+  test('EMI: schedule, shop collections post receipts, plan closes when paid', () async {
+    expect(ymd(addMonths(DateTime(2026, 1, 31), 1)), '2026-02-28');
+    final c = await Books.saveParty('customer', {'name': 'EMI Buyer'});
+    final p = await Books.saveProduct({'name': 'Vivo Y28', 'gst_bp': 0, 'price': 1500000}, openingQty: 1, openingCost: 1200000);
+    final cash = asInt((await Books.moneyAccounts())[0]['id']);
+    final sale = await Books.createSale(items: [ItemIn(p, 1, 1500000, '861111222233334')], customerId: c, paid: 300000, accountId: cash);
+    final plan = await Books.createEmiPlan(
+        customerId: c, kind: 'shop', emi: 400000, months: 3, startDate: '2026-12-05', saleId: sale, price: 1500000, downPayment: 300000);
+    final inst = await Books.emiInstallments(plan);
+    expect(inst.map((r) => r['due_date']).toList(), ['2026-12-05', '2027-01-05', '2027-02-05']);
+    var row = (await Books.emiPlans()).single;
+    expect(row['next_due'], '2026-12-05');
+    expect(asInt(row['paid_n']), 0);
+    for (final r in inst) {
+      await Books.payEmi(asInt(r['id']), amount: 400000, accountId: cash);
+    }
+    row = (await Books.emiPlans()).single;
+    expect(row['status'], 'closed');
+    expect(asInt(row['paid_sum']), 1200000);
+    expect(await Books.partyBalance('customer', c), 0);
+    expect(() => Books.deleteEmiPlan(plan), throwsA(isA<AccountingError>()));
+    final f = await Books.createEmiPlan(customerId: c, kind: 'finance', financer: 'Bajaj Finserv', emi: 250000, months: 6, startDate: '2026-12-10');
+    final fi = (await Books.emiInstallments(f)).first;
+    await Books.payEmi(asInt(fi['id']), amount: 250000);
+    expect(await Books.partyBalance('customer', c), 0); // finance plans never touch the books
+    await expectBalanced();
+  });
+
+  test('IMEI history: purchase, sale, return and warranty', () async {
+    final sup = await Books.saveParty('supplier', {'name': 'IMEI Supplier'});
+    final c = await Books.saveParty('customer', {'name': 'IMEI Customer', 'phone': '9000000000'});
+    final p = await Books.saveProduct({'name': 'Redmi 13C', 'gst_bp': 0, 'price': 900000, 'warranty_months': 12});
+    await Books.createPurchase(items: [ItemIn(p, 1, 800000, '865432100001111')], supplierId: sup, billNo: 'B-77');
+    final sale = await Books.createSale(items: [ItemIn(p, 1, 900000, '865432100001111')], customerId: c, paid: 900000);
+    var r = (await Books.imeiLookup('00001111')).single;
+    expect(r.status, 'sold');
+    expect(r.purchase!['party'], 'IMEI Supplier');
+    expect(r.sale!['party'], 'IMEI Customer');
+    expect(r.warrantyMonths, 12);
+    expect(r.warrantyDaysLeft, greaterThan(300));
+    final line = (await Books.returnable(sale)).single;
+    await Books.createSaleReturn(saleId: sale, qty: {asInt(line.item['id']): 1}, refund: 900000, accountId: asInt((await Books.moneyAccounts())[0]['id']));
+    r = (await Books.imeiLookup('865432100001111')).single;
+    expect(r.status, 'returned');
+    expect(await Books.imeiLookup('99999999'), isEmpty);
+  });
+
   test('demo data loads and balances', () async {
     await Books.loadDemo();
     await expectBalanced();

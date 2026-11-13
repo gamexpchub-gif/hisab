@@ -56,6 +56,9 @@ class Books {
   /// Bumped after every write; screens listen and reload.
   static final changes = ValueNotifier<int>(0);
 
+  /// Tells every open screen to reload (e.g. after a restore).
+  static void notifyChanged() => changes.value++;
+
   static Future<Database> get _db => AppDb.instance;
 
   static String _now() => DateTime.now().toIso8601String();
@@ -415,8 +418,20 @@ class Books {
     String? date,
     String? reference,
     String? note,
-  }) {
-    return _write((x) async {
+  }) =>
+      _write((x) => _payment(x, kind: kind, partyId: partyId, amount: amount, accountId: accountId, date: date, reference: reference, note: note));
+
+  static Future<int> _payment(
+    DatabaseExecutor x, {
+    required String kind,
+    required int partyId,
+    required int amount,
+    required int accountId,
+    String? date,
+    String? reference,
+    String? note,
+  }) async {
+    {
       if (amount <= 0) throw AccountingError('Amount must be greater than zero');
       final isReceipt = kind == 'receipt';
       final partyType = isReceipt ? 'customer' : 'supplier';
@@ -444,7 +459,186 @@ class Books {
       await post(x, kind, id, when, msg, lines);
       await _log(x, kind, msg, number, amount);
       return id;
+    }
+  }
+
+  // ------------------------------------------------------------ EMI / kisti
+  /// Creates an EMI plan with [months] monthly instalments of [emi], the
+  /// first due on [startDate]. kind 'shop' = the customer pays the shop in
+  /// kisti (collections post receipts); 'finance' = a finance company
+  /// (Bajaj, HDB…) — tracked for follow-up only.
+  static Future<int> createEmiPlan({
+    required int customerId,
+    required String kind,
+    required int emi,
+    required int months,
+    required String startDate,
+    int? saleId,
+    String? financer,
+    String? oppId,
+    String? loanNo,
+    String? product,
+    String? imei,
+    int price = 0,
+    int downPayment = 0,
+    String? note,
+  }) {
+    return _write((x) async {
+      if (months < 1 || months > 120) throw AccountingError('Tenure must be 1–120 months');
+      if (emi <= 0) throw AccountingError('EMI amount must be more than zero');
+      final c = await x.query('customers', where: 'id = ?', whereArgs: [customerId]);
+      if (c.isEmpty) throw AccountingError('Select a customer');
+      String? t(String? v) => (v ?? '').trim().isEmpty ? null : v!.trim();
+      final id = await x.insert('emi_plans', {
+        'sale_id': saleId,
+        'customer_id': customerId,
+        'kind': kind == 'finance' ? 'finance' : 'shop',
+        'financer': t(financer),
+        'opp_id': t(oppId),
+        'loan_no': t(loanNo),
+        'product': t(product),
+        'imei': t(imei),
+        'price': price,
+        'down_payment': downPayment,
+        'emi': emi,
+        'months': months,
+        'start_date': startDate,
+        'status': 'active',
+        'note': t(note),
+        'created_at': _now(),
+      });
+      final start = DateTime.parse(startDate);
+      for (var n = 1; n <= months; n++) {
+        await x.insert('emi_installments', {
+          'plan_id': id,
+          'n': n,
+          'due_date': ymd(addMonths(start, n - 1)),
+          'amount': emi,
+        });
+      }
+      await _log(x, 'sale', 'EMI plan for ${c.first['name']} · $months × ${Money.rs(emi)}', null, emi * months);
+      return id;
     });
+  }
+
+  /// Plans with customer details and progress: paid_n, paid_sum, next_due,
+  /// next_amount, overdue_n, overdue_sum.
+  static Future<List<Rec>> emiPlans() {
+    final today = ymd(DateTime.now());
+    return query(
+        'SELECT e.*, c.name AS customer, c.phone AS phone, c.photo AS photo, '
+        '(SELECT COUNT(*) FROM emi_installments i WHERE i.plan_id = e.id AND i.paid_amount >= i.amount) AS paid_n, '
+        '(SELECT IFNULL(SUM(i.paid_amount), 0) FROM emi_installments i WHERE i.plan_id = e.id) AS paid_sum, '
+        '(SELECT MIN(i.due_date) FROM emi_installments i WHERE i.plan_id = e.id AND i.paid_amount < i.amount) AS next_due, '
+        '(SELECT i.amount - i.paid_amount FROM emi_installments i WHERE i.plan_id = e.id AND i.paid_amount < i.amount ORDER BY i.n LIMIT 1) AS next_amount, '
+        '(SELECT i.id FROM emi_installments i WHERE i.plan_id = e.id AND i.paid_amount < i.amount ORDER BY i.n LIMIT 1) AS next_id, '
+        '(SELECT COUNT(*) FROM emi_installments i WHERE i.plan_id = e.id AND i.paid_amount < i.amount AND i.due_date < ?) AS overdue_n, '
+        '(SELECT IFNULL(SUM(i.amount - i.paid_amount), 0) FROM emi_installments i WHERE i.plan_id = e.id AND i.paid_amount < i.amount AND i.due_date < ?) AS overdue_sum '
+        'FROM emi_plans e JOIN customers c ON c.id = e.customer_id ORDER BY e.status, next_due, e.id DESC',
+        [today, today]);
+  }
+
+  static Future<List<Rec>> emiInstallments(int planId) =>
+      query('SELECT i.*, a.name AS account FROM emi_installments i LEFT JOIN accounts a ON a.id = i.account_id '
+          'WHERE i.plan_id = ? ORDER BY i.n', [planId]);
+
+  /// Records an instalment collection. For a shop plan the money is received
+  /// against the customer's due (a receipt); for a finance plan it is only
+  /// marked as paid. Closes the plan when every instalment is paid.
+  static Future<void> payEmi(int installmentId, {required int amount, int? accountId, String? date}) {
+    return _write((x) async {
+      final r = await x.rawQuery(
+          'SELECT i.*, e.kind, e.customer_id, e.months FROM emi_installments i JOIN emi_plans e ON e.id = i.plan_id WHERE i.id = ?',
+          [installmentId]);
+      if (r.isEmpty) throw AccountingError('Instalment not found');
+      final i = r.first;
+      final left = asInt(i['amount']) - asInt(i['paid_amount']);
+      if (amount <= 0 || amount > left) throw AccountingError('Amount must be between ₹1 and ${Money.rs(left)}');
+      final when = date ?? ymd(DateTime.now());
+      int? paymentId;
+      if (i['kind'] == 'shop') {
+        if (accountId == null) throw AccountingError('Choose the account that received the money');
+        paymentId = await _payment(x,
+            kind: 'receipt',
+            partyId: asInt(i['customer_id']),
+            amount: amount,
+            accountId: accountId,
+            date: when,
+            reference: 'EMI ${i['n']}/${i['months']}');
+      }
+      await x.rawUpdate(
+          'UPDATE emi_installments SET paid_amount = paid_amount + ?, paid_on = ?, payment_id = IFNULL(?, payment_id), account_id = IFNULL(?, account_id) WHERE id = ?',
+          [amount, when, paymentId, accountId, installmentId]);
+      final open = await x.rawQuery(
+          'SELECT COUNT(*) AS c FROM emi_installments WHERE plan_id = ? AND paid_amount < amount', [i['plan_id']]);
+      if (asInt(open.first['c']) == 0) {
+        await x.update('emi_plans', {'status': 'closed'}, where: 'id = ?', whereArgs: [i['plan_id']]);
+      }
+    });
+  }
+
+  static Future<void> setEmiStatus(int planId, String status) =>
+      _write((x) => x.update('emi_plans', {'status': status}, where: 'id = ?', whereArgs: [planId]));
+
+  /// Deletes a plan that has no collected instalments.
+  static Future<void> deleteEmiPlan(int planId) {
+    return _write((x) async {
+      final paid = await x.rawQuery('SELECT IFNULL(SUM(paid_amount), 0) AS v FROM emi_installments WHERE plan_id = ?', [planId]);
+      if (asInt(paid.first['v']) > 0) throw AccountingError('Instalments were collected — close the plan instead');
+      await x.delete('emi_installments', where: 'plan_id = ?', whereArgs: [planId]);
+      await x.delete('emi_plans', where: 'id = ?', whereArgs: [planId]);
+    });
+  }
+
+  // ------------------------------------------------------------ IMEI / warranty
+  /// Everything known about devices whose IMEI / serial contains [q]:
+  /// where it came from, who bought it, returns, and the warranty.
+  static Future<List<ImeiRecord>> imeiLookup(String q, {int limit = 30}) async {
+    final like = '%${q.trim()}%';
+    final out = <String, ImeiRecord>{};
+    ImeiRecord rec(String serial) => out.putIfAbsent(serial, () => ImeiRecord(serial));
+    for (final r in await query(
+        'SELECT i.serial, i.name, i.product_id, i.rate, b.id AS doc_id, b.number, b.bill_no, b.date, s.id AS party_id, s.name AS party '
+        'FROM purchase_items i JOIN purchases b ON b.id = i.purchase_id JOIN suppliers s ON s.id = b.supplier_id '
+        'WHERE i.serial LIKE ? ORDER BY b.date DESC LIMIT ?',
+        [like, limit])) {
+      rec('${r['serial']}').purchase ??= r;
+    }
+    for (final r in await query(
+        'SELECT i.serial, i.name, i.product_id, i.rate, i.opp_id, i.id AS item_id, s.id AS doc_id, s.number, s.date, '
+        's.customer_id AS party_id, c.name AS party, c.phone AS phone, c.photo AS photo, '
+        'IFNULL(p.warranty_months, 0) AS warranty_months FROM sale_items i JOIN sales s ON s.id = i.sale_id '
+        'LEFT JOIN customers c ON c.id = s.customer_id LEFT JOIN products p ON p.id = i.product_id '
+        'WHERE i.serial LIKE ? ORDER BY s.date DESC, s.id DESC LIMIT ?',
+        [like, limit])) {
+      rec('${r['serial']}').sale ??= r;
+    }
+    for (final r in await query(
+        'SELECT i.serial, r.id AS doc_id, r.number, r.date, r.reason FROM sale_return_items i '
+        'JOIN sale_returns r ON r.id = i.return_id WHERE i.serial LIKE ? ORDER BY r.date DESC LIMIT ?',
+        [like, limit])) {
+      rec('${r['serial']}').returned ??= r;
+    }
+    final list = out.values.toList()..sort((a, b) => b.lastDate.compareTo(a.lastDate));
+    return list.take(limit).toList();
+  }
+
+  /// Sold devices whose warranty ends within [days] days (or ended in the last week).
+  static Future<List<ImeiRecord>> warrantyEndingSoon({int days = 30}) async {
+    final rows = await query(
+        'SELECT i.serial, i.name, i.product_id, i.rate, i.opp_id, i.id AS item_id, s.id AS doc_id, s.number, s.date, '
+        's.customer_id AS party_id, c.name AS party, c.phone AS phone, c.photo AS photo, p.warranty_months '
+        'FROM sale_items i JOIN sales s ON s.id = i.sale_id LEFT JOIN customers c ON c.id = s.customer_id '
+        'JOIN products p ON p.id = i.product_id WHERE i.serial IS NOT NULL AND i.serial <> \'\' AND p.warranty_months > 0 '
+        'ORDER BY s.date DESC LIMIT 300');
+    final out = <ImeiRecord>[];
+    for (final r in rows) {
+      final rec = ImeiRecord('${r['serial']}')..sale = r;
+      final left = rec.warrantyDaysLeft;
+      if (left != null && left <= days && left >= -7) out.add(rec);
+    }
+    out.sort((a, b) => a.warrantyDaysLeft!.compareTo(b.warrantyDaysLeft!));
+    return out;
   }
 
   // ------------------------------------------------------------ expenses & transfers
@@ -1762,6 +1956,32 @@ class Books {
     final worth = charger.unitValue;
     await createSaleReturn(
         saleId: priyaSale, qty: {asInt(charger.item['id']): 1}, refund: worth - worth ~/ 10, reason: 'Changed mind');
+    // warranty on devices, and EMI plans
+    await (await _db).rawUpdate("UPDATE products SET warranty_months = 12 WHERE id IN (${ids[0]}, ${ids[2]}, ${ids[3]})");
+    final bajaj = await createEmiPlan(
+        customerId: rahul,
+        kind: 'finance',
+        financer: 'Bajaj Finserv',
+        emi: 749900,
+        months: 12,
+        startDate: ymd(addMonths(now, -2).add(const Duration(days: 3))),
+        oppId: 'B447545100',
+        loanNo: '4010CD0938',
+        product: 'iPhone 14 Pro',
+        imei: '356789104455667',
+        price: 8999900,
+        downPayment: 0);
+    final first = (await emiInstallments(bajaj)).first;
+    await payEmi(asInt(first['id']), amount: asInt(first['amount']));
+    await createEmiPlan(
+        customerId: priya,
+        kind: 'shop',
+        emi: 300000,
+        months: 4,
+        startDate: ymd(now.subtract(const Duration(days: 6))),
+        product: 'MacBook Air M1',
+        price: 6099800,
+        downPayment: 4999800);
   }
 }
 
@@ -1829,6 +2049,40 @@ class ReturnLine {
   int get soldQty => asInt(item['qty']);
   /// Value of one returned unit including GST.
   int get unitValue => soldQty == 0 ? 0 : ((netAmount + asInt(item['tax'])) / soldQty).round();
+}
+
+/// Calendar month arithmetic that keeps the day (clamped to the month's end).
+DateTime addMonths(DateTime d, int months) {
+  final y = d.year + (d.month - 1 + months) ~/ 12;
+  final m = (d.month - 1 + months) % 12 + 1;
+  final last = DateTime(y, m + 1, 0).day;
+  return DateTime(y, m, d.day > last ? last : d.day);
+}
+
+class ImeiRecord {
+  final String serial;
+  Rec? purchase, sale, returned;
+  ImeiRecord(this.serial);
+  String get name => '${sale?['name'] ?? purchase?['name'] ?? 'Device'}';
+  int? get productId => sale?['product_id'] == null ? (purchase?['product_id'] == null ? null : asInt(purchase!['product_id'])) : asInt(sale!['product_id']);
+  String get lastDate => [purchase?['date'], sale?['date'], returned?['date']].whereType<String>().fold('', (a, b) => b.compareTo(a) > 0 ? b : a);
+  /// in_stock | sold | returned | unknown
+  String get status {
+    if (returned != null && (sale == null || '${returned!['date']}'.compareTo('${sale!['date']}') >= 0)) return 'returned';
+    if (sale != null) return 'sold';
+    if (purchase != null) return 'in_stock';
+    return 'unknown';
+  }
+
+  int get warrantyMonths => sale == null ? 0 : asInt(sale!['warranty_months']);
+  DateTime? get warrantyEnd =>
+      (sale == null || warrantyMonths <= 0) ? null : addMonths(DateTime.parse('${sale!['date']}'), warrantyMonths);
+  int? get warrantyDaysLeft {
+    final e = warrantyEnd;
+    if (e == null) return null;
+    final now = DateTime.now();
+    return e.difference(DateTime(now.year, now.month, now.day)).inDays;
+  }
 }
 
 class CardStatus {

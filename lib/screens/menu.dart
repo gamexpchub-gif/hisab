@@ -8,6 +8,10 @@ import '../main.dart';
 import '../ui/photo.dart';
 import '../ui/widgets.dart';
 import 'activity.dart';
+import 'backup_screen.dart';
+import 'emi.dart';
+import 'imei.dart';
+import 'security.dart';
 import 'bank.dart';
 import 'expenses.dart';
 import 'ledgers.dart';
@@ -95,6 +99,8 @@ class _MenuScreenState extends State<MenuScreen> {
             const [Color(0xFFFF7A7A), Color(0xFFDC4545)], () => go(const ExpensesScreen())),
         _Item('Cash & Bank', 'Cash, SBI, UPI · transfers', Icons.account_balance_rounded,
             const [Color(0xFFFF5C7A), Color(0xFFD81E4A)], () => go(const BankScreen()), badge: Money.compact(d.money)),
+        _Item('EMI / Kisti', 'Finance & shop instalments, reminders', Icons.calendar_month_rounded,
+            const [Color(0xFF2DD4BF), Color(0xFF0E7490)], () => go(const EmiScreen())),
       ]),
       ('Parties', [
         _Item('Customers', 'Ledger, dues & payments', Icons.groups_rounded, const [Color(0xFF4FD8E0), Color(0xFF139DB0)],
@@ -110,6 +116,8 @@ class _MenuScreenState extends State<MenuScreen> {
         _Item('Low stock', 'Running low or out of stock', Icons.warning_amber_rounded,
             const [Color(0xFFFFC14D), Color(0xFFF29D0B)], () => go(const ProductsScreen(lowOnly: true)),
             badge: '${d.stock.alerts}', alert: d.stock.alerts > 0),
+        _Item('IMEI & Warranty', 'Scan to see device history & warranty', Icons.qr_code_scanner_rounded,
+            const [Color(0xFF818CF8), Color(0xFF4338CA)], () => go(const ImeiScreen())),
       ]),
       ('Accounting & reports', [
         _Item('Analytics dashboard', 'Charts by day, week, month, year', Icons.insights_rounded,
@@ -135,6 +143,10 @@ class _MenuScreenState extends State<MenuScreen> {
             const [Color(0xFF94A3B8), Color(0xFF475569)], () => go(const ActivityScreen())),
         _Item('Search everything', 'Customers, invoices, products, IMEI', Icons.manage_search_rounded,
             const [Color(0xFF818CF8), Color(0xFF4F46E5)], () => go(const SearchScreen())),
+        _Item('Backup & Restore', 'Save everything to Drive, restore anytime', Icons.cloud_upload_rounded,
+            const [Color(0xFF34D399), Color(0xFF0F8C58)], () => go(const BackupScreen())),
+        _Item('Security', 'App lock with PIN & fingerprint', Icons.lock_rounded,
+            const [Color(0xFF6B35EE), Color(0xFF1B2163)], () => go(const SecurityScreen())),
         _Item('Business settings', 'Shop profile, photo, GSTIN, demo data', Icons.settings_rounded,
             const [Color(0xFF64748B), Color(0xFF1E293B)], () => go(const SettingsScreen())),
       ]),

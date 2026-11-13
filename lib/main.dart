@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'core/backup.dart';
 import 'screens/dashboard.dart';
 import 'screens/home.dart';
 import 'screens/menu.dart';
 import 'screens/products.dart';
 import 'screens/sale_form.dart';
+import 'screens/security.dart';
 import 'ui/theme.dart';
 import 'ui/liquid_nav.dart';
 import 'ui/widgets.dart';
@@ -22,6 +24,8 @@ void main() {
     systemNavigationBarIconBrightness: Brightness.dark,
   ));
   runApp(const HisabApp());
+  // one automatic backup a day, a few seconds after start
+  Future<void>.delayed(const Duration(seconds: 6), Backup.autoDaily);
 }
 
 class HisabApp extends StatelessWidget {
@@ -33,7 +37,7 @@ class HisabApp extends StatelessWidget {
       title: 'GameX Hisab',
       debugShowCheckedModeBanner: false,
       theme: buildTheme(),
-      home: const Shell(),
+      home: const AppLockGate(child: Shell()),
     );
   }
 }
