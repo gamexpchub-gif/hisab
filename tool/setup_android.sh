@@ -75,7 +75,7 @@ echo 'kotlin.daemon.jvmargs=-Xmx1536m' >> "$PROPS"
 # newer Flutter then refuses to build ("AGP version is lower than Flutter's
 # minimum"). Copy the versions from a fresh template made by this Flutter.
 TPL=$(mktemp -d)
-if (cd "$TPL" && flutter create --platforms=android --no-pub -q tpl >/dev/null 2>&1); then
+if (cd "$TPL" && flutter create --platforms=android --no-pub tpl >/dev/null 2>&1); then
   for SET in android/settings.gradle.kts android/settings.gradle; do
     [ -f "$SET" ] || continue
     TSET="$TPL/tpl/$SET"
@@ -100,5 +100,25 @@ if (cd "$TPL" && flutter create --platforms=android --no-pub -q tpl >/dev/null 2
   fi
 fi
 rm -rf "$TPL"
+
+# Floor: never older than the minimum the current Flutter accepts, even when
+# its own template still writes an older one.
+AGP_MIN=9.1.1
+for SET in android/settings.gradle.kts android/settings.gradle; do
+  [ -f "$SET" ] || continue
+  CUR=$(grep -oE '"?com.android.application"?\)? version "[^"]+"' "$SET" | grep -oE '"[0-9][^"]*"' | tr -d '"' | head -1)
+  if [ -n "$CUR" ] && [ "$(printf '%s\n%s\n' "$CUR" "$AGP_MIN" | sort -V | head -1)" != "$AGP_MIN" ]; then
+    sed -i -E "s/(\"?com.android.application\"?\)? version )\"[^\"]+\"/\1\"$AGP_MIN\"/" "$SET"
+    echo "  com.android.application $CUR → $AGP_MIN"
+  fi
+done
+TOML=android/gradle/libs.versions.toml
+if [ -f "$TOML" ]; then
+  CUR=$(grep -oE '^agp *= *"[^"]+"' "$TOML" | grep -oE '"[^"]+"' | tr -d '"')
+  if [ -n "$CUR" ] && [ "$(printf '%s\n%s\n' "$CUR" "$AGP_MIN" | sort -V | head -1)" != "$AGP_MIN" ]; then
+    sed -i -E "s/^(agp *= *)\"[^\"]+\"/\1\"$AGP_MIN\"/" "$TOML"
+    echo "  agp $CUR → $AGP_MIN"
+  fi
+fi
 
 echo "Android project ready."
