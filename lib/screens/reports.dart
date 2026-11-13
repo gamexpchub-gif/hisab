@@ -5,6 +5,9 @@ import '../core/money.dart';
 import '../ui/theme.dart';
 import '../ui/widgets.dart';
 import 'forms.dart';
+import 'gst_export.dart';
+
+export 'gst_export.dart' show GstScreen, ExportScreen;
 
 class ReportsScreen extends StatelessWidget {
   const ReportsScreen({super.key});
@@ -285,52 +288,6 @@ class _DayBookScreenState extends State<DayBookScreen> {
             ),
         ]);
       },
-    );
-  }
-}
-
-class GstScreen extends StatefulWidget {
-  final String? from, to;
-  const GstScreen({super.key, this.from, this.to});
-  @override
-  State<GstScreen> createState() => _GstScreenState();
-}
-
-class _GstScreenState extends State<GstScreen> {
-  late String from = widget.from ?? ymd(DateTime(DateTime.now().year, DateTime.now().month, 1));
-  late String to = widget.to ?? ymd(DateTime.now());
-
-  @override
-  Widget build(BuildContext context) {
-    return Live<List<int>>(
-      key: ValueKey('$from$to'),
-      load: () async => [
-        await Books.balanceByCode(gstOutCode, from: from, to: to),
-        await Books.balanceByCode(gstInCode, from: from, to: to),
-        asInt((await Books.query('SELECT COALESCE(SUM(subtotal - discount),0) AS v FROM sales WHERE date >= ? AND date <= ?',
-                [from, to]))
-            .first['v']),
-        asInt((await Books.query('SELECT COALESCE(SUM(subtotal),0) AS v FROM purchases WHERE date >= ? AND date <= ?',
-                [from, to]))
-            .first['v']),
-      ],
-      builder: (context, g) => PageShell(title: 'GST Summary', subtitle: 'Estimate — verify before filing', children: [
-        _RangeBar(from, to, (f, t) => setState(() {
-              from = f;
-              to = t;
-            })),
-        CardBox(
-          child: Column(children: [
-            TotalLine('Taxable sales', Money.rs(g[2])),
-            TotalLine('Output GST (collected)', Money.rs(g[0])),
-            const Divider(color: C.line),
-            TotalLine('Taxable purchases', Money.rs(g[3])),
-            TotalLine('Input tax credit (paid)', Money.rs(g[1])),
-            const Divider(color: C.line),
-            TotalLine('Net GST payable', Money.rs(g[0] - g[1]), bold: true, color: g[0] - g[1] > 0 ? C.red : C.green),
-          ]),
-        ),
-      ]),
     );
   }
 }

@@ -88,6 +88,8 @@ Future<int> saveDueWithAlarm({
   required int amount,
   required String dueDate,
   String? note,
+  int hour = 10,
+  int minute = 0,
 }) async {
   final id = await Books.addDue(partyType, partyId, amount, dueDate, note);
   final isC = partyType == 'customer';
@@ -96,6 +98,8 @@ Future<int> saveDueWithAlarm({
     dueDate: DateTime.parse(dueDate),
     title: isC ? 'Collect ${Money.rs(amount)} from $partyName' : 'Pay ${Money.rs(amount)} to $partyName',
     body: (note ?? '').isEmpty ? 'Payment due ${prettyDate(dueDate)} · GameX Hisab' : '$note · due ${prettyDate(dueDate)}',
+    hour: hour,
+    minute: minute,
   );
   return id;
 }

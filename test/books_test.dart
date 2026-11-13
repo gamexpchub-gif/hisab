@@ -5,6 +5,9 @@ import 'package:hisab/core/books.dart';
 import 'package:hisab/core/db.dart';
 import 'package:hisab/core/money.dart';
 import 'package:hisab/core/imei_smart.dart';
+import 'package:hisab/core/insights.dart';
+import 'package:hisab/core/gst_report.dart';
+import 'package:hisab/core/xlsx.dart';
 import 'package:hisab/core/smart.dart';
 import 'package:hisab/print/invoice_pdf.dart' show amountInWords;
 import 'package:hisab/screens/sales_book.dart' show matchSale, matchDoc;
@@ -447,6 +450,49 @@ void main() {
     m = await SmartImei.match('111111112222224');
     expect(m.how, 'learned');
     expect(asInt(m.product!['id']), p2);
+  });
+
+  test('Smart AI: promised dues, low stock and trend', () async {
+    final c = await Books.saveParty('customer', {'name': 'AI Customer', 'phone': '9876543210'});
+    final p = await Books.saveProduct({'name': 'AI Phone', 'gst_bp': 1800, 'price': 1000000, 'low_stock': 2});
+    final sup = await Books.saveParty('supplier', {'name': 'AI Supplier'});
+    await Books.createPurchase(items: [ItemIn(p, 3, 800000)], supplierId: sup);
+    await Books.createSale(items: [ItemIn(p, 2, 1000000)], customerId: c, paid: 0);
+    await Books.addDue('customer', c, 500000, ymd(DateTime.now()), 'Bill test');
+    final ai = await Insights.build();
+    final due = ai.firstWhere((i) => i.kind == 'due' && i.targetId == c);
+    expect(due.level, 'urgent');
+    expect(due.message, contains('AI Customer'));
+    expect(ai.any((i) => i.kind == 'stock'), isTrue);
+    expect(ai.first.rank, 0);
+  });
+
+  test('GST report: output, ITC, credit notes and B2B', () async {
+    final today = ymd(DateTime.now());
+    final before = await GstReport.load(today, today);
+    final b2b = await Books.saveParty('customer', {'name': 'GST Firm', 'gstin': '19ABCDE1234F1Z5'});
+    final p = await Books.saveProduct({'name': 'GST Laptop', 'gst_bp': 1800, 'price': 5000000, 'hsn': '8471'});
+    final sup = await Books.saveParty('supplier', {'name': 'GST Supplier'});
+    await Books.createPurchase(items: [ItemIn(p, 2, 4000000)], supplierId: sup);
+    await Books.createSale(items: [ItemIn(p, 1, 5000000)], customerId: b2b, paid: 0);
+    final g = await GstReport.load(today, today);
+    expect(g.outTax - before.outTax, 900000);
+    expect(g.itc - before.itc, 1440000);
+    expect(g.b2b.any((b) => b['gstin'] == '19ABCDE1234F1Z5'), isTrue);
+    expect(g.hsn.keys.any((k) => k.startsWith('8471|')), isTrue);
+    expect(g.payable, g.netOutTax - g.itc);
+    expect(g.sheets().length, 6);
+  });
+
+  test('xlsx writer makes a valid zip with sheets', () {
+    final s = Sheet('Test <&>', ['A', 'B'])
+      ..add(['x & y', const Money2(12345)])
+      ..add(['TOTAL', 7], bold: true);
+    final bytes = Xlsx.build([s, Sheet('Two', ['C'])]);
+    expect(bytes[0], 0x50); // PK
+    expect(Xlsx.col(0), 'A');
+    expect(Xlsx.col(25), 'Z');
+    expect(Xlsx.col(26), 'AA');
   });
 
   test('demo data loads and balances', () async {

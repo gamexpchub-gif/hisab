@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../core/books.dart';
+import '../core/insights.dart';
 import '../core/money.dart';
 import '../main.dart';
 import '../ui/widgets.dart';
@@ -14,6 +15,7 @@ import 'parties.dart';
 import 'purchase_form.dart';
 import 'sales.dart';
 import 'search.dart';
+import 'smart_ai.dart';
 
 /// Home screen — a 1:1 reproduction of the GameX PC Hub reference design
 /// (tool/reference/home.webp, 849 px wide). Every position and size below is
@@ -56,7 +58,8 @@ class HomeData {
   final List<Rec> activity;
   final int alerts;
   final List<Rec> sales;
-  HomeData(this.settings, this.m, this.activity, this.alerts, this.sales);
+  final List<Insight> ai;
+  HomeData(this.settings, this.m, this.activity, this.alerts, this.sales, this.ai);
 }
 
 class HomeScreen extends StatelessWidget {
@@ -68,6 +71,7 @@ class HomeScreen extends StatelessWidget {
         await Books.activity(1),
         (await Books.notifications()).length,
         (await Books.salesBook()).take(10).toList(),
+        await Insights.build().catchError((_) => <Insight>[]),
       );
 
   @override
@@ -102,7 +106,9 @@ class HomeScreen extends StatelessWidget {
                   padding: EdgeInsets.only(top: p(14), bottom: mq.padding.bottom + p(300)),
                   children: [
                     _side(_Header(d)),
-                    SizedBox(height: p(25)),
+                    SizedBox(height: p(22)),
+                    _side(SmartAiStrip(d.ai)),
+                    SizedBox(height: p(22)),
                     _Welcome(d.settings),
                     SizedBox(height: p(20)),
                     _side(_StatsGrid(d.m)),
@@ -151,6 +157,8 @@ Widget _tap(Widget child, VoidCallback onTap, double radius) => Material(
 class _Header extends StatelessWidget {
   final HomeData d;
   const _Header(this.d);
+
+  static int _bell(HomeData d) => d.alerts + d.ai.where((i) => i.level == 'urgent').length;
 
   Widget _circle({required Widget child, required VoidCallback onTap}) => GestureDetector(
         onTap: onTap,
@@ -209,7 +217,7 @@ class _Header extends StatelessWidget {
             onTap: () => open(context, const NotificationsScreen()),
             child: Icon(Icons.notifications_none_rounded, size: p(46), color: const Color(0xFF14152A)),
           ),
-          if (d.alerts > 0)
+          if (d.alerts + d.ai.where((i) => i.level == 'urgent').length > 0)
             Positioned(
               right: -p(4),
               top: -p(12),
@@ -223,7 +231,7 @@ class _Header extends StatelessWidget {
                   border: Border.all(color: Colors.white, width: p(3)),
                 ),
                 alignment: Alignment.center,
-                child: Text(d.alerts > 99 ? '99+' : '${d.alerts}', style: _t(9.5, FontWeight.w500, Colors.white)),
+                child: Text(_bell(d) > 99 ? '99+' : '${_bell(d)}', style: _t(9.5, FontWeight.w500, Colors.white)),
               ),
             ),
         ]),

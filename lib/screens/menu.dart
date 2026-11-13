@@ -25,6 +25,7 @@ import 'sale_form.dart';
 import 'sales.dart';
 import 'search.dart';
 import 'settings.dart';
+import 'smart_ai.dart';
 
 const _bg = Color(0xFFF6F7FC);
 const _ink = Color(0xFF0A0E26);
@@ -91,6 +92,10 @@ class _MenuScreenState extends State<MenuScreen> {
   List<(String, List<_Item>)> _groups(_MenuData d) {
     void go(Widget w) => open(context, w);
     return [
+      ('Smart AI', [
+        _Item('Smart Business AI', 'Aaj ki korben: baki, EMI, stock, lav — auto suggestion', Icons.auto_awesome_rounded,
+            const [Color(0xFF7B3FF2), Color(0xFF1B1F6B)], () => go(const SmartAiScreen())),
+      ]),
       ('Sales & billing', [
         _Item('Sales invoices', 'Every sale, payments and dues', Icons.receipt_long_rounded,
             const [Color(0xFF8B5CF6), Color(0xFF5B2EE0)], () => go(const SalesScreen()), badge: '${d.sales}'),
@@ -129,12 +134,14 @@ class _MenuScreenState extends State<MenuScreen> {
             const [Color(0xFF3EE08F), Color(0xFF0E9F5E)], () => go(const ProfitLossScreen())),
         _Item('Balance Sheet', 'Assets = Liabilities + Equity', Icons.account_balance_wallet_rounded,
             const [Color(0xFF6AA5FF), Color(0xFF2F6BFF)], () => go(const BalanceSheetScreen())),
-        _Item('GST Summary', 'Output GST, input credit, payable', Icons.request_quote_rounded,
+        _Item('GST Report', 'GSTR-1, GSTR-3B, HSN · Excel for CA', Icons.request_quote_rounded,
             const [Color(0xFFF472B6), Color(0xFFDB2777)], () => go(const GstScreen())),
         _Item('Trial Balance', 'Debit = credit check', Icons.balance_rounded,
             const [Color(0xFFA47BFF), Color(0xFF6A35D9)], () => go(const TrialBalanceScreen())),
         _Item('Day Book', 'Every journal entry by date', Icons.event_note_rounded,
             const [Color(0xFF5EEAD4), Color(0xFF0D9488)], () => go(const DayBookScreen())),
+        _Item('Excel Export', 'Sale, purchase, stock, GST → .xlsx', Icons.table_view_rounded,
+            const [Color(0xFF21A366), Color(0xFF107C41)], () => go(const ExportScreen())),
       ]),
       ('App', [
         _Item('Notifications', 'Stock, dues and payables', Icons.notifications_rounded,

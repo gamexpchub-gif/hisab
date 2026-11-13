@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../core/books.dart';
+import '../core/insights.dart';
 import '../ui/widgets.dart';
 import 'parties.dart';
 import 'products.dart';
+import 'smart_ai.dart';
 
 class NotificationsScreen extends StatelessWidget {
   const NotificationsScreen({super.key});
@@ -16,6 +18,11 @@ class NotificationsScreen extends StatelessWidget {
         title: 'Notifications',
         subtitle: items.isEmpty ? 'All caught up' : '${items.length} alerts need attention',
         children: [
+          FutureBuilder<List<Insight>>(
+            future: Insights.build(),
+            builder: (context, snap) => SmartAiStrip(snap.data ?? const []),
+          ),
+          const SizedBox(height: 12),
           CardBox(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
             child: items.isEmpty

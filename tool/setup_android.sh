@@ -15,7 +15,7 @@ cp -r tool/android_res/* android/app/src/main/res/
 
 # Payment-due notifications (flutter_local_notifications):
 # permissions + scheduled-notification receivers in the manifest …
-for perm in POST_NOTIFICATIONS RECEIVE_BOOT_COMPLETED VIBRATE; do
+for perm in POST_NOTIFICATIONS RECEIVE_BOOT_COMPLETED VIBRATE SCHEDULE_EXACT_ALARM; do
   if ! grep -q "android.permission.$perm" "$MANIFEST"; then
     sed -i "s|<application|<uses-permission android:name=\"android.permission.$perm\"/>\n    <application|" "$MANIFEST"
   fi

@@ -14,6 +14,7 @@ import 'parties.dart';
 import 'product_form.dart';
 import 'products.dart';
 import 'sales.dart';
+import 'lend_sheet.dart' show saveDueWithAlarm;
 import 'scanner.dart';
 
 // =============================================================================
@@ -92,6 +93,9 @@ class _SaleFormState extends State<SaleForm> {
   Rec? customer;
   int? account;
   String date = ymd(DateTime.now());
+  // promised payment date for the due part, with a ringing reminder
+  String? promise = ymd(DateTime.now().add(const Duration(days: 7)));
+  TimeOfDay promiseAt = const TimeOfDay(hour: 10, minute: 0);
   final search = TextEditingController();
   final received = TextEditingController();
   final discountCtrl = TextEditingController();
@@ -487,6 +491,18 @@ class _SaleFormState extends State<SaleForm> {
             : null,
       );
       if (account != null) await Books.setSetting('last_pay_account', '$account');
+      if (!editing && due > 0 && customer != null && promise != null) {
+        await saveDueWithAlarm(
+          partyType: 'customer',
+          partyId: asInt(customer!['id']),
+          partyName: '${customer!['name']}',
+          amount: due,
+          dueDate: promise!,
+          note: 'Bill $nextNo',
+          hour: promiseAt.hour,
+          minute: promiseAt.minute,
+        );
+      }
       if (!mounted) return;
       HapticFeedback.heavyImpact();
       if (editing) {
@@ -1286,6 +1302,10 @@ class _SaleFormState extends State<SaleForm> {
           const SizedBox(width: 10),
           Expanded(child: _stat(due > 0 ? 'Goes to due' : 'Balance due', Money.rs(due), due > 0 ? _red : _muted)),
         ]),
+        if (due > 0 && customer != null && !editing) ...[
+          const SizedBox(height: 12),
+          _promiseCard(),
+        ],
         if (payMode != 'split' && paid > 0 && acc != null && acc['kind'] == 'upi' && upiId.isNotEmpty) ...[
           const SizedBox(height: 12),
           GestureDetector(
@@ -1396,6 +1416,86 @@ class _SaleFormState extends State<SaleForm> {
           ]),
         ],
       ];
+
+  // ---- promised date for the due, with a ringing alarm
+  Widget _promiseCard() {
+    final now = DateTime.now();
+    final presets = [(3, '3 din'), (7, '7 din'), (15, '15 din'), (30, '1 mash')];
+    String fmtT(TimeOfDay t) => '${t.hourOfPeriod == 0 ? 12 : t.hourOfPeriod}:${two(t.minute)} ${t.period == DayPeriod.am ? 'AM' : 'PM'}';
+    Widget chip(String label, bool on, VoidCallback onTap) => GestureDetector(
+          onTap: () {
+            HapticFeedback.selectionClick();
+            onTap();
+          },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            margin: const EdgeInsets.only(right: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+            decoration: BoxDecoration(
+              gradient: on ? const LinearGradient(colors: [Color(0xFFF59E0B), Color(0xFFD97706)]) : null,
+              color: on ? null : Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: on ? null : Border.all(color: _line),
+            ),
+            child: Text(label, style: _j(12, FontWeight.w800, on ? Colors.white : _ink)),
+          ),
+        );
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF8EB),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFFCE3B0)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.alarm_rounded, color: _amber, size: 20),
+          const SizedBox(width: 8),
+          Expanded(child: Text('Kobe debe? · ${Money.rs(due)}', style: _j(13.5, FontWeight.w800, _ink))),
+          Switch.adaptive(
+            value: promise != null,
+            activeTrackColor: _amber,
+            onChanged: (v) => setState(() => promise = v ? ymd(now.add(const Duration(days: 7))) : null),
+          ),
+        ]),
+        if (promise != null) ...[
+          const SizedBox(height: 6),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(children: [
+              for (final p in presets)
+                chip(p.$2, promise == ymd(now.add(Duration(days: p.$1))), () => setState(() => promise = ymd(now.add(Duration(days: p.$1))))),
+              chip('📅 ${prettyDate(promise!)}', !presets.any((p) => promise == ymd(now.add(Duration(days: p.$1)))), () async {
+                final d = await showDatePicker(
+                  context: context,
+                  initialDate: DateTime.parse(promise!),
+                  firstDate: DateTime(now.year, now.month, now.day),
+                  lastDate: DateTime(now.year + 3),
+                );
+                if (d != null) setState(() => promise = ymd(d));
+              }),
+            ]),
+          ),
+          const SizedBox(height: 8),
+          GestureDetector(
+            onTap: () async {
+              final t = await showTimePicker(context: context, initialTime: promiseAt);
+              if (t != null) setState(() => promiseAt = t);
+            },
+            child: Row(children: [
+              const Icon(Icons.notifications_active_rounded, size: 16, color: _amber),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text('${prettyDate(promise!)}, ${fmtT(promiseAt)}-e alarm bajbe · ager din reminder',
+                    style: _j(11.5, FontWeight.w600, _muted)),
+              ),
+              Text('Time', style: _j(12, FontWeight.w800, _purple)),
+            ]),
+          ),
+        ],
+      ]),
+    );
+  }
 
   // ---- DUE: advance presets, advance account
   List<Widget> _dueMode() {

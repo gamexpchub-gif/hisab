@@ -30,6 +30,9 @@ import 'package:hisab/screens/sale_pos.dart';
 import 'package:hisab/screens/sale_return.dart';
 import 'package:hisab/print/invoice_pdf.dart';
 import 'package:hisab/print/labels.dart';
+import 'package:hisab/core/export_book.dart';
+import 'package:hisab/screens/gst_export.dart';
+import 'package:hisab/screens/smart_ai.dart';
 import 'package:hisab/ui/theme.dart';
 
 Future<void> _assetFont(String family, String asset) async {
@@ -82,6 +85,13 @@ void main() {
     });
   }
 
+  test('excel_workbook', () async {
+    final bytes = await ExportBook.build('all', '2020-01-01', '2099-12-31');
+    Directory('screenshots').createSync(recursive: true);
+    File('screenshots/workbook.xlsx').writeAsBytesSync(bytes);
+    expect(bytes.length, greaterThan(2000));
+  });
+
   for (final z in labelSizes.where((z) => z.id == '50x25' || z.id == 'a4')) {
     test('labels_${z.id}', () async {
       final ps = await Books.query('SELECT * FROM products ORDER BY id LIMIT 4');
@@ -92,7 +102,7 @@ void main() {
     });
   }
 
-  for (final (name, index) in [('home', 0), ('dashboard', 1), ('products', 2), ('menu', 3), ('add_product', -1), ('new_sale', -2), ('new_purchase', -3), ('ledgers', -4), ('customer_profile', -5), ('expenses', -6), ('customers', -7), ('sales', -8), ('bank', -9), ('add_card', -10), ('purchases', -11), ('supplier_profile', -12), ('sale_returns', -13), ('sale_return_form', -14), ('invoice_view', -15), ('sale_complete', -16), ('emi', -17), ('emi_plan', -18), ('imei', -19), ('backup', -20), ('security', -21), ('lock', -22), ('login', -23), ('account', -24)]) {
+  for (final (name, index) in [('home', 0), ('dashboard', 1), ('products', 2), ('menu', 3), ('add_product', -1), ('new_sale', -2), ('new_purchase', -3), ('ledgers', -4), ('customer_profile', -5), ('expenses', -6), ('customers', -7), ('sales', -8), ('bank', -9), ('add_card', -10), ('purchases', -11), ('supplier_profile', -12), ('sale_returns', -13), ('sale_return_form', -14), ('invoice_view', -15), ('sale_complete', -16), ('emi', -17), ('emi_plan', -18), ('imei', -19), ('backup', -20), ('security', -21), ('lock', -22), ('login', -23), ('account', -24), ('smart_ai', -25), ('gst_report', -26), ('excel_export', -27)]) {
     testWidgets(name, (t) async {
       t.view.physicalSize = const Size(1080, 2340);
       t.view.devicePixelRatio = 2.75;
@@ -151,6 +161,12 @@ void main() {
                                                                                                       ? LoginScreen(onDone: () {})
                                                                                                       : index == -24
                                                                                                           ? const AccountScreen()
+                                                                                                          : index == -25
+                                                                                                              ? const SmartAiScreen()
+                                                                                                              : index == -26
+                                                                                                                  ? const GstScreen()
+                                                                                                                  : index == -27
+                                                                                                                      ? const ExportScreen()
                                                                   : const Scaffold(
                                                       backgroundColor: Color(0xFF8A8FAD),
                                                       body: Align(alignment: Alignment.bottomCenter, child: AccountSheet()),
