@@ -16,8 +16,8 @@ import '../core/books.dart';
 
 /// Optional built-in project keys. Leave empty and enter them in the app
 /// (Login → Cloud setup) instead, or fill them here before building.
-const _builtInApiKey = '';
-const _builtInProjectId = '';
+const _builtInApiKey = 'AIzaSyAk1N6Aw3BJk50Tsw2Z_KPDfQzJlC-5GIU';
+const _builtInProjectId = 'hisab-a7fcd';
 
 class CloudError implements Exception {
   final String message;
