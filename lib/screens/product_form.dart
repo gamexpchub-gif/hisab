@@ -19,7 +19,6 @@ import 'scanner.dart';
 const _bg = Color(0xFFF6F7FC);
 const _ink = Color(0xFF0A0E26);
 const _navy = Color(0xFF0B0F5E);
-const _muted = Color(0xFF6B7094);
 const _line = Color(0xFFE9EAF5);
 const _purple = Color(0xFF5B2EE0);
 const _green = Color(0xFF16A36A);
