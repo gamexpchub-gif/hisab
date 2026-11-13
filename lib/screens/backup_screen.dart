@@ -120,6 +120,7 @@ class _BackupScreenState extends State<BackupScreen> {
       if (mounted) toast(context, '$e', error: true);
       return;
     }
+    final here = await Backup.localSummary();
     if (!mounted) return;
     final created = DateTime.tryParse('${info['created'] ?? ''}');
     final ok = await showDialog<bool>(
@@ -132,7 +133,8 @@ class _BackupScreenState extends State<BackupScreen> {
           '${created == null ? '' : 'Made ${_when(created)}\n'}'
           '${info['sales'] ?? '?'} sales · ${info['products'] ?? '?'} products · ${info['customers'] ?? '?'} customers · '
           '${info['photos'] ?? 0} photos\n\n'
-          'Everything on this phone will be replaced with the backup. A safety copy of the current data is saved first.',
+          '⚠️ This phone now has $here — all of it will be REPLACED by the backup.\n'
+          'A safety copy of the current data is saved first.',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),

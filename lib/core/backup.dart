@@ -102,8 +102,7 @@ class Backup {
       final last = DateTime.tryParse(s['last_backup_at'] ?? '');
       final now = DateTime.now();
       if (last != null && last.year == now.year && last.month == now.month && last.day == now.day) return;
-      final any = asInt((await Books.query('SELECT COUNT(*) AS c FROM journal_entries')).first['c']);
-      if (any == 0) return; // nothing to protect yet
+      if (await phoneIsEmpty()) return; // nothing to protect yet
       final f = await create(auto: true);
       // and the same backup to the cloud when signed in
       await Cloud.load();
@@ -111,6 +110,30 @@ class Backup {
     } catch (_) {
       // a failed automatic backup must never stop the app
     }
+  }
+
+  /// Counts of what is on this phone now (to warn before a restore).
+  static Future<Map<String, int>> localCounts() async {
+    final out = <String, int>{};
+    for (final t in ['products', 'sales', 'purchases', 'customers', 'suppliers', 'expenses']) {
+      out[t] = asInt((await Books.query('SELECT COUNT(*) AS c FROM $t')).first['c']);
+    }
+    return out;
+  }
+
+  /// True when the phone has no books at all (no products, parties or bills).
+  static Future<bool> phoneIsEmpty() async => (await localCounts()).values.every((v) => v == 0);
+
+  /// "12 products, 30 sales, 4 customers" for a restore warning.
+  static Future<String> localSummary() async {
+    final c = await localCounts();
+    final parts = [
+      if (c['products']! > 0) '${c['products']} products',
+      if (c['sales']! > 0) '${c['sales']} sales',
+      if (c['purchases']! > 0) '${c['purchases']} purchases',
+      if (c['customers']! > 0) '${c['customers']} customers',
+    ];
+    return parts.isEmpty ? 'nothing yet' : parts.join(', ');
   }
 
   /// Reads what a backup contains without restoring it.

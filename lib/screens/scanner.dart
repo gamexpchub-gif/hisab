@@ -76,7 +76,7 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> with Single
     final size = MediaQuery.sizeOf(context);
     final frameW = size.width * .78;
     final frameH = frameW * .62;
-    final frame = Rect.fromCenter(center: Offset(size.width / 2, size.height * .44), width: frameW, height: frameH);
+    final frame = Rect.fromCenter(center: Offset(size.width / 2, size.height / 2), width: frameW, height: frameH);
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(children: [
@@ -84,6 +84,8 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> with Single
           child: MobileScanner(
             controller: controller,
             fit: BoxFit.cover,
+            // only codes inside the frame in the middle are read
+            scanWindow: frame,
             onDetect: (capture) {
               for (final b in capture.barcodes) {
                 final v = b.rawValue;

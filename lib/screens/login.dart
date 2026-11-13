@@ -121,8 +121,8 @@ class _LoginScreenState extends State<LoginScreen> {
   /// On a fresh phone, offer the newest cloud backup.
   Future<void> _offerRestore() async {
     try {
-      final empty = asInt((await Books.query('SELECT COUNT(*) AS c FROM journal_entries')).first['c']) == 0;
-      if (!empty) return;
+      // only a phone with no books at all is offered the cloud copy
+      if (!await Backup.phoneIsEmpty()) return;
       final list = await Cloud.listBackups();
       if (list.isEmpty || !mounted) return;
       final b = list.first;

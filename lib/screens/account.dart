@@ -98,6 +98,8 @@ class _AccountScreenState extends State<AccountScreen> {
       });
 
   Future<void> _restore(CloudBackup b) async {
+    final here = await Backup.localSummary();
+    if (!mounted) return;
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
@@ -105,7 +107,8 @@ class _AccountScreenState extends State<AccountScreen> {
         icon: const Icon(Icons.cloud_download_rounded, color: Color(0xFF4318D2), size: 42),
         title: const Text('Restore from cloud?'),
         content: Text('Backup of ${_when(b.created)} — ${b.sales} sales, ${b.products} products, ${b.customers} customers.\n\n'
-            'Everything on this phone is replaced. A safety copy of the current data is saved first.'),
+            '⚠️ This phone now has $here — all of it will be REPLACED by the backup.\n'
+            'A safety copy of the current data is saved first (Backup & Restore → Automatic).'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
           FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Restore')),

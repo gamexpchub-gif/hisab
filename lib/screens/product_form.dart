@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../core/books.dart';
+import '../core/imei_smart.dart';
 import '../core/money.dart';
+import '../core/product_lookup.dart';
 import '../core/smart.dart';
 import '../ui/photo.dart';
 import '../ui/widgets.dart';
@@ -181,10 +183,87 @@ class _ProductFormState extends State<ProductForm> {
 
   // ---------------------------------------------------------------- barcode
   Future<void> _scanSku() async {
-    final code = await BarcodeScannerScreen.scan(context, title: 'Scan product barcode');
-    if (code == null) return;
-    sku.text = code;
+    final code = await BarcodeScannerScreen.scan(context, title: 'Scan box barcode or IMEI');
+    if (code == null || !mounted) return;
+    await _smartFill(code);
+  }
+
+  bool looking = false;
+  String? smartNote;
+
+  /// Smart scan: an IMEI of a known model copies that product's details; a box
+  /// barcode becomes the SKU and its name / brand are looked up online.
+  Future<void> _smartFill(String code) async {
+    final c = SmartImei.clean(code);
+    if (SmartImei.looksLikeImei(c)) {
+      setState(() => looking = true);
+      final m = await SmartImei.match(c);
+      if (!mounted) return;
+      setState(() => looking = false);
+      if (m.product == null) {
+        setState(() => smartNote = 'New model (IMEI ${m.tac}…) — type the name once; next time this model is filled in automatically'
+            '${m.isImei && !m.valid ? '. ⚠ IMEI check digit looks wrong' : ''}');
+        return;
+      }
+      final p = m.product!;
+      final open = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          icon: const Icon(Icons.verified_rounded, color: _green, size: 40),
+          title: Text('${p['name']}'),
+          content: Text('This IMEI is ${m.how == 'exact' ? 'this exact device' : 'the same model'} — already in your products '
+              '(stock ${p['stock']}). Open it, or copy its details into a new product?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, 'copy'), child: const Text('Copy details')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, 'open'), child: const Text('Open product')),
+          ],
+        ),
+      );
+      if (!mounted) return;
+      if (open == 'open') {
+        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => ProductView(id: asInt(p['id']))));
+        return;
+      }
+      if (open == 'copy') {
+        setState(() {
+          name.text = '${p['name']}';
+          brand.text = '${p['brand'] ?? ''}';
+          variant.text = '${p['variant'] ?? ''}';
+          hsn.text = '${p['hsn'] ?? ''}';
+          gstBp = asInt(p['gst_bp']);
+          category = p['category_id'] as int?;
+          price.text = Money.edit(asInt(p['price']));
+          if (asInt(p['mrp']) > 0) mrp.text = Money.edit(asInt(p['mrp']));
+          warrantyMonths = asInt(p['warranty_months']);
+          smartNote = 'Details copied from ${p['name']}';
+        });
+      }
+      return;
+    }
+    sku.text = code.trim();
     await _checkDuplicate();
+    if (duplicate != null || !mounted) return;
+    setState(() {
+      looking = true;
+      smartNote = 'Looking up barcode online…';
+    });
+    final info = await ProductLookup.barcode(code);
+    if (!mounted) return;
+    setState(() {
+      looking = false;
+      if (info == null) {
+        smartNote = 'Barcode saved. No online match — type the name and Smart Assist fills the rest';
+        return;
+      }
+      name.text = [info.title, if (info.color != null && !info.title.toLowerCase().contains(info.color!.toLowerCase())) info.color]
+          .whereType<String>()
+          .join(' ');
+      if (info.brand != null) brand.text = info.brand!;
+      smartNote = 'Name found online for this barcode — check it before saving';
+    });
+    _analyse();
+    if (!guess.isEmpty) await _applyGuess();
   }
 
   Future<void> _autoSku() async {
@@ -279,16 +358,22 @@ class _ProductFormState extends State<ProductForm> {
             children: [
               _header(),
               const SizedBox(height: 14),
+              _smartScanCard(),
+              const SizedBox(height: 14),
               _topCard(),
-              if (!guess.isEmpty) ...[const SizedBox(height: 12), _smartStrip()],
-              const SizedBox(height: 12),
+              if (!guess.isEmpty) ...[const SizedBox(height: 14), _smartStrip()],
+              const SizedBox(height: 14),
               _priceCard(),
-              const SizedBox(height: 12),
+              const SizedBox(height: 14),
               _variantCard(),
-              const SizedBox(height: 12),
+              const SizedBox(height: 14),
               _codesCard(),
-              const SizedBox(height: 12),
+              const SizedBox(height: 14),
               _stockCard(),
+              const SizedBox(height: 14),
+              _qualityCard(),
+              const SizedBox(height: 14),
+              _previewCard(),
             ],
           ),
         ),
@@ -412,7 +497,7 @@ class _ProductFormState extends State<ProductForm> {
           const SizedBox(height: 2),
           _label('Category'),
           SizedBox(
-            height: 38,
+            height: 40,
             child: ListView(scrollDirection: Axis.horizontal, children: [
               for (final c in categories) ...[
                 _pill(c['name'] as String, category == asInt(c['id']), () => setState(() => category = asInt(c['id'])),
@@ -424,6 +509,148 @@ class _ProductFormState extends State<ProductForm> {
           ),
         ]),
       );
+
+  // ---------------------------------------------------------------- smart scan
+  Widget _smartScanCard() => GestureDetector(
+        onTap: _scanSku,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(22),
+            gradient: const LinearGradient(
+                begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF1B2163), Color(0xFF3A2BC9), Color(0xFF6A2FF0)]),
+            boxShadow: const [BoxShadow(color: Color(0x554A17C9), blurRadius: 20, offset: Offset(0, 8), spreadRadius: -8)],
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: const Color(0x26FFFFFF),
+                  borderRadius: BorderRadius.circular(15),
+                  border: Border.all(color: const Color(0x55FFFFFF)),
+                ),
+                child: looking
+                    ? const Padding(padding: EdgeInsets.all(12), child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white))
+                    : const Icon(Icons.qr_code_scanner_rounded, color: Colors.white),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Smart scan', style: _j(16, FontWeight.w800, Colors.white)),
+                  Text('Scan the box barcode or an IMEI — name, brand & model fill in automatically',
+                      style: _j(11.5, FontWeight.w600, const Color(0xDDFFFFFF))),
+                ]),
+              ),
+              const Icon(Icons.chevron_right_rounded, color: Colors.white),
+            ]),
+            if (smartNote != null) ...[
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(color: const Color(0x26FFFFFF), borderRadius: BorderRadius.circular(12)),
+                child: Text(smartNote!, style: _j(11.5, FontWeight.w700, Colors.white)),
+              ),
+            ],
+          ]),
+        ),
+      );
+
+  // ---------------------------------------------------------------- listing quality
+  Widget _qualityCard() {
+    final (pct, checks) = _score;
+    final color = pct >= 80 ? _green : pct >= 50 ? _amber : _red;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: _card(),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        SizedBox(
+          width: 60,
+          height: 60,
+          child: CustomPaint(
+            painter: _RingPainter(pct / 100, color),
+            child: Center(child: Text('$pct%', style: _j(13, FontWeight.w800, _ink))),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Listing quality', style: _j(14, FontWeight.w800, _ink)),
+            Text(pct >= 80 ? 'Excellent — ready to sell' : pct >= 50 ? 'Good — add a few more details' : 'Fill in the basics',
+                style: _j(11.5, FontWeight.w600, const Color(0xFF6B7094))),
+            const SizedBox(height: 8),
+            Wrap(spacing: 5, runSpacing: 5, children: [
+              for (final c in checks)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: c.$2 ? const Color(0xFFE3F7EC) : const Color(0xFFF2F3F8),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(c.$2 ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
+                        size: 11, color: c.$2 ? _green : const Color(0xFFB9BCD6)),
+                    const SizedBox(width: 3),
+                    Text(c.$1, style: _j(10, FontWeight.w600, c.$2 ? const Color(0xFF0E6E47) : const Color(0xFF6B7094))),
+                  ]),
+                ),
+            ]),
+          ]),
+        ),
+      ]),
+    );
+  }
+
+  // ---------------------------------------------------------------- live preview
+  Widget _previewCard() {
+    final p = _m(price), m = _m(mrp);
+    final off = m > p && m > 0 ? ((m - p) * 100 / m).round() : 0;
+    final stockNow = isNew ? qty : asInt(widget.product!['stock']);
+    final status = stockNow <= 0 ? ('Out of stock', _red) : stockNow <= low ? ('Low stock', _amber) : ('In stock', _green);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: _card(),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        _label('Live preview — how it shows in Products'),
+        Row(children: [
+          ProductThumb({'image': image, 'category': _categoryName ?? guess.category}, width: 78, height: 90),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(color: status.$2.withAlpha(0x22), borderRadius: BorderRadius.circular(10)),
+                child: Text('${status.$1} · $stockNow', style: _j(10.5, FontWeight.w700, status.$2)),
+              ),
+              const SizedBox(height: 4),
+              Text(name.text.isEmpty ? 'Product name' : name.text, maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(15, FontWeight.w800, _ink)),
+              Text(variant.text.isEmpty ? (brand.text.isEmpty ? 'Variant' : brand.text) : variant.text,
+                  maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(11.5, FontWeight.w500, const Color(0xFF3A4156))),
+              const SizedBox(height: 4),
+              Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 8, children: [
+                Text(Money.rs(p), style: _j(15, FontWeight.w800, const Color(0xFF1C1CA0))),
+                if (off > 0)
+                  Text(Money.rs(m), style: _j(11.5, FontWeight.w500, const Color(0xFF7E8198)).copyWith(decoration: TextDecoration.lineThrough)),
+                if (off > 0)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(color: const Color(0xFFFDDDE3), borderRadius: BorderRadius.circular(8)),
+                    child: Text('$off% OFF', style: _j(10, FontWeight.w800, const Color(0xFF8A0818))),
+                  ),
+              ]),
+              if (warrantyMonths > 0)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text('🛡 $warrantyMonths months warranty', style: _j(10.5, FontWeight.w700, _green)),
+                ),
+            ]),
+          ),
+        ]),
+      ]),
+    );
+  }
 
   Widget _label(String t, {Widget? trailing}) => Padding(
         padding: const EdgeInsets.only(top: 4, bottom: 7),
@@ -441,7 +668,7 @@ class _ProductFormState extends State<ProductForm> {
           SizedBox(width: 62, child: Text(label, style: _j(11.5, FontWeight.w800, const Color(0xFF3A4155)))),
           Expanded(
             child: SizedBox(
-              height: 36,
+              height: 40,
               child: ListView(scrollDirection: Axis.horizontal, children: [
                 for (final c in chips) ...[c, const SizedBox(width: 6)],
               ]),
@@ -815,8 +1042,7 @@ class _ProductFormState extends State<ProductForm> {
           fillColor: enabled ? const Color(0xFFFBFBFE) : const Color(0xFFF2F3F8),
           labelStyle: _j(13, FontWeight.w500, const Color(0xFF6B7094)),
           hintStyle: _j(13, FontWeight.w400, const Color(0xFFA3A7C2)),
-          isDense: true,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 15),
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: const BorderSide(color: _line)),
           enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: const BorderSide(color: _line)),
           disabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: const BorderSide(color: _line)),
@@ -835,7 +1061,7 @@ class _ProductFormState extends State<ProductForm> {
       },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
         decoration: BoxDecoration(
           gradient: on ? const LinearGradient(colors: [Color(0xFF6B35EE), Color(0xFF4318D2)]) : null,
           color: on ? null : (dashed ? const Color(0xFFF6F3FF) : Colors.white),
