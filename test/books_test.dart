@@ -441,6 +441,12 @@ void main() {
     // unknown model
     m = await SmartImei.match('111111111111116');
     expect(m.product, isNull);
+    // once picked by hand, the model is learned for the next unit
+    final p2 = await Books.saveProduct({'name': 'Redmi 13C 4/128', 'gst_bp': 0, 'price': 900000});
+    await SmartImei.learn('111111111111116', productId: p2, name: 'Redmi 13C 4/128', brand: 'Redmi');
+    m = await SmartImei.match('111111112222224');
+    expect(m.how, 'learned');
+    expect(asInt(m.product!['id']), p2);
   });
 
   test('demo data loads and balances', () async {

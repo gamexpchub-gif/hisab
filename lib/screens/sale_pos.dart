@@ -281,19 +281,30 @@ class _SaleFormState extends State<SaleForm> {
     if (inCart > asInt(p['stock'])) toast(context, 'Only ${p['stock']} × ${p['name']} in stock', error: true);
   }
 
+  /// Continuous scanning: every barcode / IMEI goes straight into the cart.
   Future<void> _scan() async {
-    final code = await BarcodeScannerScreen.scan(context, title: 'Scan barcode or IMEI');
-    if (code == null || !mounted) return;
+    final n = await BarcodeScannerScreen.scanMany(context, title: 'Scan items · batch', onCode: _useCode);
+    if (n > 0 && mounted) toast(context, '$n item${n == 1 ? '' : 's'} added by scan');
+  }
+
+  /// A scanned or typed code: product SKU, label code (P000123) or IMEI.
+  Future<String?> _useCode(String code) async {
+    code = code.trim();
     final c = SmartImei.clean(code);
     if (!SmartImei.looksLikeImei(c)) {
+      final pid = RegExp(r'^P(\d{6})$').firstMatch(code.toUpperCase());
       for (final p in products) {
-        if ((p['sku'] as String?)?.trim() == code.trim()) {
+        final sku = (p['sku'] as String?)?.trim() ?? '';
+        if ((sku.isNotEmpty && sku.toUpperCase() == code.toUpperCase()) || (pid != null && asInt(p['id']) == int.parse(pid.group(1)!))) {
           _add(p);
-          return;
+          return '${p['name']} added';
         }
       }
     }
-    await _addByImei(c);
+    final before = cart.length;
+    await _addByImei(c.isEmpty ? code : c);
+    if (cart.length > before) return '${cart.last.p['name']} · ${cart.last.serial.text}';
+    return null;
   }
 
   /// Smart IMEI: recognise the device from its IMEI and add it to the cart.
@@ -323,9 +334,11 @@ class _SaleFormState extends State<SaleForm> {
         context: context,
         isScrollControlled: true,
         backgroundColor: Colors.transparent,
-        builder: (_) => _PickProductSheet(products: products, code: m.code),
+        builder: (_) => _PickProductSheet(products: products, code: m.code, hint: m.suggestName),
       );
       if (product == null || !mounted) return;
+      await SmartImei.learn(m.code, productId: asInt(product['id']), name: '${product['name']}', brand: '${product['brand'] ?? ''}');
+      if (!mounted) return;
     }
     _add(product, serial: m.code);
     final l = cart.lastWhere((x) => x.serial.text == m.code, orElse: () => cart.last);
@@ -333,6 +346,7 @@ class _SaleFormState extends State<SaleForm> {
     l.imeiInfo = switch (m.how) {
       'exact' => 'Smart IMEI · from purchase ${m.boughtOn?['number'] ?? ''}',
       'tac' => 'Smart IMEI · recognised model (seen ${m.tacSeen}×)',
+      'learned' => 'Smart IMEI · recognised model',
       _ => m.isImei ? 'Smart IMEI · new model learned' : null,
     };
     HapticFeedback.mediumImpact();
@@ -1960,13 +1974,22 @@ class SaleSuccessScreen extends StatelessWidget {
 class _PickProductSheet extends StatefulWidget {
   final List<Rec> products;
   final String code;
-  const _PickProductSheet({required this.products, required this.code});
+  final String? hint; // model name found from the IMEI, if any
+  const _PickProductSheet({required this.products, required this.code, this.hint});
   @override
   State<_PickProductSheet> createState() => _PickProductSheetState();
 }
 
 class _PickProductSheetState extends State<_PickProductSheet> {
-  String q = '';
+  late String q = _hintWords();
+
+  /// First two words of the model name ("Galaxy A15") make a good search.
+  String _hintWords() {
+    final h = (widget.hint ?? '').trim();
+    if (h.isEmpty) return '';
+    final w = h.split(RegExp(r'\s+'));
+    return w.length > 2 ? w.sublist(w.length - 2).join(' ') : h;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1995,14 +2018,16 @@ class _PickProductSheetState extends State<_PickProductSheet> {
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('Which product is this?', style: _j(17, FontWeight.w800, _navy)),
-                Text('New model for ${widget.code} — the app will remember it', style: _j(11.5, FontWeight.w600, _muted)),
+                Text(widget.hint == null ? 'New model for ${widget.code} — the app will remember it' : 'IMEI says: ${widget.hint}',
+                    style: _j(11.5, FontWeight.w600, _muted)),
               ]),
             ),
           ]),
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
-          child: TextField(
+          child: TextFormField(
+            initialValue: q,
             autofocus: true,
             onChanged: (v) => setState(() => q = v.trim()),
             decoration: const InputDecoration(hintText: 'Search product', prefixIcon: Icon(Icons.search_rounded)),

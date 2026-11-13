@@ -1,5 +1,6 @@
 import 'books.dart';
 import 'money.dart';
+import 'tac_db.dart';
 
 /// What the app knows about a scanned IMEI / serial.
 class ImeiMatch {
@@ -11,8 +12,17 @@ class ImeiMatch {
   final int tacSeen; // devices of this model seen before
   final Rec? soldOn; // open sale that already has this IMEI
   final Rec? boughtOn; // purchase that brought this IMEI in
+  final String? suggestName, suggestBrand; // model name when no product matches yet
   const ImeiMatch(this.code,
-      {this.isImei = false, this.valid = true, this.product, this.how = 'none', this.tacSeen = 0, this.soldOn, this.boughtOn});
+      {this.isImei = false,
+      this.valid = true,
+      this.product,
+      this.how = 'none',
+      this.tacSeen = 0,
+      this.soldOn,
+      this.boughtOn,
+      this.suggestName,
+      this.suggestBrand});
 
   String get tac => isImei ? code.substring(0, 8) : '';
 
@@ -90,6 +100,30 @@ class SmartImei {
         }
       }
     }
+    String? sName, sBrand;
+    if (product == null && isImei) {
+      // models taught to the app (Add Product with a scanned IMEI)
+      final t = await Books.query('SELECT * FROM imei_models WHERE tac = ?', [code.substring(0, 8)]);
+      if (t.isNotEmpty) {
+        final pid = t.first['product_id'];
+        if (pid != null) product = await _product(asInt(pid));
+        if (product != null) {
+          how = 'learned';
+        } else {
+          sName = t.first['name'] as String?;
+          sBrand = t.first['brand'] as String?;
+        }
+      }
+    }
+    if (product == null && sName == null && isImei) {
+      // public TAC database (online, cached on the phone)
+      final m = await TacDb.lookup(code);
+      if (m != null) {
+        sName = m.name;
+        sBrand = m.brand;
+        how = 'tacdb';
+      }
+    }
     return ImeiMatch(code,
         isImei: isImei,
         valid: valid,
@@ -97,7 +131,18 @@ class SmartImei {
         how: how,
         tacSeen: seen,
         soldOn: sold.isEmpty ? null : sold.first,
-        boughtOn: bought.isEmpty ? null : bought.first);
+        boughtOn: bought.isEmpty ? null : bought.first,
+        suggestName: sName,
+        suggestBrand: sBrand);
+  }
+
+  /// Remembers that IMEIs starting with this TAC are [productId].
+  static Future<void> learn(String imei, {int? productId, String? name, String? brand}) async {
+    final c = clean(imei);
+    if (!looksLikeImei(c)) return;
+    await Books.execute(
+        'INSERT OR REPLACE INTO imei_models (tac, product_id, name, brand, source, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [c.substring(0, 8), productId, name, brand, 'shop', DateTime.now().toIso8601String()]);
   }
 
   static Future<Rec?> _product(int id) async {

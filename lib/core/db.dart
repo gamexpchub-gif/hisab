@@ -31,7 +31,7 @@ class AppDb {
     );
   }
 
-  static const schemaVersion = 10;
+  static const schemaVersion = 11;
 
   static Future<void> upgrade(Database db, int from, int to) async {
     if (from < 2) {
@@ -81,6 +81,9 @@ class AppDb {
       await db.execute(_emiPlans);
       await db.execute(_emiInstallments);
     }
+    if (from < 11) {
+      await db.execute(_imeiModels);
+    }
   }
 
   static Future<void> configure(Database db) async {
@@ -124,6 +127,10 @@ class AppDb {
       id INTEGER PRIMARY KEY AUTOINCREMENT, plan_id INTEGER NOT NULL REFERENCES emi_plans(id),
       n INTEGER NOT NULL, due_date TEXT NOT NULL, amount INTEGER NOT NULL,
       paid_amount INTEGER NOT NULL DEFAULT 0, paid_on TEXT, payment_id INTEGER, account_id INTEGER)''';
+
+  /// Phone models learned from IMEIs (first 8 digits = TAC).
+  static const _imeiModels = '''CREATE TABLE imei_models (
+      tac TEXT PRIMARY KEY, product_id INTEGER, name TEXT, brand TEXT, source TEXT, updated_at TEXT)''';
 
   static const _cashLends = '''CREATE TABLE cash_lends (
       id INTEGER PRIMARY KEY AUTOINCREMENT, number TEXT NOT NULL UNIQUE, kind TEXT NOT NULL,
@@ -212,6 +219,7 @@ class AppDb {
     _saleReturnItems,
     _emiPlans,
     _emiInstallments,
+    _imeiModels,
     '''CREATE TABLE transfers (
       id INTEGER PRIMARY KEY AUTOINCREMENT, number TEXT NOT NULL UNIQUE, date TEXT NOT NULL,
       from_id INTEGER NOT NULL REFERENCES accounts(id), to_id INTEGER NOT NULL REFERENCES accounts(id),

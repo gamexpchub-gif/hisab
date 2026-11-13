@@ -16,7 +16,19 @@ import '../core/imei_smart.dart';
 ///   picked; a single code is taken at once.
 class BarcodeScannerScreen extends StatefulWidget {
   final String title;
-  const BarcodeScannerScreen({super.key, this.title = 'Scan barcode'});
+
+  /// Batch mode: every code is handed to [onCode] and the camera keeps
+  /// scanning. [onCode] returns what was done ("iPhone 15 added") or null
+  /// when the code matched nothing.
+  final Future<String?> Function(String code)? onCode;
+  const BarcodeScannerScreen({super.key, this.title = 'Scan barcode', this.onCode});
+
+  /// Keeps scanning until Done; returns how many codes were used.
+  static Future<int> scanMany(BuildContext context,
+          {String title = 'Batch scan', required Future<String?> Function(String code) onCode}) async =>
+      await Navigator.of(context)
+          .push<int>(MaterialPageRoute(builder: (_) => BarcodeScannerScreen(title: title, onCode: onCode))) ??
+      0;
 
   static Future<String?> scan(BuildContext context, {String title = 'Scan barcode'}) =>
       Navigator.of(context).push<String>(MaterialPageRoute(builder: (_) => BarcodeScannerScreen(title: title)));
@@ -43,6 +55,13 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> with Single
   final seen = <String, (BarcodeFormat, DateTime)>{};
   Timer? settle;
 
+  // batch mode
+  bool get batch => widget.onCode != null;
+  bool busy = false;
+  int count = 0;
+  final recent = <String, DateTime>{}; // code → when used (no double scans)
+  final log = <(String, bool)>[]; // (message, ok) newest first
+
   @override
   void dispose() {
     settle?.cancel();
@@ -51,11 +70,48 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> with Single
     super.dispose();
   }
 
-  void _finish(String code) {
-    if (done || code.trim().isEmpty) return;
-    done = true;
+  static void beep() {
+    SystemSound.play(SystemSoundType.click);
     HapticFeedback.heavyImpact();
-    Navigator.of(context).pop(code.trim());
+  }
+
+  void _finish(String code) {
+    code = code.trim();
+    if (done || code.isEmpty) return;
+    if (batch) {
+      _use(code);
+      return;
+    }
+    done = true;
+    beep();
+    Navigator.of(context).pop(code);
+  }
+
+  Future<void> _use(String code) async {
+    final last = recent[code];
+    if (busy || (last != null && DateTime.now().difference(last).inMilliseconds < 2500)) {
+      seen.clear();
+      setState(() {});
+      return;
+    }
+    busy = true;
+    beep();
+    String? msg;
+    try {
+      msg = await widget.onCode!(code);
+    } catch (e) {
+      msg = null;
+    }
+    if (!mounted) return;
+    recent[code] = DateTime.now();
+    seen.clear();
+    setState(() {
+      busy = false;
+      if (msg != null) count++;
+      log.insert(0, (msg ?? '$code — not found', msg != null));
+      if (log.length > 4) log.removeLast();
+    });
+    if (msg == null) HapticFeedback.vibrate();
   }
 
   void _detect(BarcodeCapture capture) {
@@ -65,6 +121,7 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> with Single
     for (final b in capture.barcodes) {
       final v = (b.rawValue ?? '').trim();
       if (v.isEmpty) continue;
+      if (batch && (busy || (recent[v] != null && now.difference(recent[v]!).inMilliseconds < 2500))) continue;
       if (!seen.containsKey(v)) added = true;
       seen[v] = (b.format, now);
     }
@@ -190,7 +247,7 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> with Single
                         begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xAA000000), Color(0x00000000)]),
                   ),
                   child: Row(children: [
-                    _glassBtn(Icons.arrow_back_rounded, () => Navigator.of(context).pop()),
+                    _glassBtn(Icons.arrow_back_rounded, () => Navigator.of(context).pop(count)),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(widget.title,
@@ -214,8 +271,12 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> with Single
                 top: frame.bottom + 18,
                 child: IgnorePointer(
                   child: Text(
-                    seen.isEmpty
-                        ? 'Hold the barcode or IMEI label inside the frame · tap to focus · pinch to zoom'
+                    busy
+                        ? 'Adding…'
+                        : seen.isEmpty
+                        ? (batch
+                            ? 'Batch mode · scan items one after another'
+                            : 'Hold the barcode or IMEI label inside the frame · tap to focus · pinch to zoom')
                         : codes.length > 1
                             ? '${codes.length} codes found — tap the one you need'
                             : 'Reading…',
@@ -230,6 +291,33 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> with Single
                 right: 16,
                 bottom: mq.padding.bottom + 18,
                 child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  if (batch && log.isNotEmpty)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(color: const Color(0xEE14164A), borderRadius: BorderRadius.circular(18)),
+                      child: Column(children: [
+                        for (final (i, e) in log.indexed)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 3),
+                            child: Row(children: [
+                              Icon(e.$2 ? Icons.check_circle_rounded : Icons.error_outline_rounded,
+                                  size: 18, color: e.$2 ? const Color(0xFF34D399) : const Color(0xFFFFB020)),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(e.$1,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                        fontFamily: 'Jakarta',
+                                        color: i == 0 ? Colors.white : Colors.white60,
+                                        fontSize: 13.5,
+                                        fontWeight: i == 0 ? FontWeight.w700 : FontWeight.w500)),
+                              ),
+                            ]),
+                          ),
+                      ]),
+                    ),
                   if (codes.length > 1)
                     Container(
                       constraints: BoxConstraints(maxHeight: h * .3),
@@ -274,6 +362,23 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> with Single
                     const Icon(Icons.zoom_in_rounded, color: Colors.white70, size: 20),
                   ]),
                   const SizedBox(height: 8),
+                  if (batch)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: GestureDetector(
+                        onTap: () => Navigator.of(context).pop(count),
+                        child: Container(
+                          height: 52,
+                          decoration: BoxDecoration(
+                            gradient: const LinearGradient(colors: [Color(0xFF34D399), Color(0xFF059669)]),
+                            borderRadius: BorderRadius.circular(26),
+                          ),
+                          alignment: Alignment.center,
+                          child: Text(count == 0 ? 'Done' : 'Done · $count item${count == 1 ? '' : 's'} added',
+                              style: const TextStyle(fontFamily: 'Jakarta', color: Colors.white, fontSize: 15, fontWeight: FontWeight.w800)),
+                        ),
+                      ),
+                    ),
                   GestureDetector(
                     onTap: _manual,
                     child: Container(

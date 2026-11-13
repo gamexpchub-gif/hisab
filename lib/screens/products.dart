@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../core/books.dart';
 import '../core/money.dart';
 import '../main.dart';
+import '../print/labels.dart';
 import '../ui/photo.dart';
 import '../ui/theme.dart';
 import '../ui/widgets.dart';
@@ -770,6 +771,9 @@ class _MoreMenu extends StatelessWidget {
           case 'edit':
             open(context, ProductForm(product: p));
             break;
+          case 'label':
+            open(context, LabelStudio(products: [p]));
+            break;
           case 'buy':
             open(context, const PurchaseForm());
             break;
@@ -801,6 +805,7 @@ class _MoreMenu extends StatelessWidget {
       },
       itemBuilder: (_) => const [
         PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_rounded), title: Text('Edit product'))),
+        PopupMenuItem(value: 'label', child: ListTile(leading: Icon(Icons.qr_code_2_rounded), title: Text('Print barcode labels'))),
         PopupMenuItem(value: 'buy', child: ListTile(leading: Icon(Icons.add_shopping_cart_rounded), title: Text('Purchase stock'))),
         PopupMenuItem(value: 'sell', child: ListTile(leading: Icon(Icons.point_of_sale_rounded), title: Text('Sell'))),
         PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline_rounded, color: C.red), title: Text('Delete'))),
@@ -884,7 +889,11 @@ class ProductView extends StatelessWidget {
         return PageShell(
           title: p['name'] as String,
           subtitle: [p['variant'], p['brand'], p['category'], p['sku']].where((e) => e != null && '$e'.isNotEmpty).join(' · '),
-          action: RoundIcon(icon: Icons.edit_rounded, onTap: () => open(context, ProductForm(product: p))),
+          action: Row(mainAxisSize: MainAxisSize.min, children: [
+            RoundIcon(icon: Icons.qr_code_2_rounded, onTap: () => open(context, LabelStudio(products: [p]))),
+            const SizedBox(width: 8),
+            RoundIcon(icon: Icons.edit_rounded, onTap: () => open(context, ProductForm(product: p))),
+          ]),
           children: [
             const SizedBox(height: 12),
             Center(child: ProductThumb(p, width: 170, height: 196)),

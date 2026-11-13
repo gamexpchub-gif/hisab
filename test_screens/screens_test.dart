@@ -29,6 +29,7 @@ import 'package:hisab/screens/purchase_pos.dart';
 import 'package:hisab/screens/sale_pos.dart';
 import 'package:hisab/screens/sale_return.dart';
 import 'package:hisab/print/invoice_pdf.dart';
+import 'package:hisab/print/labels.dart';
 import 'package:hisab/ui/theme.dart';
 
 Future<void> _assetFont(String family, String asset) async {
@@ -77,6 +78,16 @@ void main() {
       final bytes = await buildInvoicePdf(d!, PrintOptions(paper: paper));
       Directory('screenshots').createSync(recursive: true);
       File('screenshots/$name.pdf').writeAsBytesSync(bytes);
+      expect(bytes.length, greaterThan(1000));
+    });
+  }
+
+  for (final z in labelSizes.where((z) => z.id == '50x25' || z.id == 'a4')) {
+    test('labels_${z.id}', () async {
+      final ps = await Books.query('SELECT * FROM products ORDER BY id LIMIT 4');
+      final bytes = await buildLabels([for (final p in ps) (p, z.id == 'a4' ? 6 : 1)], size: z, shop: 'GameX Pc Hub');
+      Directory('screenshots').createSync(recursive: true);
+      File('screenshots/labels_${z.id}.pdf').writeAsBytesSync(bytes);
       expect(bytes.length, greaterThan(1000));
     });
   }

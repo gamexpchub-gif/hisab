@@ -1063,6 +1063,9 @@ class Books {
   // ------------------------------------------------------------ queries
   static Future<List<Rec>> query(String sql, [List<Object?>? args]) async => (await _db).rawQuery(sql, args);
 
+  /// Runs a statement that changes data (no rows returned).
+  static Future<void> execute(String sql, [List<Object?>? args]) async => (await _db).execute(sql, args);
+
   static Future<List<Rec>> accounts({String? kind, String? type}) async {
     final db = await _db;
     final where = <String>[];

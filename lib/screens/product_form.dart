@@ -189,6 +189,7 @@ class _ProductFormState extends State<ProductForm> {
   }
 
   bool looking = false;
+  String? pendingImei; // IMEI scanned here — its model is learned on save
   String? smartNote;
 
   /// Smart scan: an IMEI of a known model copies that product's details; a box
@@ -200,9 +201,20 @@ class _ProductFormState extends State<ProductForm> {
       final m = await SmartImei.match(c);
       if (!mounted) return;
       setState(() => looking = false);
+      pendingImei = c;
       if (m.product == null) {
-        setState(() => smartNote = 'New model (IMEI ${m.tac}…) — type the name once; next time this model is filled in automatically'
-            '${m.isImei && !m.valid ? '. ⚠ IMEI check digit looks wrong' : ''}');
+        if (m.suggestName != null) {
+          setState(() {
+            name.text = m.suggestName!;
+            if ((m.suggestBrand ?? '').isNotEmpty) brand.text = m.suggestBrand!;
+            smartNote = 'Model found from IMEI: ${m.suggestName}${m.how == 'tacdb' ? ' (TAC database)' : ''} — add storage / colour and save';
+          });
+          _analyse();
+          if (!guess.isEmpty) await _applyGuess();
+        } else {
+          setState(() => smartNote = 'New model (IMEI ${m.tac}…) — type the name once and save; this model is then recognised automatically'
+              '${!m.valid ? '. ⚠ IMEI check digit looks wrong' : ''}');
+        }
         return;
       }
       final p = m.product!;
@@ -311,7 +323,10 @@ class _ProductFormState extends State<ProductForm> {
     }
     setState(() => saving = true);
     try {
-      await Books.saveProduct(_values(), id: _id, openingQty: isNew ? qty : 0, openingCost: isNew ? _m(cost) : 0);
+      final pid = await Books.saveProduct(_values(), id: _id, openingQty: isNew ? qty : 0, openingCost: isNew ? _m(cost) : 0);
+      if (pendingImei != null) {
+        await SmartImei.learn(pendingImei!, productId: pid, name: name.text.trim(), brand: brand.text.trim());
+      }
       if (!mounted) return;
       HapticFeedback.mediumImpact();
       toast(context, isNew ? 'Product added' : 'Product updated');
