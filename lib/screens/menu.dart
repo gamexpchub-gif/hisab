@@ -26,6 +26,7 @@ import 'sales.dart';
 import 'search.dart';
 import 'settings.dart';
 import 'smart_ai.dart';
+import 'daily_report_screen.dart';
 
 const _bg = Color(0xFFF6F7FC);
 const _ink = Color(0xFF0A0E26);
@@ -95,6 +96,8 @@ class _MenuScreenState extends State<MenuScreen> {
       ('Smart AI', [
         _Item('Smart Business AI', 'Aaj ki korben: baki, EMI, stock, lav — auto suggestion', Icons.auto_awesome_rounded,
             const [Color(0xFF7B3FF2), Color(0xFF1B1F6B)], () => go(const SmartAiScreen())),
+        _Item('Daily AI Report', 'Rat-e auto report: bikri, lav, kal ke debe, order list', Icons.summarize_rounded,
+            const [Color(0xFF6AA5FF), Color(0xFF1A47C8)], () => go(const DailyReportScreen())),
       ]),
       ('Sales & billing', [
         _Item('Sales invoices', 'Every sale, payments and dues', Icons.receipt_long_rounded,

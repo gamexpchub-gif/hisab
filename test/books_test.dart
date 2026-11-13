@@ -6,6 +6,7 @@ import 'package:hisab/core/db.dart';
 import 'package:hisab/core/money.dart';
 import 'package:hisab/core/imei_smart.dart';
 import 'package:hisab/core/insights.dart';
+import 'package:hisab/core/daily_report.dart';
 import 'package:hisab/core/gst_report.dart';
 import 'package:hisab/core/xlsx.dart';
 import 'package:hisab/core/smart.dart';
@@ -493,6 +494,24 @@ void main() {
     expect(Xlsx.col(0), 'A');
     expect(Xlsx.col(25), 'Z');
     expect(Xlsx.col(26), 'AA');
+  });
+
+  test('Daily AI report: sales, profit, tomorrow and reorder', () async {
+    final before = await DailyReport.load();
+    final c = await Books.saveParty('customer', {'name': 'Report Customer'});
+    final p = await Books.saveProduct({'name': 'Report Phone', 'gst_bp': 0, 'price': 1000000, 'low_stock': 1});
+    final sup = await Books.saveParty('supplier', {'name': 'Report Supplier'});
+    await Books.createPurchase(items: [ItemIn(p, 2, 700000)], supplierId: sup);
+    await Books.createSale(items: [ItemIn(p, 1, 1000000)], customerId: c, paid: 0);
+    await Books.addDue('customer', c, 1000000, ymd(DateTime.now().add(const Duration(days: 1))), null);
+    final r = await DailyReport.load();
+    expect(r.sales - before.sales, 1000000);
+    expect(r.profit - before.profit, 300000);
+    expect(r.newDue - before.newDue, 1000000);
+    expect(r.tomorrow.any((x) => x['name'] == 'Report Customer'), isTrue);
+    expect(r.reorder.any((x) => x['name'] == 'Report Phone'), isTrue);
+    expect(r.text('GameX'), contains('Report Customer'));
+    expect(r.headline(), contains('Bikri'));
   });
 
   test('demo data loads and balances', () async {

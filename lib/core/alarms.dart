@@ -107,4 +107,39 @@ class Alarms {
       await _plugin.cancel(_id(dueId, 2));
     } catch (_) {}
   }
+
+  // ---------------------------------------------------------------- daily AI report
+  static const _dailyBase = 900000;
+
+  static Future<void> scheduleDaily(int slot, DateTime when, String title, String body) async {
+    try {
+      await init();
+      final at = tz.TZDateTime(tz.local, when.year, when.month, when.day, when.hour, when.minute);
+      if (at.isBefore(tz.TZDateTime.now(tz.local))) return;
+      await _schedule(
+        _dailyBase + slot,
+        title,
+        body,
+        at,
+        NotificationDetails(
+          android: AndroidNotificationDetails(
+            'daily_ai_report',
+            'Daily AI report',
+            channelDescription: 'Every evening: sales, profit, collection, tomorrow\'s payments and what to reorder',
+            importance: Importance.high,
+            priority: Priority.high,
+            styleInformation: BigTextStyleInformation(body, contentTitle: title),
+          ),
+        ),
+      );
+    } catch (_) {}
+  }
+
+  static Future<void> cancelDaily() async {
+    try {
+      await init();
+      await _plugin.cancel(_dailyBase);
+      await _plugin.cancel(_dailyBase + 1);
+    } catch (_) {}
+  }
 }

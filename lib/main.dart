@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'core/backup.dart';
+import 'core/daily_report.dart';
 import 'screens/dashboard.dart';
 import 'screens/home.dart';
 import 'screens/menu.dart';
@@ -27,6 +28,8 @@ void main() {
   runApp(const HisabApp());
   // one automatic backup a day, a few seconds after start
   Future<void>.delayed(const Duration(seconds: 6), Backup.autoDaily);
+  // tonight's AI report notification, kept fresh as the books change
+  Future<void>.delayed(const Duration(seconds: 9), DailyReport.start);
 }
 
 class HisabApp extends StatelessWidget {

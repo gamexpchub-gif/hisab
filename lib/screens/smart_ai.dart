@@ -8,6 +8,7 @@ import '../core/insights.dart';
 import '../core/money.dart';
 import '../ui/contact.dart';
 import '../ui/widgets.dart';
+import 'daily_report_screen.dart';
 import 'emi.dart';
 import 'party_profile.dart';
 import 'products.dart';
@@ -249,6 +250,26 @@ class SmartAiScreen extends StatelessWidget {
                   ]),
                 ),
               ]),
+            ),
+            const SizedBox(height: 10),
+            Material(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(18),
+              child: ListTile(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                leading: Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(13),
+                      gradient: const LinearGradient(colors: [Color(0xFF6AA5FF), Color(0xFF1A47C8)])),
+                  child: const Icon(Icons.summarize_rounded, color: Colors.white),
+                ),
+                title: Text('Daily AI Report', style: _j(14.5, FontWeight.w800, _ink)),
+                subtitle: Text('Aajker bikri, lav, collection, kal ke debe, ki order korben', style: _j(11.5, FontWeight.w500, _muted)),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => open(context, const DailyReportScreen()),
+              ),
             ),
             for (final g in groups)
               if (items.any((i) => i.level == g.$1)) ...[
