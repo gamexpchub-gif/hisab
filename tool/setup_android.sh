@@ -70,4 +70,35 @@ sed -i '/^org.gradle.jvmargs=/d;/^kotlin.daemon.jvmargs=/d' "$PROPS"
 echo 'org.gradle.jvmargs=-Xmx3G -XX:MaxMetaspaceSize=1G -XX:ReservedCodeCacheSize=256m -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8' >> "$PROPS"
 echo 'kotlin.daemon.jvmargs=-Xmx1536m' >> "$PROPS"
 
+# Keep the Android build tools in step with the installed Flutter: a project
+# created by an older Flutter keeps old AGP / Kotlin / Gradle versions, and a
+# newer Flutter then refuses to build ("AGP version is lower than Flutter's
+# minimum"). Copy the versions from a fresh template made by this Flutter.
+TPL=$(mktemp -d)
+if (cd "$TPL" && flutter create --platforms=android --no-pub -q tpl >/dev/null 2>&1); then
+  for SET in android/settings.gradle.kts android/settings.gradle; do
+    [ -f "$SET" ] || continue
+    TSET="$TPL/tpl/$SET"
+    [ -f "$TSET" ] || TSET=$(ls "$TPL"/tpl/android/settings.gradle* 2>/dev/null | head -1)
+    [ -f "$TSET" ] || continue
+    for ID in com.android.application org.jetbrains.kotlin.android dev.flutter.flutter-plugin-loader; do
+      V=$(grep -oE "\"?$ID\"?\)? version \"[^\"]+\"" "$TSET" | grep -oE '"[0-9][^"]*"' | tr -d '"' | head -1)
+      [ -n "$V" ] || continue
+      sed -i -E "s/(\"?$ID\"?\)? version )\"[^\"]+\"/\1\"$V\"/" "$SET"
+      echo "  $ID → $V"
+    done
+  done
+  TW="$TPL/tpl/android/gradle/wrapper/gradle-wrapper.properties"
+  W=android/gradle/wrapper/gradle-wrapper.properties
+  if [ -f "$TW" ] && [ -f "$W" ]; then
+    URL=$(grep '^distributionUrl=' "$TW")
+    if [ -n "$URL" ]; then
+      sed -i '/^distributionUrl=/d' "$W"
+      echo "$URL" >> "$W"
+      echo "  gradle → ${URL##*/}"
+    fi
+  fi
+fi
+rm -rf "$TPL"
+
 echo "Android project ready."
