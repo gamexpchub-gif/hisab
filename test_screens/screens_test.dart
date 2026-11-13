@@ -14,7 +14,9 @@ import 'package:hisab/core/books.dart';
 import 'package:hisab/core/db.dart';
 import 'package:hisab/main.dart';
 import 'package:hisab/screens/bank.dart';
+import 'package:hisab/screens/account.dart';
 import 'package:hisab/screens/backup_screen.dart';
+import 'package:hisab/screens/login.dart';
 import 'package:hisab/screens/emi.dart';
 import 'package:hisab/screens/expenses.dart';
 import 'package:hisab/screens/imei.dart';
@@ -79,7 +81,7 @@ void main() {
     });
   }
 
-  for (final (name, index) in [('home', 0), ('dashboard', 1), ('products', 2), ('menu', 3), ('add_product', -1), ('new_sale', -2), ('new_purchase', -3), ('ledgers', -4), ('customer_profile', -5), ('expenses', -6), ('customers', -7), ('sales', -8), ('bank', -9), ('add_card', -10), ('purchases', -11), ('supplier_profile', -12), ('sale_returns', -13), ('sale_return_form', -14), ('invoice_view', -15), ('sale_complete', -16), ('emi', -17), ('emi_plan', -18), ('imei', -19), ('backup', -20), ('security', -21), ('lock', -22)]) {
+  for (final (name, index) in [('home', 0), ('dashboard', 1), ('products', 2), ('menu', 3), ('add_product', -1), ('new_sale', -2), ('new_purchase', -3), ('ledgers', -4), ('customer_profile', -5), ('expenses', -6), ('customers', -7), ('sales', -8), ('bank', -9), ('add_card', -10), ('purchases', -11), ('supplier_profile', -12), ('sale_returns', -13), ('sale_return_form', -14), ('invoice_view', -15), ('sale_complete', -16), ('emi', -17), ('emi_plan', -18), ('imei', -19), ('backup', -20), ('security', -21), ('lock', -22), ('login', -23), ('account', -24)]) {
     testWidgets(name, (t) async {
       t.view.physicalSize = const Size(1080, 2340);
       t.view.devicePixelRatio = 2.75;
@@ -134,6 +136,10 @@ void main() {
                                                                                               ? const SecurityScreen()
                                                                                               : index == -22
                                                                                                   ? LockScreen(onUnlocked: () {})
+                                                                                                  : index == -23
+                                                                                                      ? LoginScreen(onDone: () {})
+                                                                                                      : index == -24
+                                                                                                          ? const AccountScreen()
                                                                   : const Scaffold(
                                                       backgroundColor: Color(0xFF8A8FAD),
                                                       body: Align(alignment: Alignment.bottomCenter, child: AccountSheet()),

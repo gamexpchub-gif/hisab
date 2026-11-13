@@ -5,6 +5,7 @@ import 'package:archive/archive.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../cloud/cloud.dart';
 import 'books.dart';
 import 'db.dart';
 import 'money.dart';
@@ -103,7 +104,10 @@ class Backup {
       if (last != null && last.year == now.year && last.month == now.month && last.day == now.day) return;
       final any = asInt((await Books.query('SELECT COUNT(*) AS c FROM journal_entries')).first['c']);
       if (any == 0) return; // nothing to protect yet
-      await create(auto: true);
+      final f = await create(auto: true);
+      // and the same backup to the cloud when signed in
+      await Cloud.load();
+      if (Cloud.user != null && s['cloud_auto'] != '0') await Cloud.uploadBackup(f);
     } catch (_) {
       // a failed automatic backup must never stop the app
     }

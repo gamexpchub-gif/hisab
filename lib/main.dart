@@ -7,6 +7,7 @@ import 'screens/home.dart';
 import 'screens/menu.dart';
 import 'screens/products.dart';
 import 'screens/sale_form.dart';
+import 'screens/login.dart';
 import 'screens/security.dart';
 import 'ui/theme.dart';
 import 'ui/liquid_nav.dart';
@@ -37,7 +38,7 @@ class HisabApp extends StatelessWidget {
       title: 'GameX Hisab',
       debugShowCheckedModeBanner: false,
       theme: buildTheme(),
-      home: const AppLockGate(child: Shell()),
+      home: const AuthGate(child: AppLockGate(child: Shell())),
     );
   }
 }

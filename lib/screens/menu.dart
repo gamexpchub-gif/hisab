@@ -7,6 +7,7 @@ import '../core/money.dart';
 import '../main.dart';
 import '../ui/photo.dart';
 import '../ui/widgets.dart';
+import 'account.dart';
 import 'activity.dart';
 import 'backup_screen.dart';
 import 'emi.dart';
@@ -143,6 +144,8 @@ class _MenuScreenState extends State<MenuScreen> {
             const [Color(0xFF94A3B8), Color(0xFF475569)], () => go(const ActivityScreen())),
         _Item('Search everything', 'Customers, invoices, products, IMEI', Icons.manage_search_rounded,
             const [Color(0xFF818CF8), Color(0xFF4F46E5)], () => go(const SearchScreen())),
+        _Item('Account & Cloud', 'Login · cloud backup on any phone', Icons.account_circle_rounded,
+            const [Color(0xFF8B5CF6), Color(0xFF1B2163)], () => go(const AccountScreen())),
         _Item('Backup & Restore', 'Save everything to Drive, restore anytime', Icons.cloud_upload_rounded,
             const [Color(0xFF34D399), Color(0xFF0F8C58)], () => go(const BackupScreen())),
         _Item('Security', 'App lock with PIN & fingerprint', Icons.lock_rounded,

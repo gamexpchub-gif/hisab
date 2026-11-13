@@ -5,6 +5,7 @@ import '../ui/theme.dart';
 import '../ui/widgets.dart';
 import 'forms.dart';
 import '../ui/photo.dart';
+import 'account.dart';
 import 'backup_screen.dart';
 import 'sale_return.dart';
 import 'security.dart';
@@ -89,6 +90,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: Text('Profile photo\nTap to change', style: TextStyle(color: C.muted, height: 1.4)),
           ),
           const Icon(Icons.photo_camera_rounded, color: C.purple2),
+        ]),
+      ),
+      CardBox(
+        onTap: () => open(context, const AccountScreen()),
+        child: Row(children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              gradient: const LinearGradient(colors: [Color(0xFF8B5CF6), Color(0xFF1B2163)]),
+            ),
+            child: const Icon(Icons.account_circle_rounded, color: Colors.white),
+          ),
+          const SizedBox(width: 14),
+          const Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Account & Cloud', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+              SizedBox(height: 2),
+              Text('Login and keep your books in the cloud', style: TextStyle(color: C.muted, fontSize: 12.5)),
+            ]),
+          ),
+          const Icon(Icons.chevron_right_rounded, color: C.muted),
         ]),
       ),
       CardBox(
