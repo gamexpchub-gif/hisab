@@ -78,7 +78,7 @@ class Backup {
       ...counts,
     }));
     archive.addFile(ArchiveFile('backup.json', meta.length, meta));
-    final zip = ZipEncoder().encode(archive);
+    final zip = ZipEncoder().encode(archive) ?? (throw AccountingError("Could not create the backup file"));
     final now = DateTime.now();
     final stamp = '${now.year}-${two(now.month)}-${two(now.day)}_${two(now.hour)}${two(now.minute)}';
     final file = File(p.join((await folder()).path, 'GameX-Hisab-${auto ? 'auto-' : ''}$stamp.zip'));
