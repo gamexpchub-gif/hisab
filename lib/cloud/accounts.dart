@@ -257,34 +257,86 @@ class Accounts {
   }
 }
 
-/// Firestore rules for Hisab AI. Paste into Firebase → Firestore → Rules.
-/// Admins: the User ID said8180 (signs in as said8180@deencircle.online) and
-/// optionally a second email in place of ADMIN_EMAIL.
+/// Firestore rules for Hisab AI (same as firebase/firestore.rules). Paste into
+/// Firebase → Firestore → Rules and press Publish.
 const firestoreRules = r'''rules_version = '2';
+
+// =============================================================================
+// Hisab AI — Firestore security rules
+//   users/{uid}/backups/**   cloud backups: only the owner reads and writes;
+//                            the admin can read (support / restore help)
+//   accounts/{uid}           plan & usage: the owner creates it as a trial and
+//                            may update only usage fields; plan, dates, block
+//                            and notes are changed by the admin only
+//   requests/{id}            plan requests: the owner creates a pending one;
+//                            the admin approves or rejects
+// Everything else is denied.
+// =============================================================================
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() { return request.auth != null; }
-    function isAdmin() { return signedIn() && request.auth.token.email in ['said8180@deencircle.online', 'ADMIN_EMAIL']; }
 
-    match /users/{uid}/{document=**} {
-      allow read, write: if signedIn() && (request.auth.uid == uid || isAdmin());
+    // ---------------------------------------------------------------- helpers
+    function signedIn() { return request.auth != null; }
+    function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
+    function isAdmin() {
+      return signedIn() && request.auth.token.email in [
+        'said8180@deencircle.online'
+      ];
     }
+    function incoming() { return request.resource.data; }
+    function changed() { return incoming().diff(resource.data).affectedKeys(); }
+    function validPlan(p) { return p in ['basic', 'gold', 'premium']; }
+
+    // ---------------------------------------------------------------- backups
+    match /users/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow create, update: if isOwner(uid)
+        && incoming().keys().hasOnly(['email', 'name', 'lastBackup']);
+      allow delete: if isOwner(uid);
+
+      match /{document=**} {
+        allow read: if isOwner(uid) || isAdmin();
+        allow write: if isOwner(uid);
+      }
+    }
+
+    // ---------------------------------------------------------------- accounts
     match /accounts/{uid} {
-      allow get: if signedIn() && (request.auth.uid == uid || isAdmin());
-      allow list, delete: if isAdmin();
-      allow create: if isAdmin() || (signedIn() && request.auth.uid == uid
-          && request.resource.data.plan == 'trial'
-          && request.resource.data.blocked == false
-          && request.resource.data.trialUntil <= request.time + duration.value(8, 'd'));
-      allow update: if isAdmin() || (signedIn() && request.auth.uid == uid
-          && !request.resource.data.diff(resource.data).affectedKeys()
-              .hasAny(['plan', 'planUntil', 'trialUntil', 'blocked', 'note']));
+      allow get: if isOwner(uid) || isAdmin();
+      allow list: if isAdmin();
+
+      // first sign-in: a 7-day trial, nothing more
+      allow create: if isAdmin() || (isOwner(uid)
+        && incoming().keys().hasOnly(['email', 'name', 'plan', 'trialUntil', 'blocked', 'created'])
+        && incoming().plan == 'trial'
+        && incoming().blocked == false
+        && incoming().trialUntil is timestamp
+        && incoming().trialUntil <= request.time + duration.value(8, 'd'));
+
+      // the app reports usage; it can never change its own plan
+      allow update: if isAdmin() || (isOwner(uid)
+        && changed().hasOnly(['email', 'name', 'shop', 'phone', 'stores', 'products', 'sales', 'lastSeen', 'pending']));
+
+      allow delete: if isAdmin();
     }
+
+    // ---------------------------------------------------------------- plan requests
     match /requests/{id} {
-      allow create: if signedIn() && request.resource.data.uid == request.auth.uid
-          && request.resource.data.status == 'pending';
+      allow create: if signedIn()
+        && incoming().keys().hasOnly(['uid', 'email', 'name', 'plan', 'months', 'note', 'status', 'created'])
+        && incoming().uid == request.auth.uid
+        && incoming().status == 'pending'
+        && validPlan(incoming().plan)
+        && incoming().months is int && incoming().months >= 1 && incoming().months <= 24
+        && incoming().note is string && incoming().note.size() <= 200;
+
       allow get: if signedIn() && (resource.data.uid == request.auth.uid || isAdmin());
       allow list, update, delete: if isAdmin();
+    }
+
+    // ---------------------------------------------------------------- everything else
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }''';
