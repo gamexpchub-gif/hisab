@@ -1,0 +1,674 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Hisab AI Admin</title>
+<link rel="icon" href="favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#F5F6FB;--panel:#FFFFFF;--ink:#0A0E26;--muted:#6B7094;--line:#E9EAF5;--soft:#F1F2F9;
+  --brand:#5B2EE0;--brand2:#4318D2;--navy:#0F1240;--green:#16A36A;--red:#DC4545;--amber:#E39A0F;--cyan:#22D3EE;
+  --basic:#1A47C8;--gold:#E08A00;--premium:#5B2EE0;--trial:#0E9F5E;--none:#D81E4A;
+  --shadow:0 10px 30px -14px rgba(42,47,122,.35);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:'Plus Jakarta Sans',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px}
+button,input,select,textarea{font:inherit;color:inherit}
+a{color:var(--brand)}
+.hidden{display:none!important}
+
+/* ---------- login ---------- */
+#login{min-height:100vh;display:grid;place-items:center;padding:24px;
+  background:radial-gradient(900px 500px at 80% -10%,rgba(124,63,242,.55),transparent 60%),linear-gradient(135deg,#0A0C34,#2A1E8F 60%,#6B35EE)}
+.login-card{width:100%;max-width:400px;background:#fff;border-radius:28px;padding:30px;box-shadow:0 30px 60px -20px rgba(0,0,0,.5)}
+.login-card .logo{display:flex;align-items:center;gap:12px;margin-bottom:22px}
+.login-card .logo img{width:52px;height:52px;border-radius:15px}
+.login-card h1{margin:0;font-size:22px;font-weight:800}
+.login-card h1 span{background:linear-gradient(90deg,#7C3FF2,#22D3EE);-webkit-background-clip:text;background-clip:text;color:transparent}
+.login-card p{margin:2px 0 0;color:var(--muted);font-size:13px}
+.field{display:block;margin-bottom:12px}
+.field span{display:block;font-size:12px;font-weight:700;color:var(--muted);margin-bottom:6px}
+.field input,.field select,.field textarea{width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:14px;background:#FBFBFE;outline:none;transition:.15s}
+.field input:focus,.field select:focus,.field textarea:focus{border-color:var(--brand);box-shadow:0 0 0 4px rgba(91,46,224,.12);background:#fff}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:14px;padding:11px 18px;font-weight:800;cursor:pointer;transition:.15s;white-space:nowrap}
+.btn:disabled{opacity:.55;cursor:default}
+.btn-primary{background:linear-gradient(135deg,#6B35EE,#4318D2);color:#fff;box-shadow:0 10px 20px -10px rgba(67,24,210,.7)}
+.btn-primary:hover:not(:disabled){filter:brightness(1.08)}
+.btn-ghost{background:var(--soft);color:var(--ink)}
+.btn-ghost:hover{background:#E8E9F5}
+.btn-green{background:var(--green);color:#fff}
+.btn-red{background:#FDECEC;color:var(--red)}
+.btn-block{width:100%;padding:13px}
+.err{background:#FDECEC;color:var(--red);border-radius:12px;padding:10px 12px;font-size:13px;font-weight:600;margin-bottom:12px}
+
+/* ---------- layout ---------- */
+.app{display:grid;grid-template-columns:250px 1fr;min-height:100vh}
+aside{background:linear-gradient(180deg,#0A0C34,#1B1460);color:#fff;padding:22px 16px;position:sticky;top:0;height:100vh;display:flex;flex-direction:column}
+.brand{display:flex;align-items:center;gap:11px;padding:4px 8px 22px}
+.brand img{width:40px;height:40px;border-radius:12px}
+.brand b{font-size:17px;display:block}
+.brand small{color:rgba(255,255,255,.6);font-size:11.5px;font-weight:600}
+nav a{display:flex;align-items:center;gap:11px;padding:11px 12px;border-radius:12px;color:rgba(255,255,255,.75);text-decoration:none;font-weight:700;margin-bottom:4px;cursor:pointer}
+nav a:hover{background:rgba(255,255,255,.07);color:#fff}
+nav a.on{background:linear-gradient(135deg,rgba(124,63,242,.9),rgba(67,24,210,.9));color:#fff;box-shadow:0 10px 20px -12px rgba(124,63,242,.9)}
+nav a .count{margin-left:auto;background:#FFE08A;color:#3B2A00;border-radius:9px;padding:1px 8px;font-size:11.5px}
+.side-foot{margin-top:auto;padding:12px;border-radius:14px;background:rgba(255,255,255,.06);font-size:12px}
+.side-foot b{display:block;font-size:13px;overflow:hidden;text-overflow:ellipsis}
+.side-foot button{margin-top:10px;width:100%;background:rgba(255,255,255,.1);color:#fff}
+main{padding:24px 28px 60px;min-width:0}
+.top{display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap}
+.top h2{margin:0;font-size:24px;font-weight:800}
+.top p{margin:2px 0 0;color:var(--muted);font-size:13px}
+.top .sp{flex:1}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:800}
+.menu-btn{display:none}
+
+/* ---------- cards ---------- */
+.grid{display:grid;gap:14px}
+.kpis{grid-template-columns:repeat(4,minmax(0,1fr))}
+.card{background:var(--panel);border:1px solid #EFF0F8;border-radius:20px;padding:18px;box-shadow:var(--shadow)}
+.kpi .l{color:var(--muted);font-size:12.5px;font-weight:700;display:flex;align-items:center;gap:8px}
+.kpi .v{font-size:26px;font-weight:800;margin-top:6px;letter-spacing:-.5px}
+.kpi .s{color:var(--muted);font-size:12px;font-weight:600;margin-top:2px}
+.ico{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;color:#fff;flex:none}
+.hero{background:linear-gradient(135deg,#0F1240,#2A1E8F 55%,#6B35EE);color:#fff;border:0;position:relative;overflow:hidden}
+.hero::after{content:'';position:absolute;right:-60px;top:-80px;width:260px;height:260px;border-radius:50%;background:radial-gradient(rgba(255,255,255,.18),transparent 70%)}
+.hero .l,.hero .s{color:rgba(255,255,255,.75)}
+.row2{grid-template-columns:1.4fr 1fr;margin-top:14px}
+.card h3{margin:0 0 12px;font-size:15.5px;font-weight:800;display:flex;align-items:center;gap:8px}
+.card h3 .sp{flex:1}
+.legend{display:flex;flex-direction:column;gap:8px}
+.legend div{display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px}
+.legend i{width:10px;height:10px;border-radius:50%}
+.legend span{margin-left:auto;font-weight:800}
+.donut-wrap{display:flex;align-items:center;gap:20px}
+svg text{font-family:inherit}
+
+/* ---------- tables ---------- */
+.tools{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;align-items:center}
+.search{flex:1;min-width:220px;position:relative}
+.search input{width:100%;padding:11px 14px 11px 38px;border:1px solid var(--line);border-radius:14px;background:#fff;outline:none}
+.search input:focus{border-color:var(--brand)}
+.search svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);opacity:.5}
+.tabs{display:flex;gap:6px;flex-wrap:wrap}
+.tab{padding:8px 13px;border-radius:12px;border:1px solid var(--line);background:#fff;font-weight:700;cursor:pointer;font-size:13px}
+.tab.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.table-wrap{overflow:auto;border-radius:16px;border:1px solid #EFF0F8;background:#fff}
+table{width:100%;border-collapse:collapse;min-width:820px}
+th{text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:800;padding:12px 14px;background:#FAFAFE;border-bottom:1px solid var(--line);position:sticky;top:0;cursor:pointer;user-select:none}
+td{padding:12px 14px;border-bottom:1px solid var(--soft);vertical-align:middle}
+tr:last-child td{border-bottom:0}
+tbody tr{cursor:pointer;transition:.1s}
+tbody tr:hover{background:#FAF8FF}
+.u{display:flex;align-items:center;gap:10px}
+.av{width:36px;height:36px;border-radius:11px;display:grid;place-items:center;color:#fff;font-weight:800;flex:none}
+.u b{display:block;font-size:13.5px}
+.u small{color:var(--muted);font-size:12px}
+.badge{display:inline-flex;align-items:center;gap:5px;padding:4px 9px;border-radius:9px;font-size:11.5px;font-weight:800;color:#fff}
+.num{font-variant-numeric:tabular-nums;font-weight:700}
+.muted{color:var(--muted)}
+.empty{text-align:center;padding:40px;color:var(--muted);font-weight:600}
+
+/* ---------- requests ---------- */
+.req{display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:center;padding:14px;border-radius:16px;background:#FFF9EC;border:1px solid #FCE3B0;margin-bottom:10px}
+.req .amt{font-size:20px;font-weight:800;text-align:right}
+.req .acts{display:flex;gap:8px;margin-top:8px}
+
+/* ---------- drawer ---------- */
+.shade{position:fixed;inset:0;background:rgba(10,14,38,.45);backdrop-filter:blur(2px);z-index:20;opacity:0;pointer-events:none;transition:.2s}
+.shade.on{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;right:0;height:100%;width:min(460px,100%);background:#fff;z-index:21;transform:translateX(100%);transition:.25s cubic-bezier(.2,.8,.2,1);display:flex;flex-direction:column;box-shadow:-20px 0 40px -20px rgba(0,0,0,.35)}
+.drawer.on{transform:none}
+.drawer header{padding:20px;background:linear-gradient(135deg,#0F1240,#4318D2);color:#fff}
+.drawer header .x{float:right;background:rgba(255,255,255,.15);color:#fff;border:0;border-radius:10px;width:34px;height:34px;cursor:pointer;font-size:18px}
+.drawer header h4{margin:6px 0 2px;font-size:19px}
+.drawer header p{margin:0;opacity:.75;font-size:12.5px}
+.drawer .body{padding:20px;overflow:auto;flex:1}
+.stats3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px}
+.stats3 div{background:var(--soft);border-radius:12px;padding:10px;text-align:center}
+.stats3 b{display:block;font-size:17px}
+.stats3 small{color:var(--muted);font-weight:700;font-size:11px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.chip{padding:8px 12px;border-radius:11px;border:1px solid var(--line);background:#fff;cursor:pointer;font-weight:700;font-size:12.5px}
+.chip.on{background:var(--brand);border-color:var(--brand);color:#fff}
+.kv{display:grid;grid-template-columns:120px 1fr;gap:6px 10px;font-size:13px;margin-bottom:16px}
+.kv span{color:var(--muted);font-weight:600}
+.kv b{font-weight:700;word-break:break-all}
+.drawer footer{padding:14px 20px;border-top:1px solid var(--line);display:flex;gap:10px}
+.toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(30px);background:var(--ink);color:#fff;padding:12px 18px;border-radius:14px;font-weight:700;opacity:0;transition:.25s;z-index:40;max-width:90vw}
+.toast.on{opacity:1;transform:translateX(-50%)}
+.toast.err{background:var(--red)}
+.spin{width:18px;height:18px;border:2.5px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+.loading{display:grid;place-items:center;padding:60px;color:var(--muted);font-weight:700}
+
+/* ---------- responsive ---------- */
+@media (max-width:1100px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.row2{grid-template-columns:1fr}}
+@media (max-width:820px){
+  .app{grid-template-columns:1fr}
+  aside{position:fixed;left:0;top:0;z-index:30;width:260px;transform:translateX(-100%);transition:.25s}
+  aside.on{transform:none}
+  .menu-btn{display:inline-flex}
+  main{padding:16px 16px 60px}
+  .kpi .v{font-size:22px}
+}
+</style>
+</head>
+<body>
+
+<!-- ================= LOGIN ================= -->
+<section id="login" class="hidden">
+  <form class="login-card" id="loginForm" autocomplete="on">
+    <div class="logo">
+      <img src="icon.png" alt="">
+      <div><h1>Hisab <span>AI</span> Admin</h1><p>Sign in with your admin account</p></div>
+    </div>
+    <div id="loginErr" class="err hidden"></div>
+    <label class="field"><span>Email</span><input id="email" type="email" required autocomplete="username" placeholder="admin@example.com"></label>
+    <label class="field"><span>Password</span><input id="password" type="password" required autocomplete="current-password" placeholder="••••••••"></label>
+    <button class="btn btn-primary btn-block" id="loginBtn" type="submit">Sign in</button>
+    <p style="margin-top:16px;text-align:center" class="muted">Only the admin email set in the Firestore rules can open this dashboard.</p>
+  </form>
+</section>
+
+<!-- ================= APP ================= -->
+<div id="app" class="app hidden">
+  <aside id="side">
+    <div class="brand"><img src="icon.png" alt=""><div><b>Hisab AI</b><small>Admin console</small></div></div>
+    <nav>
+      <a data-view="overview" class="on">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>Overview</a>
+      <a data-view="requests">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5a2 2 0 0 0-2 2v14l4-4h12a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm-2 10H7v-2h10v2zm0-4H7V7h10v2z"/></svg>Plan requests<span class="count hidden" id="reqCount">0</span></a>
+      <a data-view="users">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M16 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 3-1.34 3-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5C15 14.17 10.33 13 8 13zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>Users</a>
+      <a data-view="plans">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 4 5v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V5l-8-3z"/></svg>Plans & pricing</a>
+    </nav>
+    <div class="side-foot">
+      <small class="muted" style="color:rgba(255,255,255,.6)">Signed in as</small>
+      <b id="whoami">—</b>
+      <button class="btn" id="logout">Sign out</button>
+    </div>
+  </aside>
+
+  <main>
+    <div class="top">
+      <button class="btn btn-ghost menu-btn" id="menuBtn">☰</button>
+      <div><h2 id="title">Overview</h2><p id="subtitle">Live from your Hisab AI accounts</p></div>
+      <div class="sp"></div>
+      <span class="muted" id="updated"></span>
+      <button class="btn btn-ghost" id="exportBtn" title="Download users as CSV">⬇ CSV</button>
+      <button class="btn btn-primary" id="refreshBtn">↻ Refresh</button>
+    </div>
+
+    <div id="view-overview"></div>
+    <div id="view-requests" class="hidden"></div>
+    <div id="view-users" class="hidden"></div>
+    <div id="view-plans" class="hidden"></div>
+  </main>
+</div>
+
+<div class="shade" id="shade"></div>
+<div class="drawer" id="drawer"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+// ============================================================================
+// Hisab AI admin console — talks straight to Firebase (Identity Toolkit +
+// Firestore REST) with the admin's own sign-in. The Firestore rules decide
+// who is admin; nothing secret lives in this page.
+// ============================================================================
+const CONFIG = {
+  apiKey: 'AIzaSyAk1N6Aw3BJk50Tsw2Z_KPDfQzJlC-5GIU',
+  projectId: 'hisab-a7fcd',
+};
+const PLANS = [
+  { id: 'basic', name: 'Basic', price: 199, yearly: 1999, color: '#1A47C8', grad: 'linear-gradient(135deg,#6AA5FF,#1A47C8)', products: 60, sales: 300, stores: 1 },
+  { id: 'gold', name: 'Gold', price: 599, yearly: 6999, color: '#E08A00', grad: 'linear-gradient(135deg,#FFC14D,#E08A00)', products: 500, sales: 3000, stores: 3 },
+  { id: 'premium', name: 'Premium', price: 999, yearly: 9999, color: '#5B2EE0', grad: 'linear-gradient(135deg,#8B5CF6,#1B1F6B)', products: 0, sales: 0, stores: 10 },
+];
+const TRIAL = { color: '#0E9F5E', grad: 'linear-gradient(135deg,#3EE08F,#0E9F5E)' };
+const NONE = { color: '#D81E4A', grad: 'linear-gradient(135deg,#FF7A9A,#D81E4A)' };
+const planById = id => PLANS.find(p => p.id === id);
+const amount = (p, months) => Math.floor(months / 12) * p.yearly + (months % 12) * p.price;
+
+// ---------------------------------------------------------------- helpers
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const inr = n => '₹' + Math.round(n).toLocaleString('en-IN');
+const fmtDate = d => d ? d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+const ago = d => {
+  if (!d) return 'never';
+  const m = Math.round((Date.now() - d) / 60000);
+  if (m < 2) return 'just now';
+  if (m < 60) return m + ' min ago';
+  if (m < 1440) return Math.round(m / 60) + ' h ago';
+  return Math.round(m / 1440) + ' days ago';
+};
+const addMonths = (d, m) => { const x = new Date(d); const day = x.getDate(); x.setMonth(x.getMonth() + m); if (x.getDate() < day) x.setDate(0); return x; };
+function toast(msg, err) { const t = $('#toast'); t.textContent = msg; t.className = 'toast on' + (err ? ' err' : ''); clearTimeout(t._h); t._h = setTimeout(() => t.className = 'toast', 3200); }
+
+// ---------------------------------------------------------------- auth
+const store = {
+  get() { try { return JSON.parse(localStorage.getItem('hisab_admin') || 'null'); } catch { return null; } },
+  set(v) { try { v ? localStorage.setItem('hisab_admin', JSON.stringify(v)) : localStorage.removeItem('hisab_admin'); } catch {} },
+};
+let session = store.get();
+
+function friendly(code) {
+  const c = String(code || '').split(' ')[0].split(':')[0];
+  return ({
+    EMAIL_NOT_FOUND: 'Wrong email or password', INVALID_PASSWORD: 'Wrong email or password', INVALID_LOGIN_CREDENTIALS: 'Wrong email or password',
+    USER_DISABLED: 'This account is disabled', TOO_MANY_ATTEMPTS_TRY_LATER: 'Too many attempts — try again in a few minutes',
+    PERMISSION_DENIED: 'This account is not the admin (check ADMIN_EMAIL in the Firestore rules)', INVALID_EMAIL: 'Enter a valid email',
+  })[c] || ('Error: ' + code);
+}
+
+async function call(method, url, body, token) {
+  const res = await fetch(url, {
+    method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : {};
+  if (!res.ok) {
+    const e = new Error(friendly(data?.error?.message || data?.error?.status || res.status));
+    e.status = res.status; throw e;
+  }
+  return data;
+}
+
+async function signIn(email, password) {
+  const r = await call('POST', `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${CONFIG.apiKey}`,
+    { email, password, returnSecureToken: true });
+  session = { email: r.email, uid: r.localId, idToken: r.idToken, refreshToken: r.refreshToken, exp: Date.now() + (+r.expiresIn - 120) * 1000 };
+  store.set(session);
+}
+async function token() {
+  if (!session) throw new Error('Please sign in');
+  if (session.idToken && Date.now() < session.exp) return session.idToken;
+  const res = await fetch(`https://securetoken.googleapis.com/v1/token?key=${CONFIG.apiKey}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'grant_type=refresh_token&refresh_token=' + encodeURIComponent(session.refreshToken),
+  });
+  const r = await res.json();
+  if (!res.ok) { logout(); throw new Error('Session expired — sign in again'); }
+  session.idToken = r.id_token; session.refreshToken = r.refresh_token; session.exp = Date.now() + (+r.expires_in - 120) * 1000;
+  store.set(session);
+  return session.idToken;
+}
+function logout() { session = null; store.set(null); show('login'); }
+
+// ---------------------------------------------------------------- firestore
+const BASE = `https://firestore.googleapis.com/v1/projects/${CONFIG.projectId}/databases/(default)/documents`;
+const val = f => {
+  if (!f) return null;
+  if ('stringValue' in f) return f.stringValue;
+  if ('integerValue' in f) return +f.integerValue;
+  if ('doubleValue' in f) return +f.doubleValue;
+  if ('booleanValue' in f) return f.booleanValue;
+  if ('timestampValue' in f) return new Date(f.timestampValue);
+  return null;
+};
+const enc = v => v === null || v === undefined ? { nullValue: null }
+  : typeof v === 'boolean' ? { booleanValue: v }
+  : typeof v === 'number' ? { integerValue: String(Math.round(v)) }
+  : v instanceof Date ? { timestampValue: v.toISOString() }
+  : { stringValue: String(v) };
+const mask = keys => keys.map(k => 'updateMask.fieldPaths=' + encodeURIComponent(k)).join('&');
+
+async function list(col) {
+  const out = []; let page = '';
+  do {
+    const r = await call('GET', `${BASE}/${col}?pageSize=300${page ? '&pageToken=' + page : ''}`, null, await token());
+    (r.documents || []).forEach(d => {
+      const o = { id: d.name.split('/').pop() };
+      for (const [k, f] of Object.entries(d.fields || {})) o[k] = val(f);
+      out.push(o);
+    });
+    page = r.nextPageToken || '';
+  } while (page);
+  return out;
+}
+async function patch(path, fields) {
+  await call('PATCH', `${BASE}/${path}?${mask(Object.keys(fields))}`,
+    { fields: Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, enc(v)])) }, await token());
+}
+
+// ---------------------------------------------------------------- model
+let accounts = [], requests = [], loadedAt = null;
+function enrich(a) {
+  a.plan = a.plan || 'trial';
+  a.until = a.plan === 'trial' ? a.trialUntil : a.planUntil;
+  a.active = !a.blocked && a.until && a.until > new Date() && a.plan !== 'none';
+  const p = planById(a.plan);
+  a.mrr = a.active && p ? p.price : 0;
+  a.status = a.blocked ? 'Blocked' : !a.active ? 'Expired' : a.plan === 'trial' ? 'Trial' : (p ? p.name : a.plan);
+  a.look = a.blocked || !a.active ? NONE : a.plan === 'trial' ? TRIAL : (p || PLANS[2]);
+  a.daysLeft = a.until ? Math.ceil((a.until - Date.now()) / 86400000) : null;
+  a.title = a.shop || a.name || a.email;
+  return a;
+}
+async function load() {
+  $('#refreshBtn').disabled = true;
+  try {
+    accounts = (await list('accounts')).map(enrich).sort((x, y) => (y.lastSeen || 0) - (x.lastSeen || 0));
+    try { requests = (await list('requests')).sort((x, y) => (y.created || 0) - (x.created || 0)); } catch { requests = []; }
+    loadedAt = new Date();
+    render();
+  } catch (e) {
+    if (e.status === 403) { toast(friendly('PERMISSION_DENIED'), true); setTimeout(logout, 1500); }
+    else toast(e.message, true);
+  } finally { $('#refreshBtn').disabled = false; }
+}
+
+// ---------------------------------------------------------------- charts (SVG)
+function donut(parts, size = 150) {
+  const total = parts.reduce((s, p) => s + p.v, 0) || 1, r = size / 2 - 12, c = 2 * Math.PI * r;
+  let off = 0;
+  const segs = parts.map(p => {
+    const len = c * p.v / total, s = `<circle r="${r}" cx="${size / 2}" cy="${size / 2}" fill="none" stroke="${p.c}" stroke-width="18" stroke-dasharray="${len} ${c - len}" stroke-dashoffset="${-off}" transform="rotate(-90 ${size / 2} ${size / 2})"/>`;
+    off += len; return s;
+  }).join('');
+  return `<svg width="${size}" height="${size}"><circle r="${r}" cx="${size / 2}" cy="${size / 2}" fill="none" stroke="#F1F2F9" stroke-width="18"/>${segs}
+    <text x="50%" y="48%" text-anchor="middle" font-size="22" font-weight="800" fill="#0A0E26">${parts.reduce((s, p) => s + p.v, 0)}</text>
+    <text x="50%" y="62%" text-anchor="middle" font-size="11" font-weight="700" fill="#6B7094">users</text></svg>`;
+}
+let barId = 0;
+function bars(items, color = '#5B2EE0') {
+  const gid = 'bg' + (++barId);
+  const w = 560, h = 190, pad = 28, max = Math.max(1, ...items.map(i => i.v)), bw = (w - pad) / items.length;
+  return `<svg viewBox="0 0 ${w} ${h + 26}" width="100%" preserveAspectRatio="none" style="max-height:230px">
+    <defs><linearGradient id="${gid}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="${color}"/><stop offset="1" stop-color="${color}" stop-opacity=".45"/></linearGradient></defs>
+    ${[0, .5, 1].map(f => `<line x1="${pad}" x2="${w}" y1="${h - h * f * .85}" y2="${h - h * f * .85}" stroke="#EEF0F8"/><text x="0" y="${h - h * f * .85 + 4}" font-size="10" fill="#8A8FAD">${Math.round(max * f)}</text>`).join('')}
+    ${items.map((it, i) => {
+      const bh = Math.max(2, (h * .85) * it.v / max), x = pad + i * bw + bw * .18;
+      return `<rect x="${x}" y="${h - bh}" width="${bw * .64}" height="${bh}" rx="6" fill="url(#${gid})"><title>${esc(it.l)}: ${it.v}</title></rect>
+        <text x="${x + bw * .32}" y="${h + 16}" font-size="10.5" text-anchor="middle" fill="#6B7094" font-weight="600">${esc(it.l)}</text>`;
+    }).join('')}</svg>`;
+}
+
+// ---------------------------------------------------------------- views
+let view = 'overview', tab = 'all', q = '', sortKey = 'lastSeen', sortDir = -1;
+const titles = {
+  overview: ['Overview', 'Revenue, users and plans at a glance'],
+  requests: ['Plan requests', 'Approve payments and start plans'],
+  users: ['Users', 'Every Hisab AI account'],
+  plans: ['Plans & pricing', 'What each plan includes'],
+};
+function setView(v) {
+  view = v;
+  document.querySelectorAll('nav a').forEach(a => a.classList.toggle('on', a.dataset.view === v));
+  Object.keys(titles).forEach(k => $('#view-' + k).classList.toggle('hidden', k !== v));
+  $('#title').textContent = titles[v][0]; $('#subtitle').textContent = titles[v][1];
+  $('#side').classList.remove('on');
+  render();
+}
+function render() {
+  const pending = requests.filter(r => r.status === 'pending');
+  $('#reqCount').textContent = pending.length; $('#reqCount').classList.toggle('hidden', !pending.length);
+  $('#updated').textContent = loadedAt ? 'Updated ' + loadedAt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '';
+  ({ overview: renderOverview, requests: renderRequests, users: renderUsers, plans: renderPlans })[view]();
+}
+
+function kpi(label, v, sub, color, icon, hero) {
+  return `<div class="card kpi ${hero ? 'hero' : ''}"><div class="l"><span class="ico" style="background:${color}">${icon}</span>${label}</div>
+    <div class="v">${v}</div><div class="s">${sub}</div></div>`;
+}
+function renderOverview() {
+  const paid = accounts.filter(a => a.active && a.plan !== 'trial');
+  const mrr = paid.reduce((s, a) => s + a.mrr, 0);
+  const trial = accounts.filter(a => a.active && a.plan === 'trial');
+  const expired = accounts.filter(a => !a.active && !a.blocked);
+  const week = Date.now() - 7 * 86400000, month = Date.now() - 30 * 86400000;
+  const active7 = accounts.filter(a => a.lastSeen && a.lastSeen > week).length;
+  const new30 = accounts.filter(a => a.created && a.created > month).length;
+  const pending = requests.filter(r => r.status === 'pending');
+  const pendingValue = pending.reduce((s, r) => s + (planById(r.plan) ? amount(planById(r.plan), r.months || 1) : 0), 0);
+  const conv = accounts.length ? Math.round(paid.length * 100 / accounts.length) : 0;
+  const parts = [
+    ...PLANS.map(p => ({ n: p.name, v: accounts.filter(a => a.active && a.plan === p.id).length, c: p.color })),
+    { n: 'Trial', v: trial.length, c: TRIAL.color }, { n: 'Expired', v: expired.length, c: NONE.color },
+    { n: 'Blocked', v: accounts.filter(a => a.blocked).length, c: '#64748B' },
+  ].filter(p => p.v > 0);
+  // sign-ups by month (last 6)
+  const months = [];
+  for (let i = 5; i >= 0; i--) { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - i); months.push(d); }
+  const signups = months.map(d => ({ l: d.toLocaleString('en', { month: 'short' }), v: accounts.filter(a => a.created && a.created.getFullYear() === d.getFullYear() && a.created.getMonth() === d.getMonth()).length }));
+  const approved = requests.filter(r => r.status === 'approved');
+  const revenue = months.map(d => ({ l: d.toLocaleString('en', { month: 'short' }), v: approved.filter(r => { const t = r.closed || r.created; return t && t.getFullYear() === d.getFullYear() && t.getMonth() === d.getMonth(); }).reduce((s, r) => s + (planById(r.plan) ? amount(planById(r.plan), r.months || 1) : 0), 0) }));
+  const ending = accounts.filter(a => a.active && a.daysLeft !== null && a.daysLeft <= 5).sort((x, y) => x.daysLeft - y.daysLeft);
+  const I = { r: '₹', u: '👥', a: '⚡', p: '✓', t: '⏳', n: '✦', c: '%', q: '✉' };
+  $('#view-overview').innerHTML = `
+    <div class="grid kpis">
+      ${kpi('Monthly revenue (MRR)', inr(mrr), `${paid.length} paying · ~${inr(mrr * 12)} a year`, 'rgba(255,255,255,.18)', I.r, true)}
+      ${kpi('Total users', accounts.length, `${new30} new in 30 days`, 'linear-gradient(135deg,#8B5CF6,#4318D2)', I.u)}
+      ${kpi('Active this week', active7, `${accounts.length ? Math.round(active7 * 100 / accounts.length) : 0}% of all users`, 'linear-gradient(135deg,#22D3EE,#0E7490)', I.a)}
+      ${kpi('Pending requests', pending.length, pending.length ? inr(pendingValue) + ' waiting' : 'All clear', 'linear-gradient(135deg,#FFC14D,#E08A00)', I.q)}
+      ${kpi('Paying users', paid.length, `${conv}% conversion`, 'linear-gradient(135deg,#3EE08F,#0E9F5E)', I.p)}
+      ${kpi('On free trial', trial.length, 'Trial ends after 7 days', 'linear-gradient(135deg,#3EE08F,#0E7F4C)', I.t)}
+      ${kpi('Expired', expired.length, 'Follow up to renew', 'linear-gradient(135deg,#FF7A9A,#D81E4A)', I.n)}
+      ${kpi('Avg. revenue / user', inr(paid.length ? mrr / paid.length : 0), 'per paying user, monthly', 'linear-gradient(135deg,#6AA5FF,#1A47C8)', I.c)}
+    </div>
+    <div class="grid row2">
+      <div class="card"><h3>Revenue approved · last 6 months<span class="sp"></span><span class="muted">${inr(revenue.reduce((s, r) => s + r.v, 0))}</span></h3>${bars(revenue, '#16A36A')}</div>
+      <div class="card"><h3>Users by plan</h3><div class="donut-wrap">${donut(parts)}<div class="legend" style="flex:1">
+        ${parts.map(p => `<div><i style="background:${p.c}"></i>${p.n}<span>${p.v}</span></div>`).join('') || '<div class="muted">No users yet</div>'}</div></div></div>
+    </div>
+    <div class="grid row2">
+      <div class="card"><h3>New sign-ups · last 6 months</h3>${bars(signups)}</div>
+      <div class="card"><h3>Expiring in 5 days<span class="sp"></span><span class="muted">${ending.length}</span></h3>
+        ${ending.length ? ending.slice(0, 7).map(a => userRow(a, true)).join('') : '<div class="empty">Nothing expiring soon</div>'}</div>
+    </div>`;
+  bindUserClicks('#view-overview');
+}
+function userRow(a, compact) {
+  return `<div class="u" data-uid="${esc(a.id)}" style="padding:8px 0;cursor:pointer;border-bottom:1px solid #F1F2F9">
+    <div class="av" style="background:${a.look.grad}">${esc((a.title || '?')[0].toUpperCase())}</div>
+    <div style="flex:1;min-width:0"><b style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(a.title)}</b><small>${esc(a.email)}</small></div>
+    <div style="text-align:right"><span class="badge" style="background:${a.look.grad}">${esc(a.status)}</span>
+    ${compact && a.daysLeft !== null ? `<div class="muted" style="font-size:11.5px;margin-top:3px">${a.daysLeft} days left</div>` : ''}</div></div>`;
+}
+
+function renderRequests() {
+  const pending = requests.filter(r => r.status === 'pending');
+  const done = requests.filter(r => r.status !== 'pending').slice(0, 30);
+  const card = r => {
+    const p = planById(r.plan), amt = p ? amount(p, r.months || 1) : 0;
+    return `<div class="req">
+      <div class="av" style="background:${p ? p.grad : NONE.grad};width:46px;height:46px">${esc((r.name || r.email || '?')[0].toUpperCase())}</div>
+      <div><b>${esc(r.name || r.email)}</b> <span class="muted">${esc(r.name ? r.email : '')}</span><br>
+        <span class="badge" style="background:${p ? p.grad : NONE.grad}">${esc(p ? p.name : r.plan)} · ${r.months || 1} ${(r.months || 1) === 1 ? 'month' : 'months'}</span>
+        <span class="muted" style="margin-left:6px">${ago(r.created)}</span>
+        ${r.note ? `<div style="margin-top:6px;font-weight:600">UTR / note: <span class="num">${esc(r.note)}</span></div>` : ''}
+        <div class="acts"><button class="btn btn-green" data-approve="${esc(r.id)}">Approve ✓</button><button class="btn btn-red" data-reject="${esc(r.id)}">Reject</button></div></div>
+      <div class="amt">${inr(amt)}</div></div>`;
+  };
+  $('#view-requests').innerHTML = `
+    <div class="card"><h3>Waiting for approval<span class="sp"></span><span class="muted">${pending.length}</span></h3>
+      ${pending.length ? pending.map(card).join('') : '<div class="empty">No pending requests 🎉</div>'}</div>
+    <div class="card" style="margin-top:14px"><h3>History</h3>
+      <div class="table-wrap"><table><thead><tr><th>User</th><th>Plan</th><th>Amount</th><th>Note</th><th>Status</th><th>Date</th></tr></thead><tbody>
+      ${done.map(r => { const p = planById(r.plan); return `<tr><td>${esc(r.email)}</td><td>${esc(p ? p.name : r.plan)} × ${r.months || 1}</td><td class="num">${inr(p ? amount(p, r.months || 1) : 0)}</td>
+        <td>${esc(r.note || '—')}</td><td><span class="badge" style="background:${r.status === 'approved' ? TRIAL.grad : NONE.grad}">${esc(r.status)}</span></td><td class="muted">${fmtDate(r.closed || r.created)}</td></tr>`; }).join('')
+        || '<tr><td colspan="6" class="empty">No history yet</td></tr>'}
+      </tbody></table></div></div>`;
+  document.querySelectorAll('[data-approve]').forEach(b => b.onclick = () => approve(b.dataset.approve, b));
+  document.querySelectorAll('[data-reject]').forEach(b => b.onclick = () => reject(b.dataset.reject, b));
+}
+
+async function approve(id, btn) {
+  const r = requests.find(x => x.id === id); if (!r) return;
+  const a = accounts.find(x => x.id === r.uid);
+  const start = a && a.active && a.plan === r.plan && a.until ? a.until : new Date();
+  const until = addMonths(start, r.months || 1);
+  btn.disabled = true;
+  try {
+    await patch('accounts/' + r.uid, { plan: r.plan, planUntil: until, blocked: false, pending: null });
+    await patch('requests/' + id, { status: 'approved', closed: new Date() });
+    toast(`${r.email} — ${planById(r.plan)?.name} active until ${fmtDate(until)}`);
+    await load();
+  } catch (e) { toast(e.message, true); btn.disabled = false; }
+}
+async function reject(id, btn) {
+  const r = requests.find(x => x.id === id); if (!r || !confirm('Reject this request?')) return;
+  btn.disabled = true;
+  try {
+    await patch('requests/' + id, { status: 'rejected', closed: new Date() });
+    await patch('accounts/' + r.uid, { pending: null });
+    toast('Request rejected'); await load();
+  } catch (e) { toast(e.message, true); btn.disabled = false; }
+}
+
+function renderUsers() {
+  const s = q.toLowerCase();
+  let rows = accounts.filter(a => {
+    const okTab = { all: true, paid: a.active && a.plan !== 'trial', trial: a.active && a.plan === 'trial', expired: !a.active && !a.blocked, blocked: a.blocked }[tab];
+    return okTab && (!s || `${a.email} ${a.name} ${a.shop} ${a.phone}`.toLowerCase().includes(s));
+  });
+  rows.sort((x, y) => { const a = x[sortKey], b = y[sortKey]; return ((a > b) - (a < b)) * sortDir || 0; });
+  const counts = { all: accounts.length, paid: accounts.filter(a => a.active && a.plan !== 'trial').length, trial: accounts.filter(a => a.active && a.plan === 'trial').length, expired: accounts.filter(a => !a.active && !a.blocked).length, blocked: accounts.filter(a => a.blocked).length };
+  const th = (k, l) => `<th data-sort="${k}">${l}${sortKey === k ? (sortDir > 0 ? ' ▲' : ' ▼') : ''}</th>`;
+  $('#view-users').innerHTML = `
+    <div class="tools">
+      <div class="search"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.5 6.5 0 1 0 9.5 16a6.47 6.47 0 0 0 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+        <input id="q" placeholder="Search email, name, shop, phone…" value="${esc(q)}"></div>
+      <div class="tabs">${['all', 'paid', 'trial', 'expired', 'blocked'].map(t => `<button class="tab ${tab === t ? 'on' : ''}" data-tab="${t}">${t[0].toUpperCase() + t.slice(1)} · ${counts[t]}</button>`).join('')}</div>
+    </div>
+    <div class="table-wrap"><table><thead><tr>${th('title', 'Account')}${th('status', 'Plan')}${th('until', 'Ends')}${th('products', 'Products')}${th('sales', 'Bills')}${th('stores', 'Stores')}${th('lastSeen', 'Last seen')}${th('created', 'Joined')}</tr></thead><tbody>
+    ${rows.map(a => `<tr data-uid="${esc(a.id)}">
+      <td><div class="u"><div class="av" style="background:${a.look.grad}">${esc((a.title || '?')[0].toUpperCase())}</div><div><b>${esc(a.title)}</b><small>${esc(a.email)}${a.phone ? ' · ' + esc(a.phone) : ''}</small></div></div></td>
+      <td><span class="badge" style="background:${a.look.grad}">${esc(a.status)}</span>${a.pending ? ' <span class="pill" style="background:#FFF4DC;color:#B7791F">requested</span>' : ''}</td>
+      <td>${fmtDate(a.until)}${a.active && a.daysLeft !== null ? `<div class="muted" style="font-size:11.5px">${a.daysLeft} days</div>` : ''}</td>
+      <td class="num">${a.products ?? 0}</td><td class="num">${a.sales ?? 0}</td><td class="num">${a.stores ?? 1}</td>
+      <td class="muted">${ago(a.lastSeen)}</td><td class="muted">${fmtDate(a.created)}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">No accounts match</td></tr>'}
+    </tbody></table></div>`;
+  const qi = $('#q'); qi.oninput = () => { q = qi.value; const pos = qi.selectionStart; renderUsers(); const n = $('#q'); n.focus(); n.setSelectionRange(pos, pos); };
+  document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { tab = b.dataset.tab; renderUsers(); });
+  document.querySelectorAll('[data-sort]').forEach(h => h.onclick = () => { const k = h.dataset.sort; sortDir = sortKey === k ? -sortDir : -1; sortKey = k; renderUsers(); });
+  bindUserClicks('#view-users');
+}
+function bindUserClicks(root) { document.querySelectorAll(root + ' [data-uid]').forEach(el => el.onclick = () => openUser(el.dataset.uid)); }
+
+function renderPlans() {
+  $('#view-plans').innerHTML = `<div class="grid kpis" style="grid-template-columns:repeat(3,minmax(0,1fr))">${PLANS.map(p => `
+    <div class="card" style="padding:0;overflow:hidden"><div style="background:${p.grad};color:#fff;padding:20px">
+      <div style="font-size:20px;font-weight:800">${p.name}</div>
+      <div style="font-size:30px;font-weight:800;margin-top:6px">${inr(p.price)}<small style="font-size:13px;opacity:.8">/month</small></div>
+      <div style="opacity:.9;font-weight:700">${inr(p.yearly)}/year · save ${Math.round((p.price * 12 - p.yearly) * 100 / (p.price * 12))}%</div></div>
+      <div style="padding:18px;line-height:2;font-weight:600">
+        ✓ ${p.products ? p.products + ' new products / 30 days' : 'Unlimited products'}<br>
+        ✓ ${p.sales ? p.sales + ' bills / 30 days' : 'Unlimited bills'}<br>
+        ✓ ${p.stores} ${p.stores === 1 ? 'store' : 'stores'}<br>
+        ✓ ${{ basic: '30%', gold: '65%', premium: '100%' }[p.id]} of features
+        <div class="muted" style="margin-top:8px">${accounts.filter(a => a.active && a.plan === p.id).length} active users · ${inr(accounts.filter(a => a.active && a.plan === p.id).length * p.price)}/month</div>
+      </div></div>`).join('')}</div>
+    <div class="card" style="margin-top:14px"><h3>How plans work</h3><div class="muted" style="line-height:1.8;font-weight:600">
+      New accounts get a 7-day trial with every feature. A user picks a plan in the app and sends a request with the UTR of their payment;
+      approve it here (or in the app's admin panel) and the plan starts at once — from today, or from the end of the current plan if they renew early.
+      Prices are set in the app (lib/core/plan.dart) and on this page (PLANS at the top of the script).</div></div>`;
+}
+
+// ---------------------------------------------------------------- user drawer
+function openUser(uid) {
+  const a = accounts.find(x => x.id === uid); if (!a) return;
+  let plan = a.plan === 'none' ? 'basic' : a.plan, months = 1;
+  const d = $('#drawer');
+  const draw = () => {
+    const p = planById(plan);
+    d.innerHTML = `
+      <header><button class="x" id="dx">×</button>
+        <div class="u"><div class="av" style="background:${a.look.grad};width:48px;height:48px;font-size:20px">${esc((a.title || '?')[0].toUpperCase())}</div>
+        <div><h4>${esc(a.title)}</h4><p>${esc(a.email)}</p></div></div>
+        <div style="margin-top:12px"><span class="badge" style="background:rgba(255,255,255,.18)">${esc(a.status)}</span>
+        ${a.until ? `<span class="pill" style="background:rgba(255,255,255,.12);color:#fff">until ${fmtDate(a.until)}</span>` : ''}</div></header>
+      <div class="body">
+        <div class="stats3"><div><b>${a.products ?? 0}</b><small>PRODUCTS</small></div><div><b>${a.sales ?? 0}</b><small>BILLS</small></div><div><b>${a.stores ?? 1}</b><small>STORES</small></div></div>
+        <div class="kv">
+          <span>Name</span><b>${esc(a.name || '—')}</b><span>Shop</span><b>${esc(a.shop || '—')}</b>
+          <span>Phone</span><b>${a.phone ? `<a href="tel:${esc(a.phone)}">${esc(a.phone)}</a> · <a target="_blank" rel="noopener" href="https://wa.me/${esc(String(a.phone).replace(/\D/g, '').replace(/^(\d{10})$/, '91$1'))}">WhatsApp</a>` : '—'}</b>
+          <span>Joined</span><b>${fmtDate(a.created)}</b><span>Last seen</span><b>${ago(a.lastSeen)}</b>
+          ${a.pending ? `<span>Request</span><b style="color:#B7791F">${esc(a.pending)}</b>` : ''}<span>User ID</span><b class="muted" style="font-size:11.5px">${esc(a.id)}</b>
+        </div>
+        <label class="field"><span>Set plan</span></label>
+        <div class="chips">${[...PLANS.map(p => [p.id, `${p.name} · ${inr(p.price)}`]), ['trial', 'Trial']].map(([id, l]) => `<button class="chip ${plan === id ? 'on' : ''}" data-plan="${id}">${l}</button>`).join('')}</div>
+        <div class="chips">${[1, 3, 6, 12, 24].map(m => `<button class="chip ${months === m ? 'on' : ''}" data-m="${m}">${plan === 'trial' ? m * 7 + ' days' : m + (m === 1 ? ' month' : ' months')}</button>`).join('')}</div>
+        ${p ? `<div class="muted" style="font-weight:700;margin:-4px 0 14px">Price for this period: <b style="color:var(--ink)">${inr(amount(p, months))}</b></div>` : ''}
+        <label class="field"><span>Admin note (only admins see it)</span><textarea id="note" rows="3">${esc(a.note || '')}</textarea></label>
+      </div>
+      <footer>
+        <button class="btn ${a.blocked ? 'btn-green' : 'btn-red'}" id="blockBtn">${a.blocked ? 'Unblock' : 'Block'}</button>
+        <div style="flex:1"></div>
+        <button class="btn btn-primary" id="saveBtn">Save plan</button>
+      </footer>`;
+    $('#dx').onclick = closeDrawer;
+    d.querySelectorAll('[data-plan]').forEach(b => b.onclick = () => { plan = b.dataset.plan; draw(); });
+    d.querySelectorAll('[data-m]').forEach(b => b.onclick = () => { months = +b.dataset.m; draw(); });
+    $('#blockBtn').onclick = async () => {
+      if (!confirm(a.blocked ? 'Unblock this account?' : 'Block this account? They can still open their books but cannot add bills or products.')) return;
+      try { await patch('accounts/' + a.id, { blocked: !a.blocked }); toast(a.blocked ? 'Unblocked' : 'Blocked'); closeDrawer(); load(); } catch (e) { toast(e.message, true); }
+    };
+    $('#saveBtn').onclick = async () => {
+      const start = a.active && a.plan === plan && a.until ? a.until : new Date();
+      const until = plan === 'trial' ? new Date(Date.now() + months * 7 * 86400000) : addMonths(start, months);
+      const fields = { plan, blocked: false, pending: null, [plan === 'trial' ? 'trialUntil' : 'planUntil']: until };
+      const note = $('#note').value;
+      try {
+        await patch('accounts/' + a.id, fields);
+        if (note !== (a.note || '')) await patch('accounts/' + a.id, { note });
+        toast(`Plan set: ${planById(plan)?.name || 'Trial'} until ${fmtDate(until)}`); closeDrawer(); load();
+      } catch (e) { toast(e.message, true); }
+    };
+  };
+  draw();
+  d.classList.add('on'); $('#shade').classList.add('on');
+}
+function closeDrawer() { $('#drawer').classList.remove('on'); $('#shade').classList.remove('on'); }
+
+// ---------------------------------------------------------------- csv
+function exportCsv() {
+  const cols = ['email', 'name', 'shop', 'phone', 'status', 'plan', 'until', 'products', 'sales', 'stores', 'lastSeen', 'created', 'note'];
+  const cell = v => { v = v instanceof Date ? v.toISOString().slice(0, 10) : (v ?? ''); v = String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  const csv = '﻿' + [cols.join(','), ...accounts.map(a => cols.map(c => cell(a[c])).join(','))].join('\n');
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  const l = document.createElement('a'); l.href = url; l.download = `hisab-ai-users-${new Date().toISOString().slice(0, 10)}.csv`; l.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// ---------------------------------------------------------------- boot
+function show(which) {
+  $('#login').classList.toggle('hidden', which !== 'login');
+  $('#app').classList.toggle('hidden', which !== 'app');
+  if (which === 'app') { $('#whoami').textContent = session?.email || ''; load(); }
+}
+$('#loginForm').onsubmit = async e => {
+  e.preventDefault();
+  const btn = $('#loginBtn'), err = $('#loginErr');
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span>'; err.classList.add('hidden');
+  try {
+    await signIn($('#email').value.trim(), $('#password').value);
+    await call('GET', `${BASE}/accounts?pageSize=1`, null, await token()); // admin check
+    show('app');
+  } catch (ex) {
+    if (ex.status === 403) { session = null; store.set(null); }
+    err.textContent = ex.status === 403 ? friendly('PERMISSION_DENIED') : ex.message; err.classList.remove('hidden');
+  } finally { btn.disabled = false; btn.textContent = 'Sign in'; }
+};
+document.querySelectorAll('nav a').forEach(a => a.onclick = () => setView(a.dataset.view));
+$('#logout').onclick = logout;
+$('#refreshBtn').onclick = load;
+$('#exportBtn').onclick = exportCsv;
+$('#shade').onclick = () => { closeDrawer(); $('#side').classList.remove('on'); };
+$('#menuBtn').onclick = () => { $('#side').classList.add('on'); $('#shade').classList.add('on'); };
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
+setInterval(() => { if (session && !document.hidden && $('#login').classList.contains('hidden')) load(); }, 120000);
+show(session ? 'app' : 'login');
+</script>
+</body>
+</html>
