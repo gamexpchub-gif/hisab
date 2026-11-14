@@ -16,6 +16,9 @@ import 'purchase_form.dart';
 import 'sales.dart';
 import 'search.dart';
 import 'smart_ai.dart';
+import 'plans.dart';
+import 'stores.dart';
+import '../core/plan.dart';
 
 /// Home screen — a 1:1 reproduction of the GameX PC Hub reference design
 /// (tool/reference/home.webp, 849 px wide). Every position and size below is
@@ -71,7 +74,7 @@ class HomeScreen extends StatelessWidget {
         await Books.activity(1),
         (await Books.notifications()).length,
         (await Books.salesBook()).take(10).toList(),
-        await Insights.build().catchError((_) => <Insight>[]),
+        Sub.can('smart_ai') ? await Insights.build().catchError((_) => <Insight>[]) : <Insight>[],
       );
 
   @override
@@ -106,9 +109,17 @@ class HomeScreen extends StatelessWidget {
                   padding: EdgeInsets.only(top: p(14), bottom: mq.padding.bottom + p(300)),
                   children: [
                     _side(_Header(d)),
-                    SizedBox(height: p(22)),
-                    _side(SmartAiStrip(d.ai)),
-                    SizedBox(height: p(22)),
+                    SizedBox(height: p(16)),
+                    _side(Row(children: [const PlanBadge(), SizedBox(width: p(12)), const StoreChip()])),
+                    if (!Sub.active && !Sub.admin) ...[
+                      SizedBox(height: p(16)),
+                      _side(const _ExpiredBanner()),
+                    ],
+                    SizedBox(height: p(18)),
+                    if (Sub.can('smart_ai')) ...[
+                      _side(SmartAiStrip(d.ai)),
+                      SizedBox(height: p(22)),
+                    ],
                     _Welcome(d.settings),
                     SizedBox(height: p(20)),
                     _side(_StatsGrid(d.m)),
@@ -186,7 +197,7 @@ class _Header extends StatelessWidget {
     return SizedBox(
       height: p(101),
       child: Row(children: [
-        Padding(padding: EdgeInsets.only(left: p(1)), child: _img('logo', 100, 101)),
+        Padding(padding: EdgeInsets.only(left: p(1)), child: _img('shop_logo', 100, 101)),
         SizedBox(width: p(30)),
         Expanded(
           child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -912,4 +923,30 @@ class _RecentSales extends StatelessWidget {
       for (final s in rows) SaleCard(s: s),
     ]);
   }
+}
+
+class _ExpiredBanner extends StatelessWidget {
+  const _ExpiredBanner();
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: () => open(context, const PlansScreen()),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            gradient: const LinearGradient(colors: [Color(0xFFFF5C7A), Color(0xFFB4123E)]),
+          ),
+          child: Row(children: [
+            const Icon(Icons.lock_clock_rounded, color: Colors.white),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                Sub.plan == 'trial' ? 'Free trial shesh — notun bill / product korte plan nin' : 'Plan-er meyad shesh — renew korun',
+                style: const TextStyle(fontFamily: 'Jakarta', color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13),
+              ),
+            ),
+            const Icon(Icons.chevron_right_rounded, color: Colors.white),
+          ]),
+        ),
+      );
 }

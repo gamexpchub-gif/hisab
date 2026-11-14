@@ -173,7 +173,7 @@ class _Fonts {
 
 Future<Uint8List?> _logo() async {
   try {
-    return (await rootBundle.load('assets/home/logo.png')).buffer.asUint8List();
+    return (await rootBundle.load('assets/home/shop_logo.png')).buffer.asUint8List();
   } catch (_) {
     return null;
   }

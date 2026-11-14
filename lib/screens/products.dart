@@ -13,6 +13,7 @@ import 'product_form.dart';
 import 'purchase_form.dart';
 import 'sale_form.dart';
 import 'sales.dart';
+import 'plans.dart';
 
 export 'product_form.dart';
 
@@ -772,7 +773,7 @@ class _MoreMenu extends StatelessWidget {
             open(context, ProductForm(product: p));
             break;
           case 'label':
-            open(context, LabelStudio(products: [p]));
+            if (gate(context, 'labels')) open(context, LabelStudio(products: [p]));
             break;
           case 'buy':
             open(context, const PurchaseForm());
@@ -890,7 +891,7 @@ class ProductView extends StatelessWidget {
           title: p['name'] as String,
           subtitle: [p['variant'], p['brand'], p['category'], p['sku']].where((e) => e != null && '$e'.isNotEmpty).join(' · '),
           action: Row(mainAxisSize: MainAxisSize.min, children: [
-            RoundIcon(icon: Icons.qr_code_2_rounded, onTap: () => open(context, LabelStudio(products: [p]))),
+            RoundIcon(icon: Icons.qr_code_2_rounded, onTap: () => gate(context, 'labels') ? open(context, LabelStudio(products: [p])) : null),
             const SizedBox(width: 8),
             RoundIcon(icon: Icons.edit_rounded, onTap: () => open(context, ProductForm(product: p))),
           ]),

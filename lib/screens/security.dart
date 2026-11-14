@@ -177,7 +177,7 @@ class _LockScreenState extends State<LockScreen> {
   int wrong = 0;
   DateTime? coolUntil;
   Timer? tick;
-  String shop = 'GameX Hisab';
+  String shop = 'Hisab AI';
 
   @override
   void initState() {
@@ -197,7 +197,7 @@ class _LockScreenState extends State<LockScreen> {
     if (!mounted) return;
     setState(() {
       bio = on;
-      shop = (s['business_name'] ?? '').trim().isEmpty ? 'GameX Hisab' : s['business_name']!.trim();
+      shop = (s['business_name'] ?? '').trim().isEmpty ? 'Hisab AI' : s['business_name']!.trim();
     });
     if (on) _bio();
   }

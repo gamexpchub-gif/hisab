@@ -113,7 +113,7 @@ class Xlsx {
       '<xf numFmtId="1" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"/>'
       '</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
 
-  static Uint8List build(List<Sheet> sheets, {String title = 'GameX Hisab'}) {
+  static Uint8List build(List<Sheet> sheets, {String title = 'Hisab AI'}) {
     final a = Archive();
     void put(String name, String text) {
       final bytes = utf8.encode(text);
@@ -150,7 +150,7 @@ class Xlsx {
     put('docProps/core.xml',
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" '
         'xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">'
-        '<dc:title>${_esc(title)}</dc:title><dc:creator>GameX Hisab</dc:creator>'
+        '<dc:title>${_esc(title)}</dc:title><dc:creator>Hisab AI</dc:creator>'
         '<dcterms:created xsi:type="dcterms:W3CDTF">${DateTime.now().toUtc().toIso8601String().split('.').first}Z</dcterms:created>'
         '</cp:coreProperties>');
     put('xl/workbook.xml',

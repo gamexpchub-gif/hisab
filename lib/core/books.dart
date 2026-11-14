@@ -61,6 +61,10 @@ class Books {
   /// Tells every open screen to reload (e.g. after a restore).
   static void notifyChanged() => changes.value++;
 
+  /// Plan check before a new product ('product') or sale ('sale') is saved;
+  /// set by the subscription (Sub.guard). Null in tests.
+  static Future<void> Function(String action)? guard;
+
   static Future<Database> get _db => AppDb.instance;
 
   static String _now() => DateTime.now().toIso8601String();
@@ -158,7 +162,8 @@ class Books {
     String? note,
     List<MapEntry<int, int>>? splits, // account id → amount, for split payments
     int? editId, // re-saves an existing sale in place (same number)
-  }) {
+  }) async {
+    if (editId == null) await guard?.call('sale');
     return _write((x) async {
       final when = date ?? ymd(DateTime.now());
       String? oldNumber;
@@ -896,7 +901,8 @@ class Books {
   }
 
   // ------------------------------------------------------------ masters
-  static Future<int> saveProduct(Rec data, {int? id, int openingQty = 0, int openingCost = 0}) {
+  static Future<int> saveProduct(Rec data, {int? id, int openingQty = 0, int openingCost = 0}) async {
+    if (id == null) await guard?.call('product');
     return _write((x) async {
       final name = (data['name'] as String? ?? '').trim();
       if (name.isEmpty) throw AccountingError('Product name is required');

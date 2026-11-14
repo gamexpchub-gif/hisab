@@ -2,7 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'core/backup.dart';
+import 'core/books.dart';
 import 'core/daily_report.dart';
+import 'core/plan.dart';
+import 'core/stores.dart';
+import 'cloud/cloud.dart';
+import 'screens/plans.dart';
 import 'screens/dashboard.dart';
 import 'screens/home.dart';
 import 'screens/menu.dart';
@@ -16,8 +21,13 @@ import 'ui/widgets.dart';
 
 export 'ui/liquid_nav.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // the store in use (each store has its own books) and the plan
+  await Stores.load();
+  await Sub.load();
+  Books.guard = Sub.guard;
+  showPlans = (context) => open(context, const PlansScreen());
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
@@ -30,6 +40,8 @@ void main() {
   Future<void>.delayed(const Duration(seconds: 6), Backup.autoDaily);
   // tonight's AI report notification, kept fresh as the books change
   Future<void>.delayed(const Duration(seconds: 9), DailyReport.start);
+  // plan, admin rights and usage from the cloud account
+  Future<void>.delayed(const Duration(seconds: 3), Accounts.sync);
 }
 
 class HisabApp extends StatelessWidget {
@@ -38,7 +50,7 @@ class HisabApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'GameX Hisab',
+      title: 'Hisab AI',
       debugShowCheckedModeBanner: false,
       theme: buildTheme(),
       home: const AuthGate(child: AppLockGate(child: Shell())),

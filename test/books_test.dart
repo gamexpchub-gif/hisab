@@ -8,6 +8,7 @@ import 'package:hisab/core/imei_smart.dart';
 import 'package:hisab/core/insights.dart';
 import 'package:hisab/core/daily_report.dart';
 import 'package:hisab/core/analytics.dart';
+import 'package:hisab/core/plan.dart';
 import 'package:hisab/core/gst_report.dart';
 import 'package:hisab/core/xlsx.dart';
 import 'package:hisab/core/smart.dart';
@@ -561,6 +562,42 @@ void main() {
     expect(t.buckets.length, 8);
     final c = await ProAnalytics.load('custom', from: '2025-01-01', to: '2025-12-31');
     expect(c.buckets.length, 12);
+  });
+
+  test('Plans: 30% / 65% / 100% of features, limits and expiry', () async {
+    expect(featurePercent(1), 30);
+    expect(featurePercent(2), 65);
+    expect(featurePercent(3), 100);
+    Books.guard = Sub.guard;
+    try {
+      Sub.plan = 'basic';
+      Sub.until = DateTime.now().add(const Duration(days: 10));
+      expect(Sub.can('sales'), isTrue);
+      expect(Sub.can('gst'), isFalse);
+      expect(Sub.can('smart_ai'), isFalse);
+      Object? err;
+      for (var i = 0; i < 70 && err == null; i++) {
+        try {
+          await Books.saveProduct({'name': 'Limit test $i', 'gst_bp': 0, 'price': 100});
+        } catch (e) {
+          err = e;
+        }
+      }
+      expect(err, isA<PlanLimitError>());
+      Sub.plan = 'gold';
+      expect(Sub.can('gst'), isTrue);
+      expect(Sub.can('analytics'), isFalse);
+      await Books.saveProduct({'name': 'Gold product', 'gst_bp': 0, 'price': 100});
+      Sub.plan = 'premium';
+      expect(Sub.can('analytics'), isTrue);
+      Sub.until = DateTime.now().subtract(const Duration(days: 1));
+      expect(Sub.active, isFalse);
+      expect(() => Books.saveProduct({'name': 'Expired', 'gst_bp': 0, 'price': 100}), throwsA(isA<PlanLimitError>()));
+    } finally {
+      Books.guard = null;
+      Sub.plan = 'trial';
+      Sub.until = null;
+    }
   });
 
   test('demo data loads and balances', () async {

@@ -9,6 +9,7 @@ import '../cloud/cloud.dart';
 import 'books.dart';
 import 'db.dart';
 import 'money.dart';
+import 'plan.dart';
 
 /// One backup file on the phone.
 class BackupFile {
@@ -72,7 +73,7 @@ class Backup {
       counts[t] = asInt((await Books.query('SELECT COUNT(*) AS c FROM $t')).first['c']);
     }
     final meta = utf8.encode(jsonEncode({
-      'app': 'GameX Hisab',
+      'app': 'Hisab AI',
       'created': DateTime.now().toIso8601String(),
       'schema': AppDb.schemaVersion,
       'photos': photos,
@@ -82,7 +83,7 @@ class Backup {
     final zip = ZipEncoder().encode(archive) ?? (throw AccountingError("Could not create the backup file"));
     final now = DateTime.now();
     final stamp = '${now.year}-${two(now.month)}-${two(now.day)}_${two(now.hour)}${two(now.minute)}';
-    final file = File(p.join((await folder()).path, 'GameX-Hisab-${auto ? 'auto-' : ''}$stamp.zip'));
+    final file = File(p.join((await folder()).path, 'Hisab-AI-${auto ? 'auto-' : ''}$stamp.zip'));
     await file.writeAsBytes(zip, flush: true);
     await Books.setSetting('last_backup_at', now.toIso8601String());
     if (auto) {
@@ -106,7 +107,7 @@ class Backup {
       final f = await create(auto: true);
       // and the same backup to the cloud when signed in
       await Cloud.load();
-      if (Cloud.user != null && s['cloud_auto'] != '0') await Cloud.uploadBackup(f);
+      if (Cloud.user != null && s['cloud_auto'] != '0' && Sub.can('cloud')) await Cloud.uploadBackup(f);
     } catch (_) {
       // a failed automatic backup must never stop the app
     }
@@ -141,7 +142,7 @@ class Backup {
     final a = ZipDecoder().decodeBytes(await zip.readAsBytes());
     final meta = a.findFile('backup.json');
     final db = a.findFile('hisab.db');
-    if (db == null) throw AccountingError('This is not a GameX Hisab backup');
+    if (db == null) throw AccountingError('This is not a Hisab AI backup');
     final info = meta == null ? <String, dynamic>{} : jsonDecode(utf8.decode(meta.content as List<int>)) as Map<String, dynamic>;
     return info;
   }
@@ -151,7 +152,7 @@ class Backup {
   static Future<void> restore(File zip) async {
     final archive = ZipDecoder().decodeBytes(await zip.readAsBytes());
     final db = archive.findFile('hisab.db');
-    if (db == null) throw AccountingError('This is not a GameX Hisab backup');
+    if (db == null) throw AccountingError('This is not a Hisab AI backup');
     final bytes = db.content as List<int>;
     if (bytes.length < 100 || ascii.decode(bytes.sublist(0, 15), allowInvalid: true) != _magic) {
       throw AccountingError('The backup database is damaged');

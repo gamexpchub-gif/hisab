@@ -36,6 +36,11 @@ import 'package:hisab/screens/smart_ai.dart';
 import 'package:hisab/screens/daily_report_screen.dart';
 import 'package:hisab/screens/analytics.dart';
 import 'package:hisab/screens/loans.dart';
+import 'package:hisab/screens/plans.dart';
+import 'package:hisab/screens/stores.dart';
+import 'package:hisab/screens/admin.dart';
+import 'package:hisab/core/plan.dart';
+import 'package:hisab/core/stores.dart';
 import 'package:hisab/ui/theme.dart';
 
 Future<void> _assetFont(String family, String asset) async {
@@ -65,6 +70,11 @@ void main() {
             version: AppDb.schemaVersion, onConfigure: AppDb.configure, onCreate: AppDb.create, singleInstance: false));
     AppDb.useDatabase(db);
     await Books.loadDemo();
+    Sub.plan = 'gold';
+    Sub.until = DateTime.now().add(const Duration(days: 23));
+    Stores.all
+      ..clear()
+      ..addAll([Store('main', 'GameX Pc Hub', 'hisab.db', ''), Store('b2', 'GameX Mobile — Branch 2', 'store_b2.db', '')]);
     for (final e in {
       'business_name': 'GameX Pc Hub',
       'tagline': 'Computer · Gaming · Accessories · Mobiles',
@@ -105,7 +115,7 @@ void main() {
     });
   }
 
-  for (final (name, index) in [('home', 0), ('dashboard', 1), ('products', 2), ('menu', 3), ('add_product', -1), ('new_sale', -2), ('new_purchase', -3), ('ledgers', -4), ('customer_profile', -5), ('expenses', -6), ('customers', -7), ('sales', -8), ('bank', -9), ('add_card', -10), ('purchases', -11), ('supplier_profile', -12), ('sale_returns', -13), ('sale_return_form', -14), ('invoice_view', -15), ('sale_complete', -16), ('emi', -17), ('emi_plan', -18), ('imei', -19), ('backup', -20), ('security', -21), ('lock', -22), ('login', -23), ('account', -24), ('smart_ai', -25), ('gst_report', -26), ('excel_export', -27), ('daily_report', -28), ('analytics', -29), ('loans', -30), ('loan_view', -31), ('loan_form', -32)]) {
+  for (final (name, index) in [('home', 0), ('dashboard', 1), ('products', 2), ('menu', 3), ('add_product', -1), ('new_sale', -2), ('new_purchase', -3), ('ledgers', -4), ('customer_profile', -5), ('expenses', -6), ('customers', -7), ('sales', -8), ('bank', -9), ('add_card', -10), ('purchases', -11), ('supplier_profile', -12), ('sale_returns', -13), ('sale_return_form', -14), ('invoice_view', -15), ('sale_complete', -16), ('emi', -17), ('emi_plan', -18), ('imei', -19), ('backup', -20), ('security', -21), ('lock', -22), ('login', -23), ('account', -24), ('smart_ai', -25), ('gst_report', -26), ('excel_export', -27), ('daily_report', -28), ('analytics', -29), ('loans', -30), ('loan_view', -31), ('loan_form', -32), ('plans', -33), ('stores', -34), ('admin', -35)]) {
     testWidgets(name, (t) async {
       t.view.physicalSize = const Size(1080, 2340);
       t.view.devicePixelRatio = 2.75;
@@ -180,6 +190,12 @@ void main() {
                                                                                                                                       ? const LoanView(id: 1)
                                                                                                                                       : index == -32
                                                                                                                                           ? const LoanForm()
+                                                                                                                                          : index == -33
+                                                                                                                                              ? const PlansScreen()
+                                                                                                                                              : index == -34
+                                                                                                                                                  ? const StoresScreen()
+                                                                                                                                                  : index == -35
+                                                                                                                                                      ? const AdminScreen()
                                                                   : const Scaffold(
                                                       backgroundColor: Color(0xFF8A8FAD),
                                                       body: Align(alignment: Alignment.bottomCenter, child: AccountSheet()),

@@ -240,7 +240,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ]),
       ),
       const SizedBox(height: 20),
-      const Center(child: Text('GameX Hisab v1.0 · data stays on this phone', style: TextStyle(color: C.muted, fontSize: 12))),
+      const Center(child: Text('Hisab AI v1.0 · data stays on this phone', style: TextStyle(color: C.muted, fontSize: 12))),
     ]);
   }
 }

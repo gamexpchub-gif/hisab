@@ -62,7 +62,7 @@ Future<void> _scheduleLoanAlarm(Rec l) async {
     dueId: 700000 + asInt(l['id']),
     dueDate: DateTime.parse(next),
     title: 'Loan EMI ${Money.rs(asInt(l['next_emi']))} — ${l['lender']}',
-    body: '${l['number']} · due ${prettyDate(next)} · GameX Hisab',
+    body: '${l['number']} · due ${prettyDate(next)} · Hisab AI',
   );
 }
 

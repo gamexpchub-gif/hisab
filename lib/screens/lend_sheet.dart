@@ -97,7 +97,7 @@ Future<int> saveDueWithAlarm({
     dueId: id,
     dueDate: DateTime.parse(dueDate),
     title: isC ? 'Collect ${Money.rs(amount)} from $partyName' : 'Pay ${Money.rs(amount)} to $partyName',
-    body: (note ?? '').isEmpty ? 'Payment due ${prettyDate(dueDate)} · GameX Hisab' : '$note · due ${prettyDate(dueDate)}',
+    body: (note ?? '').isEmpty ? 'Payment due ${prettyDate(dueDate)} · Hisab AI' : '$note · due ${prettyDate(dueDate)}',
     hour: hour,
     minute: minute,
   );

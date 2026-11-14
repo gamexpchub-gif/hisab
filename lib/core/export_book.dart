@@ -169,7 +169,7 @@ class ExportBook {
       };
 
   static Future<Uint8List> build(String kind, String from, String to) async =>
-      Xlsx.build(await sheets(kind, from, to), title: 'GameX Hisab · $kind · $from to $to');
+      Xlsx.build(await sheets(kind, from, to), title: 'Hisab AI · $kind · $from to $to');
 
   /// Writes the workbook and opens the share sheet (WhatsApp, Drive, email…).
   static Future<File> share(String kind, String from, String to) async {
@@ -179,7 +179,7 @@ class ExportBook {
     final label = kinds.firstWhere((k) => k.$1 == kind, orElse: () => kinds.first).$2.replaceAll(RegExp(r'[^A-Za-z0-9]+'), '-');
     final f = File(p.join(dir.path, 'GameX-$label-${from}_to_$to.xlsx'));
     await f.writeAsBytes(bytes, flush: true);
-    await NativeFiles.share(f, mime: xlsxMime, subject: 'GameX Hisab — $label', text: '$label · ${prettyDate(from)} – ${prettyDate(to)}');
+    await NativeFiles.share(f, mime: xlsxMime, subject: 'Hisab AI — $label', text: '$label · ${prettyDate(from)} – ${prettyDate(to)}');
     return f;
   }
 }

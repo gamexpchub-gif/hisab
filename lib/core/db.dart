@@ -10,8 +10,12 @@ class AppDb {
   /// Tests inject an in-memory database here.
   static void useDatabase(Database db) => _db = db;
 
+  /// Database file of the store in use: 'hisab.db' for the first store,
+  /// 'store_<id>.db' for every store added later (see Stores).
+  static String file = 'hisab.db';
+
   /// Path of the database file on the phone.
-  static Future<String> path() async => p.join(await getDatabasesPath(), 'hisab.db');
+  static Future<String> path() async => p.join(await getDatabasesPath(), file);
 
   /// Closes the database (backup / restore); the next query reopens it.
   static Future<void> close() async {
@@ -23,7 +27,7 @@ class AppDb {
   static Future<Database> _open() async {
     final dir = await getDatabasesPath();
     return openDatabase(
-      p.join(dir, 'hisab.db'),
+      p.join(dir, file),
       version: schemaVersion,
       onConfigure: configure,
       onCreate: create,

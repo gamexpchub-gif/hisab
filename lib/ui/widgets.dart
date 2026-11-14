@@ -576,10 +576,16 @@ class LogoTile extends StatelessWidget {
   }
 }
 
+/// Opens the plans page; set by the app (used by plan-limit toasts).
+void Function(BuildContext context)? showPlans;
+
 void toast(BuildContext context, String msg, {bool error = false}) {
+  final plan = error && showPlans != null && RegExp(r'plan|upgrade|renew|trial', caseSensitive: false).hasMatch(msg);
   ScaffoldMessenger.of(context).showSnackBar(SnackBar(
     content: Text(msg),
     backgroundColor: error ? C.red : C.green,
+    duration: Duration(seconds: plan ? 6 : 4),
+    action: plan ? SnackBarAction(label: 'PLANS', textColor: Colors.white, onPressed: () => showPlans!(context)) : null,
   ));
 }
 

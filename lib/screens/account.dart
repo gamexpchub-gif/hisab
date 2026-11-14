@@ -7,6 +7,7 @@ import '../core/books.dart';
 import '../core/money.dart';
 import '../ui/widgets.dart';
 import 'login.dart';
+import 'plans.dart';
 
 // =============================================================================
 // Account & Cloud — who is signed in, cloud backup now / automatic, the list
@@ -88,7 +89,12 @@ class _AccountScreenState extends State<AccountScreen> {
     }
   }
 
-  Future<void> _backup() => _job('Uploading to cloud…', () async {
+  Future<void> _backup() async {
+    if (!gate(context, 'cloud')) return;
+    await _cloudBackup();
+  }
+
+  Future<void> _cloudBackup() => _job('Uploading to cloud…', () async {
         final f = await Backup.create();
         await Cloud.uploadBackup(f, progress: (v) {
           if (mounted) setState(() => progress = v);

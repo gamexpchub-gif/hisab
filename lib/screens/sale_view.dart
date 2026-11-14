@@ -13,6 +13,7 @@ import 'emi.dart';
 import 'sale_form.dart';
 import 'sale_return.dart';
 import 'sales.dart' show invoiceText;
+import 'plans.dart';
 
 // =============================================================================
 // Invoice page — opened from any sale. Glass hero with status and customer,
@@ -151,7 +152,7 @@ class SaleView extends StatelessWidget {
                     side: const BorderSide(color: Color(0xFFFFC2D0)),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
                   ),
-                  onPressed: () => open(context, SaleReturnForm(saleId: id)),
+                  onPressed: () => gate(context, 'returns') ? open(context, SaleReturnForm(saleId: id)) : null,
                   icon: const Icon(Icons.assignment_return_rounded),
                   label: Text('Return items from this sale', style: _j(13.5, FontWeight.w800, const Color(0xFFE0245E))),
                 ),
@@ -345,7 +346,7 @@ class SaleView extends StatelessWidget {
     return Row(children: [
       tile(Icons.print_rounded, 'Print', const [Color(0xFF6B35EE), Color(0xFF4318D2)], () => quickPrint(context, id)),
       const SizedBox(width: 8),
-      tile(Icons.tune_rounded, 'Custom', const [Color(0xFF38BDF8), Color(0xFF2563EB)], () => open(context, PrintStudio(saleId: id))),
+      tile(Icons.tune_rounded, 'Custom', const [Color(0xFF38BDF8), Color(0xFF2563EB)], () => gate(context, 'custom_print') ? open(context, PrintStudio(saleId: id)) : null),
       const SizedBox(width: 8),
       tile(Icons.picture_as_pdf_rounded, 'PDF', const [Color(0xFFFF6B8B), Color(0xFFE0245E)], () => shareInvoicePdf(context, id)),
       const SizedBox(width: 8),

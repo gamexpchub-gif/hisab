@@ -16,6 +16,8 @@ import 'products.dart';
 import 'sales.dart';
 import 'lend_sheet.dart' show saveDueWithAlarm;
 import 'scanner.dart';
+import '../core/plan.dart';
+import 'plans.dart';
 
 // =============================================================================
 // New Sale — point-of-sale billing screen.
@@ -287,6 +289,13 @@ class _SaleFormState extends State<SaleForm> {
 
   /// Continuous scanning: every barcode / IMEI goes straight into the cart.
   Future<void> _scan() async {
+    if (!Sub.can('batch_scan')) {
+      final code = await BarcodeScannerScreen.scan(context, title: 'Scan barcode or IMEI');
+      if (code == null || !mounted) return;
+      final r = await _useCode(code);
+      if (r == null && mounted) toast(context, '$code — kono product mele ni', error: true);
+      return;
+    }
     final n = await BarcodeScannerScreen.scanMany(context, title: 'Scan items · batch', onCode: _useCode);
     if (n > 0 && mounted) toast(context, '$n item${n == 1 ? '' : 's'} added by scan');
   }
@@ -491,7 +500,7 @@ class _SaleFormState extends State<SaleForm> {
             : null,
       );
       if (account != null) await Books.setSetting('last_pay_account', '$account');
-      if (!editing && due > 0 && customer != null && promise != null) {
+      if (!editing && due > 0 && customer != null && promise != null && Sub.can('due_alarm')) {
         await saveDueWithAlarm(
           partyType: 'customer',
           partyId: asInt(customer!['id']),
@@ -1302,7 +1311,7 @@ class _SaleFormState extends State<SaleForm> {
           const SizedBox(width: 10),
           Expanded(child: _stat(due > 0 ? 'Goes to due' : 'Balance due', Money.rs(due), due > 0 ? _red : _muted)),
         ]),
-        if (due > 0 && customer != null && !editing) ...[
+        if (due > 0 && customer != null && !editing && Sub.can('due_alarm')) ...[
           const SizedBox(height: 12),
           _promiseCard(),
         ],
@@ -2013,7 +2022,7 @@ class SaleSuccessScreen extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: _action(Icons.tune_rounded, 'Custom print', const [Color(0xFFFF8A3D), Color(0xFFE0245E)],
-                      () => open(context, PrintStudio(saleId: saleId))),
+                      () => gate(context, 'custom_print') ? open(context, PrintStudio(saleId: saleId)) : null),
                 ),
               ]),
               const SizedBox(height: 10),

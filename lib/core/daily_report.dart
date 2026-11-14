@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'alarms.dart';
 import 'books.dart';
+import 'plan.dart';
 import 'money.dart';
 
 /// The end-of-day AI report: today's sales, profit, money in and out,
@@ -135,7 +136,7 @@ class DailyReport {
     }
     b
       ..writeln()
-      ..write('— GameX Hisab Smart AI');
+      ..write('— Hisab AI');
     return b.toString();
   }
 
@@ -159,7 +160,7 @@ class DailyReport {
   static Future<void> reschedule() async {
     try {
       final s = await Books.settings();
-      if (s['daily_report'] == '0') {
+      if (s['daily_report'] == '0' || !Sub.can('daily_ai')) {
         await Alarms.cancelDaily();
         return;
       }

@@ -101,7 +101,7 @@ class _BackupScreenState extends State<BackupScreen> {
 
   Future<void> _share(File f) async {
     await NativeFiles.share(f,
-        subject: 'GameX Hisab backup', text: 'GameX Hisab backup — keep this file safe (Google Drive / email).');
+        subject: 'Hisab AI backup', text: 'Hisab AI backup — keep this file safe (Google Drive / email).');
   }
 
   Future<void> _backupNow({bool share = true}) => _run('Creating backup…', () async {

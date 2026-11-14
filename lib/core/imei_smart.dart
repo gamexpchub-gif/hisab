@@ -1,5 +1,6 @@
 import 'books.dart';
 import 'money.dart';
+import 'plan.dart';
 import 'tac_db.dart';
 
 /// What the app knows about a scanned IMEI / serial.
@@ -115,7 +116,7 @@ class SmartImei {
         }
       }
     }
-    if (product == null && sName == null && isImei) {
+    if (product == null && sName == null && isImei && Sub.can('smart_imei')) {
       // public TAC database (online, cached on the phone)
       final m = await TacDb.lookup(code);
       if (m != null) {

@@ -40,7 +40,7 @@ class AppLock {
   static Future<bool> authenticate() async {
     try {
       return await _auth.authenticate(
-        localizedReason: 'Unlock GameX Hisab',
+        localizedReason: 'Unlock Hisab AI',
         options: const AuthenticationOptions(biometricOnly: true, stickyAuth: true),
       );
     } on PlatformException {

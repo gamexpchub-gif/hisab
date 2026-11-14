@@ -1,5 +1,5 @@
 // =============================================================================
-// GameX Hisab — Liquid Glass bottom navigation
+// Hisab AI — Liquid Glass bottom navigation
 //
 // Self-contained: this file owns the bottom bar's look and motion. Screens
 // only use [LiquidGlassNav] and [LiquidGlassNav.outerHeight], so redesigning a

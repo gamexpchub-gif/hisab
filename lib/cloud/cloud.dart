@@ -6,9 +6,13 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../core/books.dart';
+import '../core/plan.dart';
+import '../core/stores.dart';
+
+part 'accounts.dart';
 
 // =============================================================================
-// GameX Cloud — account login and cloud backup on the shop's own Firebase
+// Hisab AI Cloud — account login and cloud backup on the shop's own Firebase
 // project, through Firebase's REST APIs (Identity Toolkit + Firestore). Pure
 // Dart: no native plugins, no google-services.json. The session and the
 // project keys live in the app-support folder, outside the books' backups.
@@ -45,6 +49,7 @@ class Cloud {
   static String? _uid, _email, _name, _idToken, _refreshToken;
   static DateTime? _expires;
   static bool _loaded = false;
+  static int _status = 0; // HTTP status of the last failed call
 
   static bool get configured => _apiKey.isNotEmpty && _projectId.isNotEmpty;
   static CloudUser? get user => _uid == null ? null : CloudUser(_uid!, _email ?? '', _name);
@@ -108,6 +113,7 @@ class Cloud {
       final text = await res.transform(utf8.decoder).join();
       final data = text.isEmpty ? <String, dynamic>{} : jsonDecode(text) as Map<String, dynamic>;
       if (res.statusCode >= 400) {
+        _status = res.statusCode;
         final err = data['error'];
         final msg = err is Map ? '${err['message'] ?? ''}' : '';
         final status = err is Map ? '${err['status'] ?? ''}' : '';
@@ -185,6 +191,7 @@ class Cloud {
   }
 
   static Future<void> signOut() async {
+    if (Sub.admin) await Sub.apply(plan: Sub.plan, until: Sub.until, admin: false, blocked: Sub.blocked, pending: Sub.pending);
     _uid = _email = _name = _idToken = _refreshToken = null;
     _expires = null;
     await _saveSession();
@@ -232,10 +239,12 @@ class Cloud {
       'products': {'integerValue': '${await count('products')}'},
       'customers': {'integerValue': '${await count('customers')}'},
       'device': {'stringValue': Platform.localHostname},
+      'store': {'stringValue': Stores.current},
+      'storeName': {'stringValue': Stores.all.isEmpty ? '' : Stores.active.name},
       'complete': {'booleanValue': true},
     };
     await _call('PATCH', _doc(root), token: token, body: {'fields': meta});
-    await _call('PATCH', _doc('users/$_uid'), token: token, body: {
+    await _call('PATCH', _doc('users/$_uid', '?updateMask.fieldPaths=email&updateMask.fieldPaths=name&updateMask.fieldPaths=lastBackup'), token: token, body: {
       'fields': {
         'email': {'stringValue': _email ?? ''},
         'name': {'stringValue': _name ?? ''},
@@ -261,6 +270,7 @@ class Cloud {
       final m = d as Map<String, dynamic>;
       final f = (m['fields'] ?? {}) as Map<String, dynamic>;
       if (f['complete']?['booleanValue'] != true) continue;
+      if ('${f['store']?['stringValue'] ?? 'main'}' != Stores.current) continue; // this store's backups only
       int n(String k) => int.tryParse('${f[k]?['integerValue'] ?? 0}') ?? 0;
       out.add(CloudBackup(
         '${m['name']}'.split('/').last,

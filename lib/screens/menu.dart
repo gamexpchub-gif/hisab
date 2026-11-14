@@ -26,6 +26,11 @@ import 'sales.dart';
 import 'search.dart';
 import 'settings.dart';
 import 'smart_ai.dart';
+import 'plans.dart';
+import 'stores.dart';
+import 'admin.dart';
+import '../core/plan.dart';
+import '../core/stores.dart';
 import 'analytics.dart';
 import 'loans.dart';
 import 'daily_report_screen.dart';
@@ -52,6 +57,24 @@ class _MenuData {
   _MenuData(this.settings, this.m, this.stock, this.alerts, this.sales, this.purchases, this.customers, this.suppliers,
       this.money, this.payable);
 }
+
+/// Which plan feature each menu entry needs.
+const _lock = <String, String>{
+  'Smart Business AI': 'smart_ai',
+  'Daily AI Report': 'daily_ai',
+  'Pro Analytics': 'analytics',
+  'Loans & Investment': 'loans',
+  'EMI / Kisti': 'emi',
+  'IMEI & Warranty': 'imei',
+  'Ledgers': 'reports',
+  'Profit & Loss': 'reports',
+  'Day Book': 'reports',
+  'Balance Sheet': 'balance_sheet',
+  'Trial Balance': 'balance_sheet',
+  'GST Report': 'gst',
+  'Excel Export': 'excel',
+  'Security': 'lock',
+};
 
 class _Item {
   final String title, sub;
@@ -160,6 +183,13 @@ class _MenuScreenState extends State<MenuScreen> {
             const [Color(0xFF94A3B8), Color(0xFF475569)], () => go(const ActivityScreen())),
         _Item('Search everything', 'Customers, invoices, products, IMEI', Icons.manage_search_rounded,
             const [Color(0xFF818CF8), Color(0xFF4F46E5)], () => go(const SearchScreen())),
+        _Item('Plans & Subscription', '${Sub.label}${Sub.admin ? '' : ' · ${Sub.daysLeft} din baki'} · Basic / Gold / Premium', Icons.workspace_premium_rounded,
+            const [Color(0xFFFFC14D), Color(0xFFE08A00)], () => go(const PlansScreen()), badge: Sub.label, alert: !Sub.active),
+        _Item('My Stores', '${Stores.all.length} store · ekhon: ${Stores.active.name}', Icons.store_mall_directory_rounded,
+            const [Color(0xFF8B5CF6), Color(0xFF4318D2)], () => go(const StoresScreen()), badge: '${Stores.all.length}'),
+        if (Sub.admin)
+          _Item('Admin Panel', 'Shob user, plan approve, revenue', Icons.admin_panel_settings_rounded,
+              const [Color(0xFF0F1240), Color(0xFFD81E4A)], () => go(const AdminScreen()), badge: 'ADMIN'),
         _Item('Account & Cloud', 'Login · cloud backup on any phone', Icons.account_circle_rounded,
             const [Color(0xFF8B5CF6), Color(0xFF1B2163)], () => go(const AccountScreen())),
         _Item('Backup & Restore', 'Save everything to Drive, restore anytime', Icons.cloud_upload_rounded,
@@ -326,7 +356,11 @@ class _MenuScreenState extends State<MenuScreen> {
     return Material(
       color: Colors.white,
       child: InkWell(
-        onTap: it.onTap,
+        onTap: () {
+          final f = _lock[it.title];
+          if (f != null && !gate(context, f)) return;
+          it.onTap();
+        },
         child: Padding(
           padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
           child: Row(children: [
@@ -366,7 +400,17 @@ class _MenuScreenState extends State<MenuScreen> {
                 Text(it.sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(11.5, FontWeight.w500, _muted)),
               ]),
             ),
-            if (it.badge != null)
+            if (_lock[it.title] != null && !Sub.can(_lock[it.title]!))
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                decoration: BoxDecoration(color: const Color(0xFFFFF4DC), borderRadius: BorderRadius.circular(10)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.lock_rounded, size: 12, color: Color(0xFFB7791F)),
+                  const SizedBox(width: 3),
+                  Text(Sub.need(_lock[it.title]!), style: _j(10.5, FontWeight.w800, const Color(0xFFB7791F))),
+                ]),
+              )
+            else if (it.badge != null)
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
@@ -393,9 +437,9 @@ class _MenuScreenState extends State<MenuScreen> {
           ),
         ),
         const SizedBox(height: 8),
-        Text('GameX Hisab · v1.0', style: _j(12, FontWeight.w700, _navy)),
+        Text('Hisab AI · v1.0', style: _j(12, FontWeight.w700, _navy)),
         const SizedBox(height: 2),
-        Text('Offline & private — your data stays on this phone', style: _j(11, FontWeight.w500, _muted)),
+        Text('AI accounting for your shop · offline & private', style: _j(11, FontWeight.w500, _muted)),
       ]);
 }
 
@@ -471,15 +515,7 @@ class _ProfileCard extends StatelessWidget {
                     Text(owner, maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(18, FontWeight.w800, Colors.white)),
                     Text(biz, maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(12.5, FontWeight.w500, const Color(0xD9FFFFFF))),
                     const SizedBox(height: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(color: const Color(0x33FFFFFF), borderRadius: BorderRadius.circular(10)),
-                      child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        const Icon(Icons.verified_rounded, color: Colors.white, size: 13),
-                        const SizedBox(width: 4),
-                        Text('Super Admin', style: _j(10.5, FontWeight.w700, Colors.white)),
-                      ]),
-                    ),
+                    Wrap(spacing: 6, runSpacing: 4, children: const [PlanBadge(), StoreChip(dark: true)]),
                   ]),
                 ),
               ]),
