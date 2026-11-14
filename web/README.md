@@ -15,7 +15,7 @@ From your computer (in the repo folder):
 bash tool/deploy_admin.sh root@200.234.32.137 admin.deencircle.online you@example.com
 ```
 
-Then open https://admin.deencircle.online/gamex/dashboard/
+Then open https://admin.deencircle.online/hisab/dashboard/
 
 The domain needs an **A record** pointing to the VPS IP. Run the same command
 again after `git pull` to update the dashboard.

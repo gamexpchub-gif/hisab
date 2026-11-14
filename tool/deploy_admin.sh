@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Deploys the Hisab AI web admin (web/admin) to your VPS at
-#   https://<domain>/gamex/dashboard/
+#   https://<domain>/hisab/dashboard/
 #
 # Run it on YOUR computer (where this repo is), not on the VPS:
 #   bash tool/deploy_admin.sh root@200.234.32.137 admin.deencircle.online you@email.com
 #
 # It uses your own SSH login (key or password prompt). On the VPS it:
 #   - installs nginx and certbot if they are missing (Debian / Ubuntu)
-#   - copies the dashboard to /var/www/hisab-admin/gamex/dashboard
-#   - adds a /gamex/dashboard location to the site of <domain> if nginx already
+#   - copies the dashboard to /var/www/hisab-admin/hisab/dashboard
+#   - adds a /hisab/dashboard location to the site of <domain> if nginx already
 #     serves it (the existing site keeps working), or creates a new site
 #   - gets a free HTTPS certificate (Let's Encrypt) when the site has none
 # Safe to run again for updates: only the dashboard files are replaced.
@@ -29,7 +29,7 @@ cd "$(dirname "$0")/.."
 echo "→ Uploading the dashboard to $HOST …"
 tar -C web/admin -czf - . | ssh "$HOST" 'rm -rf /tmp/hisab-admin && mkdir -p /tmp/hisab-admin && tar -xzf - -C /tmp/hisab-admin'
 
-echo "→ Setting up nginx for https://$DOMAIN/gamex/dashboard/ …"
+echo "→ Setting up nginx for https://$DOMAIN/hisab/dashboard/ …"
 ssh "$HOST" "DOMAIN='$DOMAIN' EMAIL='$EMAIL' bash -s" <<'REMOTE'
 set -euo pipefail
 SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO="sudo"
@@ -47,13 +47,13 @@ if ! command -v certbot >/dev/null 2>&1; then
 fi
 
 # files
-$SUDO mkdir -p "$WEB/gamex/dashboard"
-$SUDO rm -rf "$WEB/gamex/dashboard.new"
-$SUDO cp -r /tmp/hisab-admin "$WEB/gamex/dashboard.new"
-$SUDO rm -rf "$WEB/gamex/dashboard.old"
-$SUDO mv "$WEB/gamex/dashboard" "$WEB/gamex/dashboard.old"
-$SUDO mv "$WEB/gamex/dashboard.new" "$WEB/gamex/dashboard"
-$SUDO rm -rf "$WEB/gamex/dashboard.old" /tmp/hisab-admin
+$SUDO mkdir -p "$WEB/hisab/dashboard"
+$SUDO rm -rf "$WEB/hisab/dashboard.new"
+$SUDO cp -r /tmp/hisab-admin "$WEB/hisab/dashboard.new"
+$SUDO rm -rf "$WEB/hisab/dashboard.old"
+$SUDO mv "$WEB/hisab/dashboard" "$WEB/hisab/dashboard.old"
+$SUDO mv "$WEB/hisab/dashboard.new" "$WEB/hisab/dashboard"
+$SUDO rm -rf "$WEB/hisab/dashboard.old" /tmp/hisab-admin "$WEB/gamex"
 $SUDO chown -R www-data:www-data "$WEB" 2>/dev/null || true
 $SUDO find "$WEB" -type d -exec chmod 755 {} \; ; $SUDO find "$WEB" -type f -exec chmod 644 {} \;
 
@@ -61,13 +61,16 @@ $SUDO find "$WEB" -type d -exec chmod 755 {} \; ; $SUDO find "$WEB" -type f -exe
 $SUDO mkdir -p /etc/nginx/snippets
 $SUDO tee "$SNIP" >/dev/null <<NGINX
 # Hisab AI web admin — managed by tool/deploy_admin.sh
-location = /gamex { return 301 /gamex/dashboard/; }
-location = /gamex/ { return 301 /gamex/dashboard/; }
-location = /gamex/dashboard { return 301 /gamex/dashboard/; }
-location ^~ /gamex/dashboard/ {
+location = /hisab { return 301 /hisab/dashboard/; }
+location = /hisab/ { return 301 /hisab/dashboard/; }
+location = /hisab/dashboard { return 301 /hisab/dashboard/; }
+# the old address keeps working
+location = /gamex { return 301 /hisab/dashboard/; }
+location ^~ /gamex/ { return 301 /hisab/dashboard/; }
+location ^~ /hisab/dashboard/ {
     root $WEB;
     index index.html;
-    try_files \$uri \$uri/ /gamex/dashboard/index.html;
+    try_files \$uri \$uri/ /hisab/dashboard/index.html;
     add_header X-Robots-Tag "noindex, nofollow" always;
     add_header X-Frame-Options "DENY" always;
     add_header X-Content-Type-Options "nosniff" always;
@@ -83,7 +86,7 @@ if [ -n "$EXISTING" ]; then
   for F in $EXISTING; do
     REAL=$(readlink -f "$F")
     if ! grep -q "snippets/hisab-admin.conf" "$REAL"; then
-      echo "  adding /gamex/dashboard to $REAL (backup: $REAL.bak-$STAMP)"
+      echo "  adding /hisab/dashboard to $REAL (backup: $REAL.bak-$STAMP)"
       $SUDO cp "$REAL" "$REAL.bak-$STAMP"
       $SUDO sed -i -E "/server_name[^;]*[[:space:]]${DOMAIN//./\\.}([[:space:];]|\$)/a\\    include snippets/hisab-admin.conf;" "$REAL"
     else
@@ -100,7 +103,7 @@ server {
 $( [ -f /proc/net/if_inet6 ] && echo '    listen [::]:80;' )
     server_name $DOMAIN;
     root $WEB;
-    location = / { return 302 /gamex/dashboard/; }
+    location = / { return 302 /hisab/dashboard/; }
     include snippets/hisab-admin.conf;
 }
 NGINX
@@ -142,5 +145,5 @@ elif command -v certbot >/dev/null 2>&1 && [ -n "$DNSIP" ]; then
 fi
 
 echo
-echo "✓ Hisab AI admin is live:  https://$DOMAIN/gamex/dashboard/"
+echo "✓ Hisab AI admin is live:  https://$DOMAIN/hisab/dashboard/"
 REMOTE
