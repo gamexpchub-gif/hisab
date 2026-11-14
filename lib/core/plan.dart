@@ -18,15 +18,24 @@ import 'money.dart';
 class PlanDef {
   final String id, name, tagline;
   final int price; // ₹ a month
+  final int yearly; // ₹ a year
   final int tier; // 1 basic · 2 gold · 3 premium
   final int products, sales, stores; // per 30 days / stores; 0 = unlimited
-  const PlanDef(this.id, this.name, this.tagline, this.price, this.tier, this.products, this.sales, this.stores);
+  const PlanDef(this.id, this.name, this.tagline, this.price, this.yearly, this.tier, this.products, this.sales, this.stores);
+
+  /// Price for [months]: whole years at the yearly price, the rest monthly.
+  int amount(int months) => (months ~/ 12) * yearly + (months % 12) * price;
+
+  /// What a year saves against 12 monthly payments.
+  int get yearSaving => price * 12 - yearly;
+  int get yearSavingPct => price == 0 ? 0 : (yearSaving * 100 / (price * 12)).round();
+  int get yearlyPerMonth => (yearly / 12).round();
 }
 
 const plans = [
-  PlanDef('basic', 'Basic', 'Choto dokan shuru korar jonno', 199, 1, 60, 300, 1),
-  PlanDef('gold', 'Gold', 'Barte thaka business-er jonno', 599, 2, 500, 3000, 3),
-  PlanDef('premium', 'Premium', 'Shob feature, kono limit nei', 999, 3, 0, 0, 10),
+  PlanDef('basic', 'Basic', 'Choto dokan shuru korar jonno', 199, 1999, 1, 60, 300, 1),
+  PlanDef('gold', 'Gold', 'Barte thaka business-er jonno', 599, 6999, 2, 500, 3000, 3),
+  PlanDef('premium', 'Premium', 'Shob feature, kono limit nei', 999, 11988, 3, 0, 0, 10),
 ];
 
 PlanDef? planById(String? id) => plans.where((x) => x.id == id).firstOrNull;

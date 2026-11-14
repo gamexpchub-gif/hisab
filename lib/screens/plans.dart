@@ -118,8 +118,11 @@ class PlansScreen extends StatefulWidget {
 }
 
 class _PlansScreenState extends State<PlansScreen> {
-  int months = 1;
+  bool yearly = true;
+  int months = 1; // monthly mode: 1 / 3 / 6
   bool syncing = false;
+
+  int get term => yearly ? 12 : months;
 
   @override
   void initState() {
@@ -165,9 +168,9 @@ class _PlansScreenState extends State<PlansScreen> {
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 22),
           decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('${p.name} plan · $months mash', style: _j(19, FontWeight.w800, _ink)),
+            Text('${p.name} plan · ${yearly ? '1 bochor' : '$months mash'}', style: _j(19, FontWeight.w800, _ink)),
             const SizedBox(height: 4),
-            Text('Mot ₹${p.price * months}', style: _j(26, FontWeight.w800, planColors[p.id]!.last)),
+            Text('Mot ₹${inr(p.amount(term))}', style: _j(26, FontWeight.w800, planColors[p.id]!.last)),
             const SizedBox(height: 10),
             Text('Taka pathanor por niche UTR / transaction ID ba note likhun. Admin check kore plan chalu kore deben.',
                 style: _j(12.5, FontWeight.w500, _muted)),
@@ -192,7 +195,7 @@ class _PlansScreenState extends State<PlansScreen> {
     );
     if (go != true || !mounted) return;
     try {
-      await Accounts.requestPlan(p.id, months, note.text);
+      await Accounts.requestPlan(p.id, term, note.text);
       if (!mounted) return;
       toast(context, 'Request pathano holo — approve hole plan nijei chalu hobe');
       setState(() {});
@@ -251,28 +254,12 @@ class _PlansScreenState extends State<PlansScreen> {
               ]),
             ),
             const SizedBox(height: 14),
-            Row(children: [
-              Text('Kotodiner jonno', style: _j(13, FontWeight.w700, _muted)),
-              const Spacer(),
-              for (final m in const [1, 3, 6, 12])
-                GestureDetector(
-                  onTap: () => setState(() => months = m),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 160),
-                    margin: const EdgeInsets.only(left: 6),
-                    padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
-                    decoration: BoxDecoration(
-                      color: months == m ? _ink : Colors.white,
-                      borderRadius: BorderRadius.circular(11),
-                      border: Border.all(color: months == m ? _ink : _line),
-                    ),
-                    child: Text('$m mash', style: _j(12, FontWeight.w800, months == m ? Colors.white : _ink)),
-                  ),
-                ),
-            ]),
+            _billing(),
             const SizedBox(height: 6),
             for (final p in plans) _planCard(p, current: !Sub.admin && Sub.active && Sub.plan == p.id),
-            const SizedBox(height: 8),
+            const SizedBox(height: 16),
+            _showcase(),
+            const SizedBox(height: 12),
             _compare(),
             const SizedBox(height: 12),
             Text('Online payment shiggiri ashche. Ekhon: taka pathiye request korun, admin approve korle plan chalu.',
@@ -283,6 +270,170 @@ class _PlansScreenState extends State<PlansScreen> {
       },
     );
   }
+
+  static String inr(int v) {
+    final s = '$v';
+    if (s.length <= 3) return s;
+    final last = s.substring(s.length - 3);
+    var rest = s.substring(0, s.length - 3);
+    final parts = <String>[];
+    while (rest.length > 2) {
+      parts.insert(0, rest.substring(rest.length - 2));
+      rest = rest.substring(0, rest.length - 2);
+    }
+    if (rest.isNotEmpty) parts.insert(0, rest);
+    return '${parts.join(',')},$last';
+  }
+
+  Widget _billing() {
+    final best = plans.map((p) => p.yearSavingPct).fold<int>(0, (a, b) => a > b ? a : b);
+    Widget seg(bool y, String l, String? badge) => Expanded(
+          child: GestureDetector(
+            onTap: () {
+              HapticFeedback.selectionClick();
+              setState(() => yearly = y);
+            },
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              height: 50,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                gradient: yearly == y ? const LinearGradient(colors: [Color(0xFF1B1F6B), Color(0xFF5B2EE0)]) : null,
+                boxShadow: yearly == y ? const [BoxShadow(color: Color(0x405B2EE0), blurRadius: 12, offset: Offset(0, 5))] : null,
+              ),
+              child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                Text(l, style: _j(14, FontWeight.w800, yearly == y ? Colors.white : _ink)),
+                if (badge != null) Text(badge, style: _j(10.5, FontWeight.w800, yearly == y ? const Color(0xFF7CF2B4) : _green)),
+              ]),
+            ),
+          ),
+        );
+    return Column(children: [
+      Container(
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18), border: Border.all(color: _line)),
+        child: Row(children: [
+          seg(false, 'Mashik', null),
+          seg(true, 'Bochorik', best > 0 ? 'Save up to $best%' : null),
+        ]),
+      ),
+      if (!yearly) ...[
+        const SizedBox(height: 10),
+        Row(children: [
+          Text('Koto mash', style: _j(12.5, FontWeight.w700, _muted)),
+          const Spacer(),
+          for (final m in const [1, 3, 6])
+            GestureDetector(
+              onTap: () => setState(() => months = m),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 160),
+                margin: const EdgeInsets.only(left: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                decoration: BoxDecoration(
+                  color: months == m ? _ink : Colors.white,
+                  borderRadius: BorderRadius.circular(11),
+                  border: Border.all(color: months == m ? _ink : _line),
+                ),
+                child: Text('$m mash', style: _j(12, FontWeight.w800, months == m ? Colors.white : _ink)),
+              ),
+            ),
+        ]),
+      ],
+    ]);
+  }
+
+  static const _featureIcon = <String, IconData>{
+    'sales': Icons.point_of_sale_rounded,
+    'purchases': Icons.shopping_bag_rounded,
+    'products': Icons.inventory_2_rounded,
+    'parties': Icons.groups_rounded,
+    'expenses': Icons.sell_rounded,
+    'print': Icons.print_rounded,
+    'scanner': Icons.qr_code_scanner_rounded,
+    'cash_bank': Icons.account_balance_rounded,
+    'backup': Icons.backup_rounded,
+    'search': Icons.manage_search_rounded,
+    'dashboard': Icons.dashboard_rounded,
+    'returns': Icons.assignment_return_rounded,
+    'emi': Icons.calendar_month_rounded,
+    'imei': Icons.verified_user_rounded,
+    'labels': Icons.qr_code_2_rounded,
+    'whatsapp': Icons.chat_rounded,
+    'due_alarm': Icons.alarm_rounded,
+    'reports': Icons.menu_book_rounded,
+    'gst': Icons.request_quote_rounded,
+    'excel': Icons.table_view_rounded,
+    'cloud': Icons.cloud_done_rounded,
+    'lock': Icons.fingerprint_rounded,
+    'multi_store': Icons.store_mall_directory_rounded,
+    'opp_id': Icons.badge_rounded,
+    'smart_ai': Icons.auto_awesome_rounded,
+    'daily_ai': Icons.summarize_rounded,
+    'analytics': Icons.query_stats_rounded,
+    'loans': Icons.account_balance_wallet_rounded,
+    'smart_imei': Icons.phone_android_rounded,
+    'batch_scan': Icons.burst_mode_rounded,
+    'custom_print': Icons.tune_rounded,
+    'balance_sheet': Icons.balance_rounded,
+    'unlimited': Icons.all_inclusive_rounded,
+    'stores10': Icons.storefront_rounded,
+    'loan_alarm': Icons.notifications_active_rounded,
+    'priority': Icons.support_agent_rounded,
+    'early': Icons.rocket_launch_rounded,
+  };
+
+  /// Every feature as a tile, coloured by the plan that opens it.
+  Widget _showcase() => Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(24),
+          gradient: const LinearGradient(colors: [Color(0xFF0F1240), Color(0xFF241A7A)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.auto_awesome_rounded, color: Color(0xFFFFE08A), size: 20),
+            const SizedBox(width: 8),
+            Expanded(child: Text('Hisab AI-te ${features.length} ta feature', style: _j(16, FontWeight.w800, Colors.white))),
+          ]),
+          const SizedBox(height: 4),
+          Text('Rong dekhe bujhun kon plan-e ki pabe', style: _j(12, FontWeight.w500, const Color(0xB3FFFFFF))),
+          const SizedBox(height: 10),
+          Wrap(spacing: 10, runSpacing: 4, children: [
+            for (final p in plans)
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                Container(width: 10, height: 10, decoration: BoxDecoration(shape: BoxShape.circle, gradient: LinearGradient(colors: planColors[p.id]!))),
+                const SizedBox(width: 5),
+                Text('${p.name} ${featurePercent(p.tier)}%', style: _j(11.5, FontWeight.w700, Colors.white)),
+              ]),
+          ]),
+          const SizedBox(height: 12),
+          LayoutBuilder(builder: (context, c) {
+            final w = (c.maxWidth - 16) / 3;
+            return Wrap(spacing: 8, runSpacing: 8, children: [
+              for (final f in features)
+                Container(
+                  width: w,
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0x14FFFFFF),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: planColors[plans[f.tier - 1].id]!.first.withAlpha(0x88)),
+                  ),
+                  child: Column(children: [
+                    Container(
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(borderRadius: BorderRadius.circular(11), gradient: LinearGradient(colors: planColors[plans[f.tier - 1].id]!)),
+                      child: Icon(_featureIcon[f.key] ?? Icons.check_rounded, color: Colors.white, size: 18),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(f.name, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: _j(10.5, FontWeight.w700, Colors.white)),
+                  ]),
+                ),
+            ]);
+          }),
+        ]),
+      );
 
   Widget _usage(String l, int used, int max) {
     final unlimited = max == 0;
@@ -347,14 +498,39 @@ class _PlansScreenState extends State<PlansScreen> {
               ]),
             ),
             Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-              Text('₹${p.price}', style: _j(24, FontWeight.w800, Colors.white)),
-              Text('/mash', style: _j(11, FontWeight.w600, const Color(0xE6FFFFFF))),
+              if (yearly && p.yearSaving > 0)
+                Text('₹${inr(p.price * 12)}',
+                    style: _j(12, FontWeight.w700, const Color(0xB3FFFFFF)).copyWith(decoration: TextDecoration.lineThrough, decorationColor: Colors.white)),
+              Text('₹${inr(yearly ? p.yearly : p.price)}', style: _j(24, FontWeight.w800, Colors.white)),
+              Text(yearly ? '/bochor · ₹${p.yearlyPerMonth}/mash' : '/mash', style: _j(11, FontWeight.w600, const Color(0xE6FFFFFF))),
             ]),
           ]),
         ),
         Padding(
           padding: const EdgeInsets.all(14),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            if (yearly && p.yearSaving > 0)
+              Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(color: const Color(0xFFE6F7EE), borderRadius: BorderRadius.circular(10)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.savings_rounded, size: 16, color: _green),
+                  const SizedBox(width: 6),
+                  Text('Bochore ₹${inr(p.yearSaving)} bachan (${p.yearSavingPct}% kom)', style: _j(12, FontWeight.w800, _green)),
+                ]),
+              ),
+            if (yearly && p.yearSaving <= 0)
+              Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(color: const Color(0xFFF1ECFF), borderRadius: BorderRadius.circular(10)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.lock_clock_rounded, size: 16, color: Color(0xFF5B2EE0)),
+                  const SizedBox(width: 6),
+                  Text('Ek bar pay — 12 mash nishchinto', style: _j(12, FontWeight.w800, const Color(0xFF5B2EE0))),
+                ]),
+              ),
             Row(children: [
               Text('$pct% feature', style: _j(13.5, FontWeight.w800, _ink)),
               const SizedBox(width: 8),
@@ -389,7 +565,7 @@ class _PlansScreenState extends State<PlansScreen> {
                   : FilledButton(
                       style: FilledButton.styleFrom(backgroundColor: colors.last, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24))),
                       onPressed: Sub.admin ? null : () => _request(p),
-                      child: Text('${p.name} nin · ₹${p.price * months}', style: _j(14, FontWeight.w800, Colors.white)),
+                      child: Text('${p.name} nin · ₹${inr(p.amount(term))}${yearly ? '/bochor' : ''}', style: _j(14, FontWeight.w800, Colors.white)),
                     ),
             ),
           ]),

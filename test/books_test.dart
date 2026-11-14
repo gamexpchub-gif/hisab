@@ -568,6 +568,12 @@ void main() {
     expect(featurePercent(1), 30);
     expect(featurePercent(2), 65);
     expect(featurePercent(3), 100);
+    expect(planById('basic')!.amount(12), 1999);
+    expect(planById('gold')!.amount(12), 6999);
+    expect(planById('premium')!.amount(12), 11988);
+    expect(planById('gold')!.amount(3), 1797);
+    expect(planById('basic')!.amount(15), 1999 + 3 * 199);
+    expect(planById('basic')!.yearSavingPct, 16);
     Books.guard = Sub.guard;
     try {
       Sub.plan = 'basic';

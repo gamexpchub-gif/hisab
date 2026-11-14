@@ -46,7 +46,7 @@ class PlanRequest {
   final int months;
   final DateTime? created;
   PlanRequest(this.id, this.uid, this.email, this.name, this.plan, this.months, this.note, this.status, this.created);
-  int get amount => (planById(plan)?.price ?? 0) * months;
+  int get amount => planById(plan)?.amount(months) ?? 0;
 }
 
 // Firestore value helpers ---------------------------------------------------
