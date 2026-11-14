@@ -570,7 +570,8 @@ void main() {
     expect(featurePercent(3), 100);
     expect(planById('basic')!.amount(12), 1999);
     expect(planById('gold')!.amount(12), 6999);
-    expect(planById('premium')!.amount(12), 11988);
+    expect(planById('premium')!.amount(12), 9999);
+    expect(planById('premium')!.yearSavingPct, 17);
     expect(planById('gold')!.amount(3), 1797);
     expect(planById('basic')!.amount(15), 1999 + 3 * 199);
     expect(planById('basic')!.yearSavingPct, 16);

@@ -35,7 +35,7 @@ class PlanDef {
 const plans = [
   PlanDef('basic', 'Basic', 'Choto dokan shuru korar jonno', 199, 1999, 1, 60, 300, 1),
   PlanDef('gold', 'Gold', 'Barte thaka business-er jonno', 599, 6999, 2, 500, 3000, 3),
-  PlanDef('premium', 'Premium', 'Shob feature, kono limit nei', 999, 11988, 3, 0, 0, 10),
+  PlanDef('premium', 'Premium', 'Shob feature, kono limit nei', 999, 9999, 3, 0, 0, 10),
 ];
 
 PlanDef? planById(String? id) => plans.where((x) => x.id == id).firstOrNull;
