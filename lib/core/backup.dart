@@ -180,8 +180,8 @@ class Backup {
       await out.writeAsBytes(f.content as List<int>, flush: true);
     }
     // reopen (runs upgrades for older backups) and check the books are readable
-    final db = await AppDb.instance;
-    final ok = await db.rawQuery('PRAGMA quick_check');
+    final books = await AppDb.instance;
+    final ok = await books.rawQuery('PRAGMA quick_check');
     if (ok.isEmpty || '${ok.first.values.first}' != 'ok') {
       throw AccountingError('The restored books are damaged — your previous data is in the latest automatic backup');
     }
