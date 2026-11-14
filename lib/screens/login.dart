@@ -245,10 +245,19 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                Center(child: Text('Hisab AI', style: _j(26, FontWeight.w800, Colors.white))),
+                Center(
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Text('Hisab ', style: _j(28, FontWeight.w800, Colors.white)),
+                    ShaderMask(
+                      blendMode: BlendMode.srcIn,
+                      shaderCallback: (r) => const LinearGradient(colors: [Color(0xFFC4B5FD), Color(0xFF67E8F9)]).createShader(r),
+                      child: Text('AI', style: _j(28, FontWeight.w800, Colors.white)),
+                    ),
+                  ]),
+                ),
                 const SizedBox(height: 4),
                 Center(
-                  child: Text('Billing · Stock · Khata — safe in your cloud',
+                  child: Text('Smart accounting for your shop — billing, stock, khata & AI',
                       style: _j(13, FontWeight.w600, const Color(0xDDFFFFFF))),
                 ),
                 const SizedBox(height: 18),
