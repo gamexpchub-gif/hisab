@@ -513,7 +513,7 @@ void main() {
     expect(r.tomorrow.any((x) => x['name'] == 'Report Customer'), isTrue);
     expect(r.reorder.any((x) => x['name'] == 'Report Phone'), isTrue);
     expect(r.text('GameX'), contains('Report Customer'));
-    expect(r.headline(), contains('Bikri'));
+    expect(r.headline(), contains('Sales'));
   });
 
   test('Loans: EMI maths, receive, repay with interest, close, delete', () async {

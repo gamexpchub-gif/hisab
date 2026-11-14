@@ -64,7 +64,7 @@ const _lock = <String, String>{
   'Daily AI Report': 'daily_ai',
   'Pro Analytics': 'analytics',
   'Loans & Investment': 'loans',
-  'EMI / Kisti': 'emi',
+  'EMI / Instalments': 'emi',
   'IMEI & Warranty': 'imei',
   'Ledgers': 'reports',
   'Profit & Loss': 'reports',
@@ -119,11 +119,11 @@ class _MenuScreenState extends State<MenuScreen> {
     void go(Widget w) => open(context, w);
     return [
       ('Smart AI', [
-        _Item('Smart Business AI', 'Aaj ki korben: baki, EMI, stock, lav — auto suggestion', Icons.auto_awesome_rounded,
+        _Item('Smart Business AI', 'What to do today: dues, EMIs, stock, profit', Icons.auto_awesome_rounded,
             const [Color(0xFF7B3FF2), Color(0xFF1B1F6B)], () => go(const SmartAiScreen())),
-        _Item('Pro Analytics', 'Chart: bikri, lav, baki, cash, bank, loan — aaj/mash/bochor', Icons.query_stats_rounded,
+        _Item('Pro Analytics', 'Charts: sales, profit, dues, cash, bank, loans', Icons.query_stats_rounded,
             const [Color(0xFFF472B6), Color(0xFF7B3FF2)], () => go(const AnalyticsScreen())),
-        _Item('Daily AI Report', 'Rat-e auto report: bikri, lav, kal ke debe, order list', Icons.summarize_rounded,
+        _Item('Daily AI Report', 'Evening report: sales, profit, who pays tomorrow, reorders', Icons.summarize_rounded,
             const [Color(0xFF6AA5FF), Color(0xFF1A47C8)], () => go(const DailyReportScreen())),
       ]),
       ('Sales & billing', [
@@ -135,9 +135,9 @@ class _MenuScreenState extends State<MenuScreen> {
             const [Color(0xFFFF7A7A), Color(0xFFDC4545)], () => go(const ExpensesScreen())),
         _Item('Cash & Bank', 'Cash, SBI, UPI · transfers', Icons.account_balance_rounded,
             const [Color(0xFFFF5C7A), Color(0xFFD81E4A)], () => go(const BankScreen()), badge: Money.compact(d.money)),
-        _Item('Loans & Investment', 'Bank/person loan, partner capital, EMI, sud', Icons.request_quote_rounded,
+        _Item('Loans & Investment', 'Bank and personal loans, partner capital, EMIs, interest', Icons.request_quote_rounded,
             const [Color(0xFF0F1240), Color(0xFF6B35EE)], () => go(const LoansScreen())),
-        _Item('EMI / Kisti', 'Finance & shop instalments, reminders', Icons.calendar_month_rounded,
+        _Item('EMI / Instalments', 'Finance & shop instalments, reminders', Icons.calendar_month_rounded,
             const [Color(0xFF2DD4BF), Color(0xFF0E7490)], () => go(const EmiScreen())),
       ]),
       ('Parties', [
@@ -183,12 +183,12 @@ class _MenuScreenState extends State<MenuScreen> {
             const [Color(0xFF94A3B8), Color(0xFF475569)], () => go(const ActivityScreen())),
         _Item('Search everything', 'Customers, invoices, products, IMEI', Icons.manage_search_rounded,
             const [Color(0xFF818CF8), Color(0xFF4F46E5)], () => go(const SearchScreen())),
-        _Item('Plans & Subscription', '${Sub.label}${Sub.admin ? '' : ' · ${Sub.daysLeft} din baki'} · Basic / Gold / Premium', Icons.workspace_premium_rounded,
+        _Item('Plans & Subscription', '${Sub.label}${Sub.admin ? '' : ' · ${Sub.daysLeft} days left'} · Basic / Gold / Premium', Icons.workspace_premium_rounded,
             const [Color(0xFFFFC14D), Color(0xFFE08A00)], () => go(const PlansScreen()), badge: Sub.label, alert: !Sub.active),
-        _Item('My Stores', '${Stores.all.length} store · ekhon: ${Stores.active.name}', Icons.store_mall_directory_rounded,
+        _Item('My Stores', '${Stores.all.length} stores · open: ${Stores.active.name}', Icons.store_mall_directory_rounded,
             const [Color(0xFF8B5CF6), Color(0xFF4318D2)], () => go(const StoresScreen()), badge: '${Stores.all.length}'),
         if (Sub.admin)
-          _Item('Admin Panel', 'Shob user, plan approve, revenue', Icons.admin_panel_settings_rounded,
+          _Item('Admin Panel', 'All users, plan approvals, revenue', Icons.admin_panel_settings_rounded,
               const [Color(0xFF0F1240), Color(0xFFD81E4A)], () => go(const AdminScreen()), badge: 'ADMIN'),
         _Item('Account & Cloud', 'Login · cloud backup on any phone', Icons.account_circle_rounded,
             const [Color(0xFF8B5CF6), Color(0xFF1B2163)], () => go(const AccountScreen())),

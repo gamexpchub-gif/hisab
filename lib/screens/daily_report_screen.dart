@@ -95,7 +95,7 @@ class _DailyReportScreenState extends State<DailyReportScreen> {
         final shop = (s['business_name'] ?? '').trim().isEmpty ? 'GameX Pc Hub' : s['business_name']!.trim();
         return PageShell(
           title: 'Daily AI Report',
-          subtitle: isToday ? 'Aaj · ${prettyDate(r.day)}' : prettyDate(r.day),
+          subtitle: isToday ? 'Today · ${prettyDate(r.day)}' : prettyDate(r.day),
           children: [
             Row(children: [
               IconButton(
@@ -108,7 +108,7 @@ class _DailyReportScreenState extends State<DailyReportScreen> {
                     final d = await showDatePicker(context: context, initialDate: day, firstDate: DateTime(2015), lastDate: DateTime.now());
                     if (d != null) setState(() => day = d);
                   },
-                  child: Text(isToday ? 'Aaj' : prettyDate(r.day), textAlign: TextAlign.center, style: _j(15, FontWeight.w800, _ink)),
+                  child: Text(isToday ? 'Today' : prettyDate(r.day), textAlign: TextAlign.center, style: _j(15, FontWeight.w800, _ink)),
                 ),
               ),
               IconButton(
@@ -123,52 +123,52 @@ class _DailyReportScreenState extends State<DailyReportScreen> {
                 gradient: const LinearGradient(colors: [Color(0xFF1B1F6B), Color(0xFF4318D2), Color(0xFF7B3FF2)]),
               ),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Mot bikri', style: _j(12.5, FontWeight.w600, const Color(0xD9FFFFFF))),
+                Text('Total sales', style: _j(12.5, FontWeight.w600, const Color(0xD9FFFFFF))),
                 Text(Money.rs(r.sales), style: _j(30, FontWeight.w800, Colors.white)),
                 const SizedBox(height: 4),
                 Text(
-                  '${r.invoices} bill · ${r.items} item · ${r.prevSales > 0 || r.sales > 0 ? '${r.change >= 0 ? '▲' : '▼'} ${r.change.abs()}% ager din-er theke' : 'ager din bikri nei'}',
+                  '${r.invoices} bills · ${r.items} items · ${r.prevSales > 0 || r.sales > 0 ? '${r.change >= 0 ? '▲' : '▼'} ${r.change.abs()}% vs the day before' : 'no sales the day before'}',
                   style: _j(12, FontWeight.w600, const Color(0xE6FFFFFF)),
                 ),
                 if (r.best != null) ...[
                   const SizedBox(height: 4),
-                  Text('🔥 Best: ${r.best}', style: _j(12, FontWeight.w700, const Color(0xFFFFE08A))),
+                  Text('🔥 Best seller: ${r.best}', style: _j(12, FontWeight.w700, const Color(0xFFFFE08A))),
                 ],
               ]),
             ),
             const SizedBox(height: 10),
             Row(children: [
-              Expanded(child: _tile('Lav', r.profit, const [Color(0xFF3EE08F), Color(0xFF0E9F5E)], Icons.trending_up_rounded, sub: 'Margin ${r.margin}%')),
+              Expanded(child: _tile('Profit', r.profit, const [Color(0xFF3EE08F), Color(0xFF0E9F5E)], Icons.trending_up_rounded, sub: 'Margin ${r.margin}%')),
               const SizedBox(width: 10),
-              Expanded(child: _tile('Collection', r.collected, const [Color(0xFF6AA5FF), Color(0xFF1A47C8)], Icons.south_west_rounded)),
+              Expanded(child: _tile('Collected', r.collected, const [Color(0xFF6AA5FF), Color(0xFF1A47C8)], Icons.south_west_rounded)),
             ]),
             const SizedBox(height: 10),
             Row(children: [
-              Expanded(child: _tile('Khoroch', r.expenses, const [Color(0xFFFF7A7A), Color(0xFFDC4545)], Icons.sell_rounded)),
+              Expanded(child: _tile('Expenses', r.expenses, const [Color(0xFFFF7A7A), Color(0xFFDC4545)], Icons.sell_rounded)),
               const SizedBox(width: 10),
-              Expanded(child: _tile('Notun baki', r.newDue, const [Color(0xFFFFB547), Color(0xFFE38A0B)], Icons.schedule_rounded, sub: 'Mot ${Money.compact(r.totalDue)}')),
+              Expanded(child: _tile('New dues', r.newDue, const [Color(0xFFFFB547), Color(0xFFE38A0B)], Icons.schedule_rounded, sub: 'Total ${Money.compact(r.totalDue)}')),
             ]),
             if (r.cash.isNotEmpty)
-              _section('Taka kothay ache (ekhon)', Icons.account_balance_wallet_rounded, [
+              _section('Where the money is (now)', Icons.account_balance_wallet_rounded, [
                 for (final e in r.cash.entries) _line(e.key, Money.rs(e.value), color: e.value < 0 ? _red : null),
               ]),
-            _section('Kal collect / pay', Icons.event_rounded, [
-              if (r.tomorrow.isEmpty) Text('Kal kono payment-er tarikh nei', style: _j(12.5, FontWeight.w500, _muted)),
+            _section('Due tomorrow', Icons.event_rounded, [
+              if (r.tomorrow.isEmpty) Text('No payments due tomorrow', style: _j(12.5, FontWeight.w500, _muted)),
               for (final x in r.tomorrow)
                 _line('${x['name']} · ${x['what']}${x['late'] == true ? ' (late)' : ''}', Money.rs(asInt(x['amount'])),
                     color: x['late'] == true ? _red : _green),
             ]),
-            _section('Order korte hobe', Icons.inventory_2_rounded, [
-              if (r.reorder.isEmpty) Text('Ekhon kichu order korar dorkar nei', style: _j(12.5, FontWeight.w500, _muted)),
+            _section('To reorder', Icons.inventory_2_rounded, [
+              if (r.reorder.isEmpty) Text('Nothing to reorder right now', style: _j(12.5, FontWeight.w500, _muted)),
               for (final x in r.reorder.take(10))
-                _line('${x['name']} · stock ${x['stock']}${x['days'] == null ? '' : ' · ~${x['days']} din'}', '${x['need']} ta'),
+                _line('${x['name']} · stock ${x['stock']}${x['days'] == null ? '' : ' · ~${x['days']} days'}', '${x['need']} pcs'),
             ]),
             const SizedBox(height: 14),
             GestureDetector(
               onTap: () async {
                 HapticFeedback.selectionClick();
                 final ok = await Contact.whatsapp(null, r.text(shop));
-                if (!ok && context.mounted) toast(context, 'Report copy kora holo');
+                if (!ok && context.mounted) toast(context, 'Report copied');
               },
               child: Container(
                 height: 54,
@@ -176,13 +176,13 @@ class _DailyReportScreenState extends State<DailyReportScreen> {
                 child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                   const Icon(Icons.chat_rounded, color: Colors.white),
                   const SizedBox(width: 10),
-                  Text('WhatsApp-e report pathan', style: _j(14.5, FontWeight.w800, Colors.white)),
+                  Text('Share report on WhatsApp', style: _j(14.5, FontWeight.w800, Colors.white)),
                 ]),
               ),
             ),
-            _section('Protidin notification', Icons.notifications_active_rounded, [
+            _section('Daily notification', Icons.notifications_active_rounded, [
               Row(children: [
-                Expanded(child: Text('Rat-e AI report notification', style: _j(13, FontWeight.w600, _ink))),
+                Expanded(child: Text('Evening AI report notification', style: _j(13, FontWeight.w600, _ink))),
                 Switch.adaptive(
                   value: on,
                   onChanged: (v) async {
@@ -202,7 +202,7 @@ class _DailyReportScreenState extends State<DailyReportScreen> {
                     await DailyReport.reschedule();
                   },
                   child: Row(children: [
-                    Expanded(child: Text('Somoy', style: _j(13, FontWeight.w600, _muted))),
+                    Expanded(child: Text('Time', style: _j(13, FontWeight.w600, _muted))),
                     Text(at, style: _j(14, FontWeight.w800, const Color(0xFF5B2EE0))),
                     const Icon(Icons.edit_rounded, size: 16, color: Color(0xFF5B2EE0)),
                   ]),

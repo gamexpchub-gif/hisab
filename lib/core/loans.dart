@@ -130,7 +130,7 @@ class Loans {
     String? note,
   }) {
     return Books._write((x) async {
-      if (lender.trim().isEmpty) throw AccountingError('Kar kach theke taka elo — naam likhun');
+      if (lender.trim().isEmpty) throw AccountingError('Enter who the money came from');
       if (principal <= 0) throw AccountingError('Amount must be greater than zero');
       if (rateBp < 0 || rateBp > 10000) throw AccountingError('Interest rate must be between 0% and 100%');
       final when = date ?? ymd(DateTime.now());
@@ -175,7 +175,7 @@ class Loans {
       if (principal < 0 || interest < 0 || principal + interest <= 0) throw AccountingError('Amount must be greater than zero');
       if (principal > out) throw AccountingError('Principal is more than the outstanding ${Money.rs(out)}');
       final isLoan = loan['kind'] == 'loan';
-      if (!isLoan && interest > 0) throw AccountingError('Investment-e interest hoy na — profit share ta expense hisebe likhun');
+      if (!isLoan && interest > 0) throw AccountingError('Investments carry no interest — record a profit share as an expense');
       final when = date ?? ymd(DateTime.now());
       final number = await Books._nextNumber(x, 'loan_payments', 'LP');
       final id = await x.insert('loan_payments', {

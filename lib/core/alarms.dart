@@ -88,7 +88,7 @@ class Alarms {
       await init();
       final now = tz.TZDateTime.now(tz.local);
       var count = 0;
-      for (final (slot, day, prefix) in [(1, dueDate.subtract(const Duration(days: 1)), 'Kal: '), (2, dueDate, 'Aaj: ')]) {
+      for (final (slot, day, prefix) in [(1, dueDate.subtract(const Duration(days: 1)), 'Tomorrow: '), (2, dueDate, 'Today: ')]) {
         final at = tz.TZDateTime(tz.local, day.year, day.month, day.day, hour, minute);
         if (at.isBefore(now)) continue;
         await _schedule(_id(dueId, slot), '$prefix$title', body, at, slot == 2 && ring ? _ring : _details);

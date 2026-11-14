@@ -70,9 +70,10 @@ class Stores {
   /// Opens another store's books.
   static Future<void> switchTo(String id) async {
     if (id == current || !all.any((s) => s.id == id)) return;
-    await AppDb.close();
-    current = id;
-    AppDb.file = active.file;
+    await AppDb.exclusive((_) async {
+      current = id;
+      AppDb.file = active.file;
+    });
     await _save();
     await AppDb.instance;
     Books.notifyChanged();
@@ -81,9 +82,9 @@ class Stores {
   /// Adds a new, empty store and switches to it.
   static Future<Store> add(String name) async {
     name = name.trim();
-    if (name.isEmpty) throw AccountingError('Store-er naam likhun');
+    if (name.isEmpty) throw AccountingError('Enter a store name');
     if (all.length >= Sub.storeLimit) {
-      throw PlanLimitError('${Sub.label} plan-e ${Sub.storeLimit} ta store — aro store-er jonno upgrade korun', feature: 'multi_store');
+      throw PlanLimitError('${Sub.label} plan allows ${Sub.storeLimit} store${Sub.storeLimit == 1 ? '' : 's'} — upgrade to add more', feature: 'multi_store');
     }
     final id = DateTime.now().millisecondsSinceEpoch.toRadixString(36);
     final s = Store(id, name, 'store_$id.db', DateTime.now().toIso8601String());
@@ -104,8 +105,8 @@ class Stores {
 
   /// Deletes a store and its books (not the one in use, not the last one).
   static Future<void> remove(String id) async {
-    if (id == current) throw AccountingError('Ei store ekhon cholche — onno store-e giye delete korun');
-    if (all.length <= 1) throw AccountingError('Kom-pokkhe ekta store thakte hobe');
+    if (id == current) throw AccountingError('This store is open — switch to another store to delete it');
+    if (all.length <= 1) throw AccountingError('At least one store is needed');
     final s = all.firstWhere((x) => x.id == id);
     final path = p.join(await getDatabasesPath(), s.file);
     for (final suffix in ['', '-wal', '-shm', '-journal']) {

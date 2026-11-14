@@ -53,10 +53,15 @@ class Backup {
   static Future<File> create({bool auto = false}) async {
     final docs = await _docs();
     final archive = Archive();
-    // the database file, copied while it is closed so it is consistent
-    final dbPath = await AppDb.path();
-    await AppDb.close();
-    final dbBytes = await File(dbPath).readAsBytes();
+    final counts = <String, int>{};
+    for (final t in ['sales', 'purchases', 'products', 'customers', 'suppliers', 'expenses']) {
+      counts[t] = asInt((await Books.query('SELECT COUNT(*) AS c FROM $t')).first['c']);
+    }
+    // the database file, copied while it is closed (and locked) so it is consistent
+    final dbBytes = await AppDb.exclusive((path) => File(path).readAsBytes());
+    if (dbBytes.length < 100 || ascii.decode(dbBytes.sublist(0, 15), allowInvalid: true) != _magic) {
+      throw AccountingError('Could not read the books for the backup');
+    }
     archive.addFile(ArchiveFile('hisab.db', dbBytes.length, dbBytes));
     // photos and documents (everything except the backups themselves)
     var photos = 0;
@@ -67,10 +72,6 @@ class Backup {
       final b = await e.readAsBytes();
       archive.addFile(ArchiveFile('files/$rel', b.length, b));
       photos++;
-    }
-    final counts = <String, int>{};
-    for (final t in ['sales', 'purchases', 'products', 'customers', 'suppliers', 'expenses']) {
-      counts[t] = asInt((await Books.query('SELECT COUNT(*) AS c FROM $t')).first['c']);
     }
     final meta = utf8.encode(jsonEncode({
       'app': 'Hisab AI',
@@ -161,13 +162,15 @@ class Backup {
       await create(auto: true); // safety copy of what is being replaced
     } catch (_) {}
     final docs = await _docs();
-    final dbPath = await AppDb.path();
-    await AppDb.close();
-    for (final suffix in ['', '-wal', '-shm', '-journal']) {
-      final f = File('$dbPath$suffix');
-      if (await f.exists()) await f.delete();
-    }
-    await File(dbPath).writeAsBytes(bytes, flush: true);
+    // swap the database file while nothing can open it
+    await AppDb.exclusive((dbPath) async {
+      for (final suffix in ['', '-wal', '-shm', '-journal']) {
+        final f = File('$dbPath$suffix');
+        if (await f.exists()) await f.delete();
+      }
+      await File(dbPath).parent.create(recursive: true);
+      await File(dbPath).writeAsBytes(bytes, flush: true);
+    });
     for (final f in archive.files) {
       if (!f.isFile || !f.name.startsWith('files/')) continue;
       final rel = f.name.substring(6);
@@ -176,7 +179,13 @@ class Backup {
       await out.parent.create(recursive: true);
       await out.writeAsBytes(f.content as List<int>, flush: true);
     }
-    await AppDb.instance; // reopen (runs upgrades for older backups)
+    // reopen (runs upgrades for older backups) and check the books are readable
+    final db = await AppDb.instance;
+    final ok = await db.rawQuery('PRAGMA quick_check');
+    if (ok.isEmpty || '${ok.first.values.first}' != 'ok') {
+      throw AccountingError('The restored books are damaged — your previous data is in the latest automatic backup');
+    }
+    await Books.setSetting('last_restore_at', DateTime.now().toIso8601String());
     Books.notifyChanged();
   }
 

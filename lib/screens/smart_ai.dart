@@ -68,7 +68,7 @@ Future<void> whatsappInsight(BuildContext context, Insight i) async {
   if (i.message == null) return;
   HapticFeedback.selectionClick();
   final ok = await Contact.whatsapp(i.phone, i.message!);
-  if (!ok && context.mounted) toast(context, 'WhatsApp khola gelo na — message copy kora holo');
+  if (!ok && context.mounted) toast(context, 'Couldn\'t open WhatsApp — message copied');
 }
 
 /// The "Smart AI" strip at the top of Home: the most important suggestions,
@@ -135,14 +135,14 @@ class _SmartAiStripState extends State<SmartAiStrip> {
             Expanded(
               child: Text(
                 items.isEmpty
-                    ? 'Shob thik ache — kono kaj baki nei ✓'
+                    ? 'All good — nothing pending ✓'
                     : urgent > 0
-                        ? '$urgent ta jinish aaj-i dekhun'
-                        : '${widget.items.length} ta suggestion',
+                        ? '$urgent things need attention today'
+                        : '${widget.items.length} suggestions',
                 style: _j(11.5, FontWeight.w600, const Color(0xCCFFFFFF)),
               ),
             ),
-            Text('Shob dekhun ›', style: _j(11.5, FontWeight.w800, Colors.white)),
+            Text('See all ›', style: _j(11.5, FontWeight.w800, Colors.white)),
           ]),
         ),
         if (items.isNotEmpty) ...[
@@ -219,16 +219,16 @@ class SmartAiScreen extends StatelessWidget {
       load: Insights.build,
       builder: (context, items) {
         final groups = [
-          ('urgent', 'Aaj-i korun', Icons.priority_high_rounded),
-          ('warn', 'Nojor rakhun', Icons.visibility_rounded),
-          ('good', 'Bhalo cholche', Icons.thumb_up_alt_rounded),
-          ('info', 'Jene rakhun', Icons.lightbulb_rounded),
+          ('urgent', 'Do today', Icons.priority_high_rounded),
+          ('warn', 'Keep an eye on', Icons.visibility_rounded),
+          ('good', 'Going well', Icons.thumb_up_alt_rounded),
+          ('info', 'Good to know', Icons.lightbulb_rounded),
         ];
         final urgent = items.where((i) => i.level == 'urgent').toList();
         final collect = urgent.where((i) => i.amount != null && (i.kind == 'due' || i.kind == 'emi')).fold<int>(0, (a, i) => a + i.amount!);
         return PageShell(
           title: 'Smart Business AI',
-          subtitle: items.isEmpty ? 'Shob thik ache' : '${items.length} suggestion · protibar hisab bodlale update hoy',
+          subtitle: items.isEmpty ? 'All good' : '${items.length} suggestions · updates whenever your books change',
           children: [
             const SizedBox(height: 8),
             Container(
@@ -242,13 +242,13 @@ class SmartAiScreen extends StatelessWidget {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(urgent.isEmpty ? 'Aaj kono joruri kaj nei 🎉' : '${urgent.length} ta joruri kaj',
+                    Text(urgent.isEmpty ? 'Nothing urgent today 🎉' : '${urgent.length} urgent tasks',
                         style: _j(17, FontWeight.w800, Colors.white)),
                     const SizedBox(height: 4),
                     Text(
                         collect > 0
-                            ? 'Aaj ${Money.rs(collect)} collect korar ache — niche WhatsApp button-e ek tap-e reminder pathan'
-                            : 'Apnar bikri, stock, baki ar EMI dekhe AI ei suggestion gulo diyeche',
+                            ? '${Money.rs(collect)} to collect today — send reminders with the WhatsApp buttons below'
+                            : 'Suggestions from your sales, stock, dues and EMIs',
                         style: _j(12, FontWeight.w500, const Color(0xD9FFFFFF))),
                   ]),
                 ),
@@ -269,7 +269,7 @@ class SmartAiScreen extends StatelessWidget {
                   child: const Icon(Icons.summarize_rounded, color: Colors.white),
                 ),
                 title: Text('Daily AI Report', style: _j(14.5, FontWeight.w800, _ink)),
-                subtitle: Text('Aajker bikri, lav, collection, kal ke debe, ki order korben', style: _j(11.5, FontWeight.w500, _muted)),
+                subtitle: Text('Today\'s sales, profit, collections, tomorrow\'s payments and reorders', style: _j(11.5, FontWeight.w500, _muted)),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => open(context, const DailyReportScreen()),
               ),
@@ -286,7 +286,7 @@ class SmartAiScreen extends StatelessWidget {
                 ),
                 for (final it in items.where((i) => i.level == g.$1)) _InsightCard(it),
               ],
-            if (items.isEmpty) const EmptyState('Kono suggestion nei — bikri korle AI shikhe suggestion debe'),
+            if (items.isEmpty) const EmptyState('No suggestions yet — the AI learns as you make sales'),
           ],
         );
       },

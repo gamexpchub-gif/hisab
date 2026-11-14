@@ -293,7 +293,7 @@ class _SaleFormState extends State<SaleForm> {
       final code = await BarcodeScannerScreen.scan(context, title: 'Scan barcode or IMEI');
       if (code == null || !mounted) return;
       final r = await _useCode(code);
-      if (r == null && mounted) toast(context, '$code — kono product mele ni', error: true);
+      if (r == null && mounted) toast(context, '$code — no matching product', error: true);
       return;
     }
     final n = await BarcodeScannerScreen.scanMany(context, title: 'Scan items · batch', onCode: _useCode);
@@ -1429,7 +1429,7 @@ class _SaleFormState extends State<SaleForm> {
   // ---- promised date for the due, with a ringing alarm
   Widget _promiseCard() {
     final now = DateTime.now();
-    final presets = [(3, '3 din'), (7, '7 din'), (15, '15 din'), (30, '1 mash')];
+    final presets = [(3, '3 days'), (7, '7 days'), (15, '15 days'), (30, '1 month')];
     String fmtT(TimeOfDay t) => '${t.hourOfPeriod == 0 ? 12 : t.hourOfPeriod}:${two(t.minute)} ${t.period == DayPeriod.am ? 'AM' : 'PM'}';
     Widget chip(String label, bool on, VoidCallback onTap) => GestureDetector(
           onTap: () {
@@ -1460,7 +1460,7 @@ class _SaleFormState extends State<SaleForm> {
         Row(children: [
           const Icon(Icons.alarm_rounded, color: _amber, size: 20),
           const SizedBox(width: 8),
-          Expanded(child: Text('Kobe debe? · ${Money.rs(due)}', style: _j(13.5, FontWeight.w800, _ink))),
+          Expanded(child: Text('Payment promised on · ${Money.rs(due)}', style: _j(13.5, FontWeight.w800, _ink))),
           Switch.adaptive(
             value: promise != null,
             activeTrackColor: _amber,
@@ -1495,7 +1495,7 @@ class _SaleFormState extends State<SaleForm> {
               const Icon(Icons.notifications_active_rounded, size: 16, color: _amber),
               const SizedBox(width: 6),
               Expanded(
-                child: Text('${prettyDate(promise!)}, ${fmtT(promiseAt)}-e alarm bajbe · ager din reminder',
+                child: Text('Alarm rings on ${prettyDate(promise!)} at ${fmtT(promiseAt)} · reminder the day before',
                     style: _j(11.5, FontWeight.w600, _muted)),
               ),
               Text('Time', style: _j(12, FontWeight.w800, _purple)),

@@ -19,7 +19,7 @@ import 'sales.dart';
 // =============================================================================
 // Customer / supplier profile: liquid-glass profile card, balance & credit
 // usage, quick actions (call · WhatsApp · remind · statement), due ageing,
-// smart WhatsApp reminder (EN / বাংলা, tone picked from the age of dues),
+// smart WhatsApp reminder (tone picked from the age of dues),
 // lifetime stats and the full transaction timeline.
 // =============================================================================
 
@@ -74,7 +74,6 @@ class PartyView extends StatefulWidget {
 
 class _PartyViewState extends State<PartyView> {
   String filter = 'all'; // all | bills | payments
-  bool bangla = false;
   ReminderTone? tone;
 
   bool get isC => widget.type == 'customer';
@@ -440,13 +439,13 @@ class _PartyViewState extends State<PartyView> {
             child: const Icon(Icons.account_balance_wallet_rounded, color: _purple, size: 18),
           ),
           const SizedBox(width: 10),
-          Expanded(child: Text(isC ? 'Udhar breakdown' : 'Account breakdown', style: _j(15, FontWeight.w800, _ink))),
+          Expanded(child: Text(isC ? 'Credit breakdown' : 'Account breakdown', style: _j(15, FontWeight.w800, _ink))),
         ]),
         const SizedBox(height: 12),
         Row(children: [
-          tile(isC ? 'Goods udhar' : 'Goods taken', isC ? 'Unpaid part of bills' : 'Unpaid part of bills', s.goods, const Color(0xFF7B3FF2), Icons.shopping_bag_rounded),
+          tile(isC ? 'Goods on credit' : 'Goods taken', isC ? 'Unpaid part of bills' : 'Unpaid part of bills', s.goods, const Color(0xFF7B3FF2), Icons.shopping_bag_rounded),
           const SizedBox(width: 10),
-          tile(isC ? 'Cash udhar' : 'Cash given', isC ? 'Cash you gave' : 'Advance you gave', s.cashGave, _red, Icons.north_east_rounded),
+          tile(isC ? 'Cash lent' : 'Cash given', isC ? 'Cash you gave' : 'Advance you gave', s.cashGave, _red, Icons.north_east_rounded),
         ]),
         const SizedBox(height: 10),
         Row(children: [
@@ -920,7 +919,6 @@ class _PartyViewState extends State<PartyView> {
               ),
             ]),
           ),
-          _langToggle(),
         ]),
         const SizedBox(height: 12),
         Row(children: [
@@ -936,8 +934,8 @@ class _PartyViewState extends State<PartyView> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Column(children: [
-                    Text(Reminders.label(rt, bangla: bangla), style: _j(11.5, FontWeight.w800, Colors.white)),
-                    if (rt == suggested) Text(bangla ? 'প্রস্তাবিত' : 'suggested', style: _j(9, FontWeight.w600, const Color(0xCCFFFFFF))),
+                    Text(Reminders.label(rt), style: _j(11.5, FontWeight.w800, Colors.white)),
+                    if (rt == suggested) Text('suggested', style: _j(9, FontWeight.w600, const Color(0xCCFFFFFF))),
                   ]),
                 ),
               ),
@@ -969,7 +967,7 @@ class _PartyViewState extends State<PartyView> {
             child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
               const Icon(Icons.send_rounded, color: Colors.white, size: 19),
               const SizedBox(width: 8),
-              Text(bangla ? 'WhatsApp-এ পাঠান' : 'Send on WhatsApp', style: _j(14, FontWeight.w800, Colors.white)),
+              Text('Send on WhatsApp', style: _j(14, FontWeight.w800, Colors.white)),
             ]),
           ),
         ),
@@ -977,25 +975,8 @@ class _PartyViewState extends State<PartyView> {
     );
   }
 
-  Widget _langToggle() => GestureDetector(
-        onTap: () => setState(() => bangla = !bangla),
-        child: Container(
-          padding: const EdgeInsets.all(3),
-          decoration: BoxDecoration(color: const Color(0x26FFFFFF), borderRadius: BorderRadius.circular(12)),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            for (final (l, on) in [('EN', !bangla), ('বাং', bangla)])
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(color: on ? Colors.white : Colors.transparent, borderRadius: BorderRadius.circular(9)),
-                child: Text(l, style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: on ? const Color(0xFF075E54) : Colors.white)),
-              ),
-          ]),
-        ),
-      );
-
   String _message(_ProfileData d, ReminderTone t) => Reminders.message(
         tone: t,
-        bangla: bangla,
         name: d.party['name'] as String,
         due: d.balance,
         days: d.ageing.oldestDays,

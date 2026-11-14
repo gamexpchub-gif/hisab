@@ -45,15 +45,14 @@ class Reminders {
   static ReminderTone suggest(int oldestDays) =>
       oldestDays > 60 ? ReminderTone.finalNotice : oldestDays > 30 ? ReminderTone.firm : ReminderTone.friendly;
 
-  static String label(ReminderTone t, {bool bangla = false}) => switch (t) {
-        ReminderTone.friendly => bangla ? 'বিনীত' : 'Friendly',
-        ReminderTone.firm => bangla ? 'দৃঢ়' : 'Firm',
-        ReminderTone.finalNotice => bangla ? 'শেষ নোটিশ' : 'Final notice',
+  static String label(ReminderTone t) => switch (t) {
+        ReminderTone.friendly => 'Friendly',
+        ReminderTone.firm => 'Firm',
+        ReminderTone.finalNotice => 'Final notice',
       };
 
   static String message({
     required ReminderTone tone,
-    required bool bangla,
     required String name,
     required int due,
     required int days,
@@ -63,17 +62,6 @@ class Reminders {
     final phone = settings['phone'] ?? '';
     final upi = (settings['upi_id'] ?? '').trim();
     final amt = Money.rs(due);
-    if (bangla) {
-      final upiLine = upi.isEmpty ? '' : '\nUPI: $upi';
-      return switch (tone) {
-        ReminderTone.friendly => 'নমস্কার $name,\n$shop থেকে একটি ছোট্ট অনুস্মারক — আপনার বকেয়া $amt।'
-            '$upiLine\nসুবিধামতো পরিশোধ করে দিলে খুশি হব। ধন্যবাদ 🙏',
-        ReminderTone.firm => 'প্রিয় $name,\n$shop-এ আপনার $amt বকেয়া $days দিন ধরে বাকি আছে। '
-            'অনুগ্রহ করে শীঘ্রই পরিশোধ করুন।$upiLine\n— $shop${phone.isEmpty ? '' : ', $phone'}',
-        ReminderTone.finalNotice => 'প্রিয় $name,\nআপনার $amt বকেয়া $days দিন পেরিয়ে গেছে। '
-            '৩ দিনের মধ্যে পরিশোধ না হলে বাকিতে বিক্রি বন্ধ থাকবে।$upiLine\n— $shop${phone.isEmpty ? '' : ', $phone'}',
-      };
-    }
     final upiLine = upi.isEmpty ? '' : '\nPay by UPI: $upi';
     return switch (tone) {
       ReminderTone.friendly => 'Hi $name,\nA friendly reminder from $shop — your outstanding balance is $amt.'

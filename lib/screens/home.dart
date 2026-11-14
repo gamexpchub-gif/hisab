@@ -941,7 +941,7 @@ class _ExpiredBanner extends StatelessWidget {
             const SizedBox(width: 10),
             Expanded(
               child: Text(
-                Sub.plan == 'trial' ? 'Free trial shesh — notun bill / product korte plan nin' : 'Plan-er meyad shesh — renew korun',
+                Sub.plan == 'trial' ? 'Free trial ended — choose a plan to add bills and products' : 'Your plan has expired — renew now',
                 style: const TextStyle(fontFamily: 'Jakarta', color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13),
               ),
             ),

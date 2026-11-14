@@ -203,7 +203,7 @@ class ProAnalytics {
         'SELECT i.product_id, i.name, SUM(i.qty) AS q, SUM(i.amount) AS rev, SUM(i.amount - i.unit_cost * i.qty) AS pr FROM sale_items i '
         'JOIN sales s ON s.id = i.sale_id WHERE s.date >= ? AND s.date <= ? GROUP BY i.product_id ORDER BY rev DESC LIMIT 6',
         [a.from, a.to])) {
-      a.topProducts.add(Share('${x['name']}', asInt(x['rev']), sub: '${x['q']} ta · lav ${Money.compact(asInt(x['pr']))}', id: asInt(x['product_id'])));
+      a.topProducts.add(Share('${x['name']}', asInt(x['rev']), sub: '${x['q']} sold · profit ${Money.compact(asInt(x['pr']))}', id: asInt(x['product_id'])));
     }
     for (final x in await Books.query(
         "SELECT IFNULL(c.name, 'Other') AS n, SUM(i.amount) AS v FROM sale_items i JOIN sales s ON s.id = i.sale_id "
@@ -236,7 +236,7 @@ class ProAnalytics {
         [a.from, a.to])) {
       a.payModes.add(Share('${x['n']}', asInt(x['v'])));
     }
-    if (a.newDue > 0) a.payModes.add(Share('Baki (credit)', a.newDue));
+    if (a.newDue > 0) a.payModes.add(Share('Credit (due)', a.newDue));
     final bal = await Books.partyBalances('customer');
     final names = {for (final c in await Books.query('SELECT id, name FROM customers')) asInt(c['id']): '${c['name']}'};
     final top = bal.entries.where((x) => x.value > 0).toList()..sort((x, y) => y.value.compareTo(x.value));
@@ -250,48 +250,48 @@ class ProAnalytics {
 
   /// The AI reading: what changed, what is strong, what needs attention.
   void _think() {
-    final word = switch (period) { 'today' => 'kal', 'week' => 'ager shoptaho', 'month' => 'gato mash', 'year' => 'gato bochor', _ => 'ager somoy' };
+    final word = switch (period) { 'today' => 'yesterday', 'week' => 'the previous week', 'month' => 'last month', 'year' => 'last year', _ => 'the previous period' };
     if (sales == 0 && pSales == 0) {
-      ai.add('Ei somoye kono bikri nei — bikri korle AI analysis shuru hobe.');
+      ai.add('No sales in this period yet — the AI analysis starts with your first sale.');
       return;
     }
     final ch = Books.pctChange(sales, pSales);
-    ai.add(ch >= 0 ? '📈 Bikri $word-er theke $ch% beshi (${Money.compact(sales)} vs ${Money.compact(pSales)}).' : '📉 Bikri $word-er theke ${ch.abs()}% kom — offer ba purono customer-der message pathan.');
+    ai.add(ch >= 0 ? '📈 Sales are up $ch% on $word (${Money.compact(sales)} vs ${Money.compact(pSales)}).' : '📉 Sales are down ${ch.abs()}% on $word — try an offer or message past customers.');
     if (sales > 0) {
-      ai.add('💰 Gross margin $margin%${margin < 10 ? ' — kom; accessories / combo bechle margin barbe' : margin > 25 ? ' — darun!' : ''}. Net lav ${Money.compact(net)}.');
+      ai.add('💰 Gross margin $margin%${margin < 10 ? ' — low; accessories and combos raise it' : margin > 25 ? ' — excellent!' : ''}. Net profit ${Money.compact(net)}.');
     }
     if (pNet != 0 || net != 0) {
       final nc = Books.pctChange(net, pNet);
-      if (net < 0) ai.add('⚠️ Ei somoye loss ${Money.compact(-net)} — khoroch ${Money.compact(expenses)} komano dorkar.');
-      if (net > 0 && nc > 0 && pNet > 0) ai.add('✅ Net lav $nc% bereche.');
+      if (net < 0) ai.add('⚠️ A loss of ${Money.compact(-net)} this period — expenses of ${Money.compact(expenses)} need cutting.');
+      if (net > 0 && nc > 0 && pNet > 0) ai.add('✅ Net profit is up $nc%.');
     }
     if (expenses > 0 && sales > 0) {
       final ep = (expenses * 100 / sales).round();
-      if (ep > 15) ai.add('🧾 Khoroch bikri-r $ep% — ${expenseHeads.isEmpty ? '' : '${expenseHeads.first.name}-e shobcheye beshi'}.');
+      if (ep > 15) ai.add('🧾 Expenses are $ep% of sales${expenseHeads.isEmpty ? '' : ' — the most on ${expenseHeads.first.name}'}.');
     }
     if (newDue > 0 && sales > 0) {
       final dp = (newDue * 100 / sales).round();
-      if (dp >= 20) ai.add('⏳ Bikri-r $dp% baki-te geche (${Money.compact(newDue)}) — collection-e jor din.');
+      if (dp >= 20) ai.add('⏳ $dp% of sales went on credit (${Money.compact(newDue)}) — focus on collections.');
     }
     if (receivable > 0 && money > 0 && receivable > money) {
-      ai.add('🔔 Bazar-e baki ${Money.compact(receivable)}, hate taka ${Money.compact(money)} — baki tolar dorkar.');
+      ai.add('🔔 Customers owe ${Money.compact(receivable)} while cash in hand is ${Money.compact(money)} — collect dues.');
     }
-    if (topProducts.isNotEmpty) ai.add('🔥 Top: ${topProducts.first.name} — ${Money.compact(topProducts.first.value)} (${topProducts.first.sub}).');
+    if (topProducts.isNotEmpty) ai.add('🔥 Top product: ${topProducts.first.name} — ${Money.compact(topProducts.first.value)} (${topProducts.first.sub}).');
     if (categories.length > 1 && sales > 0) {
       final cat = categories.first;
       final total = categories.fold(0, (s, x) => s + x.value);
-      ai.add('📦 ${cat.name} theke ${(cat.value * 100 / (total == 0 ? 1 : total)).round()}% bikri.');
+      ai.add('📦 ${(cat.value * 100 / (total == 0 ? 1 : total)).round()}% of sales come from ${cat.name}.');
     }
     if (topCustomers.isNotEmpty) ai.add('👑 Best customer: ${topCustomers.first.name} (${Money.compact(topCustomers.first.value)}).');
     if (loans > 0) {
-      ai.add('🏦 Loan baki ${Money.compact(loans)}${interest > 0 ? ', ei somoye sud ${Money.compact(interest)}' : ''}'
-          '${net > 0 && interest > 0 ? ' — lav-er ${(interest * 100 / net).round()}% sud-e jacche' : ''}.');
+      ai.add('🏦 Loans outstanding ${Money.compact(loans)}${interest > 0 ? ', interest this period ${Money.compact(interest)}' : ''}'
+          '${net > 0 && interest > 0 ? ' — ${(interest * 100 / net).round()}% of profit goes to interest' : ''}.');
     }
     if (stock > 0 && cogs > 0) {
       final days = period == 'today' ? 1 : DateTime.parse(to).difference(DateTime.parse(from)).inDays + 1;
       final turn = (stock / (cogs / days)).round();
-      ai.add('🗃️ Stock ${Money.compact(stock)} — ei speed-e ~$turn din cholbe${turn > 90 ? ' (beshi maal pore ache)' : turn < 10 ? ' (shiggiri order din)' : ''}.');
+      ai.add('🗃️ Stock ${Money.compact(stock)} — lasts ~$turn days at this pace${turn > 90 ? ' (overstocked)' : turn < 10 ? ' (reorder soon)' : ''}.');
     }
-    if (returns > 0) ai.add('↩️ Return ${Money.compact(returns)} — quality / customer-er proyojon check korun.');
+    if (returns > 0) ai.add('↩️ Returns ${Money.compact(returns)} — check quality and customer needs.');
   }
 }

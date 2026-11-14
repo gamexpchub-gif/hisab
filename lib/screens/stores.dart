@@ -36,12 +36,12 @@ Future<void> addStoreFlow(BuildContext context) async {
   final name = await showDialog<String>(
     context: context,
     builder: (d) => AlertDialog(
-      title: const Text('Notun store'),
+      title: const Text('New store'),
       content: TextField(
         controller: c,
         autofocus: true,
         textCapitalization: TextCapitalization.words,
-        decoration: const InputDecoration(labelText: 'Store / dokaner naam', hintText: 'e.g. GameX Mobile — Branch 2'),
+        decoration: const InputDecoration(labelText: 'Store name', hintText: 'e.g. GameX Mobile — Branch 2'),
         onSubmitted: (v) => Navigator.pop(d, v),
       ),
       actions: [
@@ -53,7 +53,7 @@ Future<void> addStoreFlow(BuildContext context) async {
   if (name == null || name.trim().isEmpty || !context.mounted) return;
   try {
     await Stores.add(name);
-    if (context.mounted) toast(context, '${name.trim()} chalu holo — ekhon ei store-er hisab');
+    if (context.mounted) toast(context, '${name.trim()} created — now showing this store');
   } catch (e) {
     if (context.mounted) toast(context, '$e', error: true);
   }
@@ -69,7 +69,7 @@ Future<void> showStoreSwitcher(BuildContext context) => showModalBottomSheet(
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: const Color(0xFFE9EAF5), borderRadius: BorderRadius.circular(2)))),
           const SizedBox(height: 12),
-          Text('Store bachun', style: _j(18, FontWeight.w800, _ink)),
+          Text('Choose a store', style: _j(18, FontWeight.w800, _ink)),
           const SizedBox(height: 8),
           for (final (i, s) in Stores.all.indexed)
             ListTile(
@@ -81,7 +81,7 @@ Future<void> showStoreSwitcher(BuildContext context) => showModalBottomSheet(
                 Navigator.pop(c);
                 HapticFeedback.selectionClick();
                 await Stores.switchTo(s.id);
-                if (context.mounted) toast(context, '${s.name} khola holo');
+                if (context.mounted) toast(context, 'Switched to ${s.name}');
               },
             ),
           const SizedBox(height: 6),
@@ -92,7 +92,7 @@ Future<void> showStoreSwitcher(BuildContext context) => showModalBottomSheet(
               open(context, const StoresScreen());
             },
             icon: const Icon(Icons.store_mall_directory_rounded),
-            label: const Text('Store manage korun'),
+            label: const Text('Manage stores'),
           ),
         ]),
       ),
@@ -141,12 +141,12 @@ class StoresScreen extends StatelessWidget {
       load: Stores.counts,
       builder: (context, counts) => PageShell(
         title: 'My Stores',
-        subtitle: '${Stores.all.length} / ${Sub.storeLimit} store · ${Sub.label} plan',
+        subtitle: '${Stores.all.length} / ${Sub.storeLimit} stores · ${Sub.label} plan',
         fab: FloatingActionButton.extended(
           backgroundColor: _purple,
           onPressed: () => addStoreFlow(context),
           icon: const Icon(Icons.add_business_rounded, color: Colors.white),
-          label: Text('Notun store', style: _j(14, FontWeight.w800, Colors.white)),
+          label: Text('New store', style: _j(14, FontWeight.w800, Colors.white)),
         ),
         children: [
           const SizedBox(height: 6),
@@ -157,7 +157,7 @@ class StoresScreen extends StatelessWidget {
               const Icon(Icons.info_outline_rounded, color: _purple),
               const SizedBox(width: 10),
               Expanded(
-                child: Text('Protita store-er hisab (product, bill, khata, cash) alada thake. Ek account-e shob store, ek tap-e bodlan.',
+                child: Text('Each store keeps its own books (products, bills, ledgers, cash). All stores in one account — switch with one tap.',
                     style: _j(12, FontWeight.w600, const Color(0xFF3B2E8F))),
               ),
             ]),
@@ -176,14 +176,14 @@ class StoresScreen extends StatelessWidget {
                 leading: _avatar(s, i, size: 48),
                 title: Text(s.name, style: _j(15, FontWeight.w800, _ink)),
                 subtitle: Text(
-                  '${counts[s.id]?.$1 ?? 0} product · ${counts[s.id]?.$2 ?? 0} bill${s.id == Stores.current ? ' · ekhon cholche' : ''}',
+                  '${counts[s.id]?.$1 ?? 0} products · ${counts[s.id]?.$2 ?? 0} bills${s.id == Stores.current ? ' · open now' : ''}',
                   style: _j(12, FontWeight.w600, s.id == Stores.current ? _purple : _muted),
                 ),
                 onTap: s.id == Stores.current
                     ? null
                     : () async {
                         await Stores.switchTo(s.id);
-                        if (context.mounted) toast(context, '${s.name} khola holo');
+                        if (context.mounted) toast(context, 'Switched to ${s.name}');
                       },
                 trailing: PopupMenuButton<String>(
                   onSelected: (v) async {
@@ -193,7 +193,7 @@ class StoresScreen extends StatelessWidget {
                       final n = await showDialog<String>(
                         context: context,
                         builder: (d) => AlertDialog(
-                          title: const Text('Naam bodlan'),
+                          title: const Text('Rename'),
                           content: TextField(controller: c, autofocus: true),
                           actions: [
                             TextButton(onPressed: () => Navigator.pop(d), child: const Text('Cancel')),
@@ -208,7 +208,7 @@ class StoresScreen extends StatelessWidget {
                         context: context,
                         builder: (d) => AlertDialog(
                           title: Text('${s.name} delete?'),
-                          content: const Text('Ei store-er shob hisab (product, bill, khata) phone theke muche jabe. Age backup nin.'),
+                          content: const Text('All books of this store (products, bills, ledgers) will be removed from this phone. Take a backup first.'),
                           actions: [
                             TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Cancel')),
                             TextButton(onPressed: () => Navigator.pop(d, true), child: const Text('Delete', style: TextStyle(color: _red))),
@@ -236,7 +236,7 @@ class StoresScreen extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Text(
-                Sub.tier >= 3 ? 'Sorbochcho ${Sub.storeLimit} ta store.' : 'Aro store-er jonno ${Sub.tier < 2 ? 'Gold (3 store)' : 'Premium (10 store)'} plan nin.',
+                Sub.tier >= 3 ? 'Up to ${Sub.storeLimit} stores.' : 'Get ${Sub.tier < 2 ? 'Gold (3 stores)' : 'Premium (10 stores)'} for more stores.',
                 textAlign: TextAlign.center,
                 style: _j(12, FontWeight.w600, _muted),
               ),

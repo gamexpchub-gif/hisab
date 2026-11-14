@@ -116,11 +116,11 @@ Widget _table(List<String> head, List<List<String>> rows) => SingleChildScrollVi
     );
 
 Future<void> _export(BuildContext context, String kind, String from, String to) async {
-  toast(context, 'Excel file banano hocche…');
+  toast(context, 'Creating the Excel file…');
   try {
     await ExportBook.share(kind, from, to);
   } catch (e) {
-    if (context.mounted) toast(context, 'Export hoyni: $e', error: true);
+    if (context.mounted) toast(context, 'Export failed: $e', error: true);
   }
 }
 
@@ -146,7 +146,7 @@ class _GstScreenState extends State<GstScreen> {
         final rs = Money.rs;
         return PageShell(
           title: 'GST Report',
-          subtitle: 'GSTR-1 · GSTR-3B · HSN — CA-ke Excel pathan',
+          subtitle: 'GSTR-1 · GSTR-3B · HSN — send Excel to your CA',
           children: [
             _PeriodBar(from, to, (f, t) => setState(() {
                   from = f;
@@ -181,7 +181,7 @@ class _GstScreenState extends State<GstScreen> {
               if (g.discount > 0)
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
-                  child: Text('Bill discount ${rs(g.discount)} dewa hoyeche — taxable value-te kome dekhano hoyni, CA-ke jante din.',
+                  child: Text('Bill discounts of ${rs(g.discount)} are not deducted from taxable value — tell your CA.',
                       style: _j(11, FontWeight.w500, _muted)),
                 ),
             ]),
@@ -192,7 +192,7 @@ class _GstScreenState extends State<GstScreen> {
             ]),
             _card('B2B invoices · ${g.b2b.length}', [
               if (g.b2b.isEmpty)
-                Text('GSTIN-wala customer-ke kono bill nei. Customer profile-e GSTIN dile B2B-te ashbe.', style: _j(12, FontWeight.w500, _muted))
+                Text('No bills to customers with a GSTIN. Add a GSTIN to a customer to see B2B invoices.', style: _j(12, FontWeight.w500, _muted))
               else
                 _table(['Invoice', 'Date', 'Customer', 'GSTIN', 'Taxable', 'Tax'], [
                   for (final b in g.b2b)
@@ -213,11 +213,11 @@ class _GstScreenState extends State<GstScreen> {
             const SizedBox(height: 14),
             _BigButton(
               icon: Icons.table_view_rounded,
-              label: 'Excel download · GSTR-1 + 3B + HSN',
+              label: 'Download Excel · GSTR-1 + 3B + HSN',
               onTap: () => _export(context, 'gst', from, to),
             ),
             const SizedBox(height: 8),
-            Text('Sob supply intra-state (CGST + SGST) dhora hoyeche. File korar age CA-ke dekhiye nin.',
+            Text('All supplies are treated as intra-state (CGST + SGST). Check with your CA before filing.',
                 textAlign: TextAlign.center, style: _j(11, FontWeight.w500, _muted)),
           ],
         );
@@ -264,13 +264,13 @@ class _ExportScreenState extends State<ExportScreen> {
   String? busy;
 
   static const _icons = <String, (IconData, List<Color>, String)>{
-    'all': (Icons.workspaces_rounded, [Color(0xFF21A366), Color(0xFF107C41)], 'Shob sheet ek file-e: sale, purchase, stock, party, day book, GST'),
-    'sales': (Icons.receipt_long_rounded, [Color(0xFF8B5CF6), Color(0xFF5B2EE0)], 'Protiti bill + item-wise lav, IMEI soho'),
-    'purchases': (Icons.shopping_bag_rounded, [Color(0xFFB58CFF), Color(0xFF7B3FF2)], 'Supplier bill, GSTIN, payable'),
-    'stock': (Icons.inventory_2_rounded, [Color(0xFF6AA5FF), Color(0xFF1A47C8)], 'Product, stock, kena dam, stock value'),
-    'parties': (Icons.groups_rounded, [Color(0xFF4FD8E0), Color(0xFF139DB0)], 'Customer baki ar supplier payable'),
-    'expenses': (Icons.sell_rounded, [Color(0xFFFF7A7A), Color(0xFFDC4545)], 'Category-wise khoroch'),
-    'daybook': (Icons.event_note_rounded, [Color(0xFF5EEAD4), Color(0xFF0D9488)], 'Tally-r moto journal: debit / credit'),
+    'all': (Icons.workspaces_rounded, [Color(0xFF21A366), Color(0xFF107C41)], 'Every sheet in one file: sales, purchases, stock, parties, day book, GST'),
+    'sales': (Icons.receipt_long_rounded, [Color(0xFF8B5CF6), Color(0xFF5B2EE0)], 'Every bill plus item-wise profit, with IMEI'),
+    'purchases': (Icons.shopping_bag_rounded, [Color(0xFFB58CFF), Color(0xFF7B3FF2)], 'Supplier bills, GSTIN, payables'),
+    'stock': (Icons.inventory_2_rounded, [Color(0xFF6AA5FF), Color(0xFF1A47C8)], 'Products, stock, cost, stock value'),
+    'parties': (Icons.groups_rounded, [Color(0xFF4FD8E0), Color(0xFF139DB0)], 'Customer dues and supplier payables'),
+    'expenses': (Icons.sell_rounded, [Color(0xFFFF7A7A), Color(0xFFDC4545)], 'Expenses by category'),
+    'daybook': (Icons.event_note_rounded, [Color(0xFF5EEAD4), Color(0xFF0D9488)], 'Tally-style journal: debit / credit'),
     'gst': (Icons.request_quote_rounded, [Color(0xFFF472B6), Color(0xFFDB2777)], 'GSTR-1, GSTR-3B, HSN, credit note'),
   };
 
@@ -285,7 +285,7 @@ class _ExportScreenState extends State<ExportScreen> {
   Widget build(BuildContext context) {
     return PageShell(
       title: 'Excel Export',
-      subtitle: 'Asol .xlsx file · Excel, Google Sheets, WPS-e khulbe',
+      subtitle: 'Real .xlsx files · open in Excel, Google Sheets or WPS',
       children: [
         _PeriodBar(from, to, (f, t) => setState(() {
               from = f;
@@ -331,7 +331,7 @@ class _ExportScreenState extends State<ExportScreen> {
             ),
           ),
         const SizedBox(height: 4),
-        Text('Stock ar party sheet aajker hisab dekhay; baki sob sheet upore bacha somoy-er.',
+        Text('Stock and party sheets show today\'s position; other sheets cover the chosen period.',
             textAlign: TextAlign.center, style: _j(11, FontWeight.w500, _muted)),
       ],
     );

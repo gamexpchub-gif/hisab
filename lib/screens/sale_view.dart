@@ -127,7 +127,7 @@ class SaleView extends StatelessWidget {
                     ),
                     onPressed: () => open(context, EmiForm(saleId: id)),
                     icon: const Icon(Icons.calendar_month_rounded),
-                    label: Text('Create EMI / kisti plan', style: _j(13.5, FontWeight.w800, const Color(0xFF0E7490))),
+                    label: Text('Create EMI plan', style: _j(13.5, FontWeight.w800, const Color(0xFF0E7490))),
                   ),
                   const SizedBox(height: 10),
                 ],

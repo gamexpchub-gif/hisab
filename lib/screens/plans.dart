@@ -60,8 +60,8 @@ Future<void> showUpgrade(BuildContext context, String feature) {
         const SizedBox(height: 6),
         Text(
           Sub.tier == 0
-              ? 'Apnar plan-er meyad shesh. ${p.name} ba tar upore plan nile eta chalu hobe.'
-              : 'Eta ${p.name} plan (₹${p.price}/mash) theke pawa jay. Apnar ekhon ${Sub.label} plan.',
+              ? 'Your plan has expired. Get ${p.name} or higher to unlock this.'
+              : 'Available from the ${p.name} plan (₹${p.price}/month). You are on ${Sub.label}.',
           textAlign: TextAlign.center,
           style: _j(13, FontWeight.w500, _muted),
         ),
@@ -75,7 +75,7 @@ Future<void> showUpgrade(BuildContext context, String feature) {
               Navigator.pop(c);
               open(context, const PlansScreen());
             },
-            child: Text('Plan dekhun · ${p.name} ₹${p.price}', style: _j(15, FontWeight.w800, Colors.white)),
+            child: Text('See plans · ${p.name} ₹${p.price}', style: _j(15, FontWeight.w800, Colors.white)),
           ),
         ),
       ]),
@@ -143,11 +143,11 @@ class _PlansScreenState extends State<PlansScreen> {
       final ok = await showDialog<bool>(
         context: context,
         builder: (c) => AlertDialog(
-          title: const Text('Account login korun'),
-          content: const Text('Plan nite Hisab AI account lagbe — login ba notun account khulun.'),
+          title: const Text('Sign in to continue'),
+          content: const Text('A Hisab AI account is needed to get a plan — sign in or create one.'),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Pore')),
-            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Login')),
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Later')),
+            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Sign in')),
           ],
         ),
       );
@@ -168,11 +168,11 @@ class _PlansScreenState extends State<PlansScreen> {
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 22),
           decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('${p.name} plan · ${yearly ? '1 bochor' : '$months mash'}', style: _j(19, FontWeight.w800, _ink)),
+            Text('${p.name} plan · ${yearly ? '1 year' : '$months months'}', style: _j(19, FontWeight.w800, _ink)),
             const SizedBox(height: 4),
-            Text('Mot ₹${inr(p.amount(term))}', style: _j(26, FontWeight.w800, planColors[p.id]!.last)),
+            Text('Total ₹${inr(p.amount(term))}', style: _j(26, FontWeight.w800, planColors[p.id]!.last)),
             const SizedBox(height: 10),
-            Text('Taka pathanor por niche UTR / transaction ID ba note likhun. Admin check kore plan chalu kore deben.',
+            Text('After paying, enter the UTR / transaction ID or a note below. Your plan is activated once the payment is verified.',
                 style: _j(12.5, FontWeight.w500, _muted)),
             const SizedBox(height: 10),
             TextField(
@@ -186,7 +186,7 @@ class _PlansScreenState extends State<PlansScreen> {
               child: FilledButton(
                 style: FilledButton.styleFrom(backgroundColor: planColors[p.id]!.last, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26))),
                 onPressed: () => Navigator.pop(c, true),
-                child: Text('Request pathan', style: _j(15, FontWeight.w800, Colors.white)),
+                child: Text('Send request', style: _j(15, FontWeight.w800, Colors.white)),
               ),
             ),
           ]),
@@ -197,7 +197,7 @@ class _PlansScreenState extends State<PlansScreen> {
     try {
       await Accounts.requestPlan(p.id, term, note.text);
       if (!mounted) return;
-      toast(context, 'Request pathano holo — approve hole plan nijei chalu hobe');
+      toast(context, 'Request sent — your plan activates as soon as it is approved');
       setState(() {});
     } catch (e) {
       if (mounted) toast(context, '$e', error: true);
@@ -213,7 +213,7 @@ class _PlansScreenState extends State<PlansScreen> {
         final curId = Sub.admin ? 'premium' : !Sub.active ? 'none' : Sub.plan;
         return PageShell(
           title: 'Hisab AI Plans',
-          subtitle: syncing ? 'Account check hocche…' : 'Apnar business-er jonno thik plan',
+          subtitle: syncing ? 'Checking your account…' : 'The right plan for your business',
           children: [
             const SizedBox(height: 6),
             // current plan
@@ -225,7 +225,7 @@ class _PlansScreenState extends State<PlansScreen> {
               ),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Row(children: [
-                  Text('Apnar plan', style: _j(12.5, FontWeight.w600, const Color(0xD9FFFFFF))),
+                  Text('Your plan', style: _j(12.5, FontWeight.w600, const Color(0xD9FFFFFF))),
                   const Spacer(),
                   if (Sub.pending != null)
                     Container(
@@ -237,20 +237,20 @@ class _PlansScreenState extends State<PlansScreen> {
                 Text(Sub.label, style: _j(28, FontWeight.w800, Colors.white)),
                 Text(
                   Sub.admin
-                      ? 'Shob feature, kono limit nei'
+                      ? 'Every feature, no limits'
                       : !Sub.active
-                          ? 'Meyad shesh — notun bill / product korte plan nin'
-                          : '${Sub.daysLeft} din baki · ${Sub.until == null ? '' : '${Sub.until!.day}/${Sub.until!.month}/${Sub.until!.year} porjonto'}',
+                          ? 'Expired — choose a plan to add bills and products'
+                          : '${Sub.daysLeft} days left · ${Sub.until == null ? '' : 'until ${Sub.until!.day}/${Sub.until!.month}/${Sub.until!.year}'}',
                   style: _j(12.5, FontWeight.w600, const Color(0xE6FFFFFF)),
                 ),
                 if (!Sub.admin && d != null) ...[
                   const SizedBox(height: 14),
-                  _usage('Product (30 din)', u.$1, d.products),
-                  _usage('Bill (30 din)', u.$2, d.sales),
+                  _usage('Products (30 days)', u.$1, d.products),
+                  _usage('Bills (30 days)', u.$2, d.sales),
                   _usage('Store', Stores.all.length, d.stores),
                 ],
                 const SizedBox(height: 10),
-                Text('${featurePercent(Sub.tier)}% feature chalu', style: _j(12, FontWeight.w800, Colors.white)),
+                Text('${featurePercent(Sub.tier)}% of features unlocked', style: _j(12, FontWeight.w800, Colors.white)),
               ]),
             ),
             const SizedBox(height: 14),
@@ -262,7 +262,7 @@ class _PlansScreenState extends State<PlansScreen> {
             const SizedBox(height: 12),
             _compare(),
             const SizedBox(height: 12),
-            Text('Online payment shiggiri ashche. Ekhon: taka pathiye request korun, admin approve korle plan chalu.',
+            Text('Online payment is coming soon. For now: pay, send a request, and your plan starts once approved.',
                 textAlign: TextAlign.center, style: _j(11.5, FontWeight.w500, _muted)),
             const SizedBox(height: 30),
           ],
@@ -313,14 +313,14 @@ class _PlansScreenState extends State<PlansScreen> {
         padding: const EdgeInsets.all(4),
         decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18), border: Border.all(color: _line)),
         child: Row(children: [
-          seg(false, 'Mashik', null),
-          seg(true, 'Bochorik', best > 0 ? 'Save up to $best%' : null),
+          seg(false, 'Monthly', null),
+          seg(true, 'Yearly', best > 0 ? 'Save up to $best%' : null),
         ]),
       ),
       if (!yearly) ...[
         const SizedBox(height: 10),
         Row(children: [
-          Text('Koto mash', style: _j(12.5, FontWeight.w700, _muted)),
+          Text('Months', style: _j(12.5, FontWeight.w700, _muted)),
           const Spacer(),
           for (final m in const [1, 3, 6])
             GestureDetector(
@@ -334,7 +334,7 @@ class _PlansScreenState extends State<PlansScreen> {
                   borderRadius: BorderRadius.circular(11),
                   border: Border.all(color: months == m ? _ink : _line),
                 ),
-                child: Text('$m mash', style: _j(12, FontWeight.w800, months == m ? Colors.white : _ink)),
+                child: Text('$m months', style: _j(12, FontWeight.w800, months == m ? Colors.white : _ink)),
               ),
             ),
         ]),
@@ -393,10 +393,10 @@ class _PlansScreenState extends State<PlansScreen> {
           Row(children: [
             const Icon(Icons.auto_awesome_rounded, color: Color(0xFFFFE08A), size: 20),
             const SizedBox(width: 8),
-            Expanded(child: Text('Hisab AI-te ${features.length} ta feature', style: _j(16, FontWeight.w800, Colors.white))),
+            Expanded(child: Text('${features.length} features in Hisab AI', style: _j(16, FontWeight.w800, Colors.white))),
           ]),
           const SizedBox(height: 4),
-          Text('Rong dekhe bujhun kon plan-e ki pabe', style: _j(12, FontWeight.w500, const Color(0xB3FFFFFF))),
+          Text('Colour shows the plan each feature comes with', style: _j(12, FontWeight.w500, const Color(0xB3FFFFFF))),
           const SizedBox(height: 10),
           Wrap(spacing: 10, runSpacing: 4, children: [
             for (final p in plans)
@@ -502,7 +502,7 @@ class _PlansScreenState extends State<PlansScreen> {
                 Text('₹${inr(p.price * 12)}',
                     style: _j(12, FontWeight.w700, const Color(0xB3FFFFFF)).copyWith(decoration: TextDecoration.lineThrough, decorationColor: Colors.white)),
               Text('₹${inr(yearly ? p.yearly : p.price)}', style: _j(24, FontWeight.w800, Colors.white)),
-              Text(yearly ? '/bochor · ₹${p.yearlyPerMonth}/mash' : '/mash', style: _j(11, FontWeight.w600, const Color(0xE6FFFFFF))),
+              Text(yearly ? '/year · ₹${p.yearlyPerMonth}/month' : '/month', style: _j(11, FontWeight.w600, const Color(0xE6FFFFFF))),
             ]),
           ]),
         ),
@@ -517,7 +517,7 @@ class _PlansScreenState extends State<PlansScreen> {
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
                   const Icon(Icons.savings_rounded, size: 16, color: _green),
                   const SizedBox(width: 6),
-                  Text('Bochore ₹${inr(p.yearSaving)} bachan (${p.yearSavingPct}% kom)', style: _j(12, FontWeight.w800, _green)),
+                  Text('Save ₹${inr(p.yearSaving)} a year (${p.yearSavingPct}% off)', style: _j(12, FontWeight.w800, _green)),
                 ]),
               ),
             if (yearly && p.yearSaving <= 0)
@@ -528,7 +528,7 @@ class _PlansScreenState extends State<PlansScreen> {
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
                   const Icon(Icons.lock_clock_rounded, size: 16, color: Color(0xFF5B2EE0)),
                   const SizedBox(width: 6),
-                  Text('Ek bar pay — 12 mash nishchinto', style: _j(12, FontWeight.w800, const Color(0xFF5B2EE0))),
+                  Text('Pay once — covered for 12 months', style: _j(12, FontWeight.w800, const Color(0xFF5B2EE0))),
                 ]),
               ),
             Row(children: [
@@ -547,11 +547,11 @@ class _PlansScreenState extends State<PlansScreen> {
               ),
             ]),
             const SizedBox(height: 10),
-            _li(p.products == 0 ? 'Unlimited product' : '30 dine ${p.products} ta product'),
-            _li(p.sales == 0 ? 'Unlimited bill / sale' : '30 dine ${p.sales} ta bill'),
-            _li(p.stores == 1 ? '1 ta store' : '${p.stores} ta store'),
+            _li(p.products == 0 ? 'Unlimited products' : '${p.products} products / 30 days'),
+            _li(p.sales == 0 ? 'Unlimited bills' : '${p.sales} bills / 30 days'),
+            _li(p.stores == 1 ? '1 store' : '${p.stores} stores'),
             for (final f in features.where((f) => f.tier == p.tier).take(p.tier == 1 ? 6 : 7)) _li(f.name),
-            if (p.tier > 1) _li('+ ${plans[p.tier - 2].name}-er shob kichu', bold: true),
+            if (p.tier > 1) _li('+ everything in ${plans[p.tier - 2].name}', bold: true),
             const SizedBox(height: 10),
             SizedBox(
               width: double.infinity,
@@ -560,12 +560,12 @@ class _PlansScreenState extends State<PlansScreen> {
                   ? OutlinedButton(
                       style: OutlinedButton.styleFrom(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24))),
                       onPressed: () => _request(p),
-                      child: Text('Chalu ache ✓ · Renew', style: _j(14, FontWeight.w800, colors.last)),
+                      child: Text('Active ✓ · Renew', style: _j(14, FontWeight.w800, colors.last)),
                     )
                   : FilledButton(
                       style: FilledButton.styleFrom(backgroundColor: colors.last, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24))),
                       onPressed: Sub.admin ? null : () => _request(p),
-                      child: Text('${p.name} nin · ₹${inr(p.amount(term))}${yearly ? '/bochor' : ''}', style: _j(14, FontWeight.w800, Colors.white)),
+                      child: Text('Get ${p.name} · ₹${inr(p.amount(term))}${yearly ? '/year' : ''}', style: _j(14, FontWeight.w800, Colors.white)),
                     ),
             ),
           ]),
@@ -587,7 +587,7 @@ class _PlansScreenState extends State<PlansScreen> {
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), border: Border.all(color: const Color(0xFFF1F2F9))),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Shob feature tulona', style: _j(15, FontWeight.w800, _ink)),
+          Text('Compare all features', style: _j(15, FontWeight.w800, _ink)),
           const SizedBox(height: 8),
           Row(children: [
             const Expanded(child: SizedBox()),

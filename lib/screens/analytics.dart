@@ -65,18 +65,18 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
               _chart(a),
               const SizedBox(height: 8),
               _legend(chart == 'sales'
-                  ? [('Bikri', _cSales), ('Purchase', _cPurch)]
+                  ? [('Sales', _cSales), ('Purchases', _cPurch)]
                   : chart == 'profit'
-                      ? [('Lav', _cProfit), ('Khoroch', _cExp)]
-                      : [('Collection', _cColl), ('Notun baki', _cDue)]),
+                      ? [('Profit', _cProfit), ('Expenses', _cExp)]
+                      : [('Collected', _cColl), ('New dues', _cDue)]),
             ]),
           ),
           _aiCard(a),
-          _card('Bill-er sonkha', child: _Bars(a.buckets.map((b) => b.bills).toList(), a.buckets.map((b) => b.label).toList(), _cSales)),
-          _card('Taka kothay ache (ekhon)', child: _moneyGrid(a)),
+          _card('Bills', child: _Bars(a.buckets.map((b) => b.bills).toList(), a.buckets.map((b) => b.label).toList(), _cSales)),
+          _card('Where the money is (now)', child: _moneyGrid(a)),
           if (a.categories.isNotEmpty || a.payModes.isNotEmpty)
             Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              if (a.categories.isNotEmpty) Expanded(child: _donutCard('Category', a.categories, 'bikri')),
+              if (a.categories.isNotEmpty) Expanded(child: _donutCard('Category', a.categories, 'sales')),
               if (a.categories.isNotEmpty && a.payModes.isNotEmpty) const SizedBox(width: 10),
               if (a.payModes.isNotEmpty) Expanded(child: _donutCard('Payment', a.payModes, 'collection')),
             ]),
@@ -87,14 +87,14 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             _card('Top customers',
                 child: _ranked(a.topCustomers, _cColl, onTap: (s) => open(context, PartyView(type: 'customer', id: s.id!)))),
           if (a.debtors.isNotEmpty)
-            _card('Kar kache koto baki',
+            _card('Who owes you',
                 trailing: Text(Money.compact(a.receivable), style: _j(13, FontWeight.w800, _red)),
                 child: _ranked(a.debtors, _cDue, onTap: (s) => open(context, PartyView(type: 'customer', id: s.id!)))),
           if (a.topSuppliers.isNotEmpty)
             _card('Top suppliers',
                 trailing: Text('Payable ${Money.compact(a.payable)}', style: _j(12, FontWeight.w800, _muted)),
                 child: _ranked(a.topSuppliers, _cPurch, onTap: (s) => open(context, PartyView(type: 'supplier', id: s.id!)))),
-          if (a.expenseHeads.isNotEmpty) _card('Khoroch kothay', child: _ranked(a.expenseHeads, _cExp)),
+          if (a.expenseHeads.isNotEmpty) _card('Where the money goes', child: _ranked(a.expenseHeads, _cExp)),
           _card('Profit & Loss', child: _pl(a)),
           const SizedBox(height: 30),
         ],
@@ -144,10 +144,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(children: [
-        chip('today', 'Aaj'),
-        chip('week', '7 din'),
-        chip('month', 'Ei mash'),
-        chip('year', 'Ei bochor'),
+        chip('today', 'Today'),
+        chip('week', '7 days'),
+        chip('month', 'This month'),
+        chip('year', 'This year'),
         chip('custom', period == 'custom' ? '📅 ${prettyDate(a.from).substring(0, 6)} – ${prettyDate(a.to).substring(0, 6)}' : '📅 Custom'),
       ]),
     );
@@ -165,20 +165,20 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          Text('Mot bikri', style: _j(13, FontWeight.w600, const Color(0xD9FFFFFF))),
+          Text('Total sales', style: _j(13, FontWeight.w600, const Color(0xD9FFFFFF))),
           const Spacer(),
           _pill(ch),
         ]),
         Text(Money.rs(a.sales), style: _j(31, FontWeight.w800, Colors.white)),
         const SizedBox(height: 2),
-        Text('${a.bills} bill · ${a.items} item · gor bill ${Money.compact(a.avgBill)}', style: _j(12, FontWeight.w600, const Color(0xD9FFFFFF))),
+        Text('${a.bills} bills · ${a.items} items · avg bill ${Money.compact(a.avgBill)}', style: _j(12, FontWeight.w600, const Color(0xD9FFFFFF))),
         const SizedBox(height: 12),
         SizedBox(height: 42, child: Sparkline(a.buckets.map((b) => b.sales).toList(), const Color(0xFF9F7BFF), width: double.infinity, height: 42)),
         const SizedBox(height: 12),
         Row(children: [
-          _heroStat('Net lav', a.net, a.net >= 0 ? const Color(0xFF3EE08F) : const Color(0xFFFFB5C2)),
+          _heroStat('Net profit', a.net, a.net >= 0 ? const Color(0xFF3EE08F) : const Color(0xFFFFB5C2)),
           _heroStat('Margin', null, Colors.white, text: '${a.margin}%'),
-          _heroStat('Collection', a.collected, Colors.white),
+          _heroStat('Collected', a.collected, Colors.white),
         ]),
       ]),
     );
@@ -207,14 +207,14 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   // ------------------------------------------------------------ KPI grid
   Widget _kpis(ProAnalytics a) {
     final items = [
-      ('Purchase', a.purchases, Books.pctChange(a.purchases, a.pPurchases), Icons.shopping_bag_rounded, _cPurch, false),
-      ('Gross lav', a.gross, Books.pctChange(a.gross, a.pGross), Icons.trending_up_rounded, _cProfit, false),
-      ('Khoroch', a.expenses, Books.pctChange(a.expenses, a.pExpenses), Icons.sell_rounded, _cExp, true),
-      ('Collection', a.collected, Books.pctChange(a.collected, a.pCollected), Icons.south_west_rounded, _cColl, false),
-      ('Notun baki', a.newDue, null, Icons.schedule_rounded, _cDue, true),
-      ('Supplier-ke dewa', a.paidOut, null, Icons.north_east_rounded, const Color(0xFF64748B), false),
-      ('Customer', a.activeCustomers, null, Icons.groups_rounded, const Color(0xFF0D9488), false),
-      ('Notun customer', a.newCustomers, null, Icons.person_add_alt_1_rounded, const Color(0xFF8B5CF6), false),
+      ('Purchases', a.purchases, Books.pctChange(a.purchases, a.pPurchases), Icons.shopping_bag_rounded, _cPurch, false),
+      ('Gross profit', a.gross, Books.pctChange(a.gross, a.pGross), Icons.trending_up_rounded, _cProfit, false),
+      ('Expenses', a.expenses, Books.pctChange(a.expenses, a.pExpenses), Icons.sell_rounded, _cExp, true),
+      ('Collected', a.collected, Books.pctChange(a.collected, a.pCollected), Icons.south_west_rounded, _cColl, false),
+      ('New dues', a.newDue, null, Icons.schedule_rounded, _cDue, true),
+      ('Paid to suppliers', a.paidOut, null, Icons.north_east_rounded, const Color(0xFF64748B), false),
+      ('Customers', a.activeCustomers, null, Icons.groups_rounded, const Color(0xFF0D9488), false),
+      ('New customers', a.newCustomers, null, Icons.person_add_alt_1_rounded, const Color(0xFF8B5CF6), false),
     ];
     return LayoutBuilder(builder: (context, c) {
       final w = (c.maxWidth - 10) / 2;
@@ -272,7 +272,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         padding: const EdgeInsets.all(3),
         decoration: BoxDecoration(color: const Color(0xFFF1F2F9), borderRadius: BorderRadius.circular(11)),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          for (final s in const [('sales', 'Bikri'), ('profit', 'Lav'), ('cash', 'Taka')])
+          for (final s in const [('sales', 'Sales'), ('profit', 'Profit'), ('cash', 'Money')])
             GestureDetector(
               onTap: () => setState(() => chart = s.$1),
               child: AnimatedContainer(
@@ -289,16 +289,16 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     final labels = a.buckets.map((b) => b.label).toList();
     final series = switch (chart) {
       'profit' => [
-          ChartSeries('Lav', a.buckets.map((b) => b.profit - b.expenses).toList(), _cProfit, area: true),
-          ChartSeries('Khoroch', a.buckets.map((b) => b.expenses).toList(), _cExp),
+          ChartSeries('Profit', a.buckets.map((b) => b.profit - b.expenses).toList(), _cProfit, area: true),
+          ChartSeries('Expenses', a.buckets.map((b) => b.expenses).toList(), _cExp),
         ],
       'cash' => [
-          ChartSeries('Collection', a.buckets.map((b) => b.collected).toList(), _cColl, area: true),
-          ChartSeries('Notun baki', a.buckets.map((b) => b.due).toList(), _cDue),
+          ChartSeries('Collected', a.buckets.map((b) => b.collected).toList(), _cColl, area: true),
+          ChartSeries('New dues', a.buckets.map((b) => b.due).toList(), _cDue),
         ],
       _ => [
-          ChartSeries('Bikri', a.buckets.map((b) => b.sales).toList(), _cSales, area: true),
-          ChartSeries('Purchase', a.buckets.map((b) => b.purchases).toList(), _cPurch),
+          ChartSeries('Sales', a.buckets.map((b) => b.sales).toList(), _cSales, area: true),
+          ChartSeries('Purchases', a.buckets.map((b) => b.purchases).toList(), _cPurch),
         ],
     };
     return TrendChart(labels: labels, series: series, height: 220);
@@ -343,16 +343,16 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       ('UPI / wallet', a.upi, Icons.qr_code_rounded, _cSales),
       if (a.card != 0) ('Card', a.card, Icons.credit_card_rounded, const Color(0xFF64748B)),
       ('Stock value', a.stock, Icons.inventory_2_rounded, _cPurch),
-      ('Bazare baki', a.receivable, Icons.call_received_rounded, _cDue),
+      ('Receivable', a.receivable, Icons.call_received_rounded, _cDue),
       ('Supplier payable', -a.payable, Icons.call_made_rounded, _red),
-      ('Loan baki', -a.loans, Icons.request_quote_rounded, _red),
+      ('Loans due', -a.loans, Icons.request_quote_rounded, _red),
     ];
     final worth = a.cash + a.bank + a.upi + a.card + a.stock + a.receivable - a.payable - a.loans;
     final maxV = rows.fold<int>(1, (m, r) => math.max(m, r.$2.abs()));
     return Column(children: [
       for (final r in rows)
         GestureDetector(
-          onTap: r.$1 == 'Loan baki' ? () => open(context, const LoansScreen()) : null,
+          onTap: r.$1 == 'Loans due' ? () => open(context, const LoansScreen()) : null,
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 5),
             child: Row(children: [
@@ -380,7 +380,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         ),
       const Divider(color: _line),
       Row(children: [
-        Expanded(child: Text('Business-er mot mullo (net worth)', style: _j(13, FontWeight.w800, _ink))),
+        Expanded(child: Text('Business net worth', style: _j(13, FontWeight.w800, _ink))),
         Text(Money.compact(worth), style: _j(15, FontWeight.w800, worth >= 0 ? _green : _red)),
       ]),
       if (a.capital != 0)
@@ -481,12 +481,12 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           ]),
         );
     return Column(children: [
-      row('Bikri (GST soho)', a.sales),
-      row('Kena dam (COGS)', -a.cogs),
-      row('Gross lav', a.gross, bold: true, c: a.gross >= 0 ? _green : _red),
-      row('Khoroch (sud soho)', -a.expenses),
+      row('Sales (incl. GST)', a.sales),
+      row('Cost of goods (COGS)', -a.cogs),
+      row('Gross profit', a.gross, bold: true, c: a.gross >= 0 ? _green : _red),
+      row('Expenses (incl. interest)', -a.expenses),
       const Divider(color: _line),
-      row('Net lav', a.net, bold: true, c: a.net >= 0 ? _green : _red),
+      row('Net profit', a.net, bold: true, c: a.net >= 0 ? _green : _red),
       if (a.pNet != 0 || a.net != 0)
         Align(alignment: Alignment.centerRight, child: _pill(Books.pctChange(a.net, a.pNet), light: false)),
     ]);

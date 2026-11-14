@@ -121,7 +121,7 @@ class EmiAlarms {
         dueId: 2000000 + asInt(next),
         dueDate: DateTime.parse('${p['next_due']}'),
         title: 'EMI ${Money.rs(asInt(p['next_amount']))} — ${p['customer']}',
-        body: '${p['financer'] ?? 'Shop kisti'} · ${p['product'] ?? ''} · instalment due',
+        body: '${p['financer'] ?? 'Shop instalments'} · ${p['product'] ?? ''} · instalment due',
       );
     }
   }
@@ -212,7 +212,7 @@ class _EmiScreenState extends State<EmiScreen> {
                 if (canPop) ...[_round(Icons.arrow_back_rounded, () => Navigator.of(context).pop()), const SizedBox(width: 12)],
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('EMI / Kisti', style: _j(22, FontWeight.w800, _navy)),
+                    Text('EMI / Instalments', style: _j(22, FontWeight.w800, _navy)),
                     Text('Finance & shop instalments', style: _j(12, FontWeight.w600, const Color(0xFF323B60))),
                   ]),
                 ),
@@ -369,7 +369,7 @@ class _PlanCard extends StatelessWidget {
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text('${p['customer']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(14.5, FontWeight.w800, _ink)),
                     Text(
-                      [p['product'], p['financer'] ?? 'Shop kisti'].whereType<Object>().join(' · '),
+                      [p['product'], p['financer'] ?? 'Shop instalments'].whereType<Object>().join(' · '),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: _j(11.5, FontWeight.w600, _muted),
@@ -585,7 +585,7 @@ class EmiPlanView extends StatelessWidget {
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text('EMI plan', style: _j(22, FontWeight.w800, _navy)),
-                    Text('${p['financer'] ?? 'Shop kisti'} · $months months', style: _j(12, FontWeight.w600, const Color(0xFF323B60))),
+                    Text('${p['financer'] ?? 'Shop instalments'} · $months months', style: _j(12, FontWeight.w600, const Color(0xFF323B60))),
                   ]),
                 ),
                 PopupMenuButton<String>(
@@ -659,7 +659,7 @@ class EmiPlanView extends StatelessWidget {
                 padding: const EdgeInsets.all(14),
                 decoration: _card(),
                 child: Column(children: [
-                  _kv('Type', p['kind'] == 'shop' ? 'Shop kisti (we collect)' : 'Finance company'),
+                  _kv('Type', p['kind'] == 'shop' ? 'Shop instalments (we collect)' : 'Finance company'),
                   if (p['financer'] != null) _kv('Financer', '${p['financer']}'),
                   if (p['opp_id'] != null) _kv('Opportunity ID', '${p['opp_id']}'),
                   if (p['loan_no'] != null) _kv('Loan / agreement no.', '${p['loan_no']}'),
@@ -1010,7 +1010,7 @@ class _EmiFormState extends State<EmiForm> {
             Row(children: [
               Expanded(child: _chip('Finance company', kind == 'finance', () => setState(() => kind = 'finance'))),
               const SizedBox(width: 8),
-              Expanded(child: _chip('Shop kisti', kind == 'shop', () => setState(() => kind = 'shop'))),
+              Expanded(child: _chip('Shop instalments', kind == 'shop', () => setState(() => kind = 'shop'))),
             ]),
             const SizedBox(height: 8),
             Text(

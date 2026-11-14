@@ -105,7 +105,7 @@ class _LoansScreenState extends State<LoansScreen> {
         final today = ymd(DateTime.now());
         return PageShell(
           title: 'Loans & Investment',
-          subtitle: 'Business-e kotha theke taka elo, koto shodh baki',
+          subtitle: 'Money brought into the business and what is still owed',
           fab: FloatingActionButton.extended(
             backgroundColor: _purple,
             onPressed: () => open(context, const LoanForm()),
@@ -127,13 +127,13 @@ class _LoansScreenState extends State<LoansScreen> {
               ),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Row(children: [
-                  Text('Mot loan baki', style: _j(13, FontWeight.w600, const Color(0xD9FFFFFF))),
+                  Text('Total loans outstanding', style: _j(13, FontWeight.w600, const Color(0xD9FFFFFF))),
                   const Spacer(),
                   if (monthly > 0)
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(color: const Color(0x26FFFFFF), borderRadius: BorderRadius.circular(10)),
-                      child: Text('EMI ${Money.compact(monthly)}/mash', style: _j(11.5, FontWeight.w800, Colors.white)),
+                      child: Text('EMI ${Money.compact(monthly)}/month', style: _j(11.5, FontWeight.w800, Colors.white)),
                     ),
                 ]),
                 const SizedBox(height: 2),
@@ -149,12 +149,12 @@ class _LoansScreenState extends State<LoansScreen> {
                   ),
                 ),
                 const SizedBox(height: 6),
-                Text('${Money.compact(repaid)} shodh · ${borrowed == 0 ? 0 : (repaid * 100 / borrowed).round()}% · mot newa ${Money.compact(borrowed)}',
+                Text('${Money.compact(repaid)} repaid · ${borrowed == 0 ? 0 : (repaid * 100 / borrowed).round()}% · borrowed ${Money.compact(borrowed)}',
                     style: _j(11.5, FontWeight.w600, const Color(0xD9FFFFFF))),
                 const SizedBox(height: 14),
                 Row(children: [
                   _heroStat('Investment', Money.compact(capital), const Color(0xFF3EE08F)),
-                  _heroStat('Sud dewa', Money.compact(interest), const Color(0xFFFFB5C2)),
+                  _heroStat('Interest paid', Money.compact(interest), const Color(0xFFFFB5C2)),
                   _heroStat('Next EMI', next.isEmpty ? '—' : prettyDate('${next.first['next_due']}').substring(0, 6),
                       next.isNotEmpty && '${next.first['next_due']}'.compareTo(today) <= 0 ? const Color(0xFFFFB5C2) : Colors.white),
                 ]),
@@ -171,12 +171,12 @@ class _LoansScreenState extends State<LoansScreen> {
                     colors: const [Color(0xFF2F6BFF), Color(0xFF16A36A), Color(0xFFF08A24), Color(0xFFD81E4A), Color(0xFF8B5CF6), Color(0xFF0D9488)],
                     size: 120,
                     centerTop: Money.compact(bySource.values.fold(0, (a, b) => a + b)),
-                    centerBottom: 'taka elo',
+                    centerBottom: 'received',
                   ),
                   const SizedBox(width: 14),
                   Expanded(
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text('Kotha theke', style: _j(14, FontWeight.w800, _ink)),
+                      Text('By source', style: _j(14, FontWeight.w800, _ink)),
                       const SizedBox(height: 6),
                       for (final (i, e) in bySource.entries.indexed)
                         Padding(
@@ -204,7 +204,7 @@ class _LoansScreenState extends State<LoansScreen> {
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(children: [
-                for (final t in const [('active', 'Cholche'), ('loan', 'Loan'), ('investment', 'Investment'), ('closed', 'Shodh hoye geche')])
+                for (final t in const [('active', 'Active'), ('loan', 'Loan'), ('investment', 'Investment'), ('closed', 'Closed')])
                   GestureDetector(
                     onTap: () => setState(() => tab = t.$1),
                     child: AnimatedContainer(
@@ -224,7 +224,7 @@ class _LoansScreenState extends State<LoansScreen> {
             ),
             const SizedBox(height: 10),
             if (shown.isEmpty)
-              const EmptyState('Kono loan ba investment nei — niche button chepe jog korun')
+              const EmptyState('No loans or investments yet — add one with the button below')
             else
               for (final l in shown) _LoanCard(l),
             const SizedBox(height: 90),
@@ -280,7 +280,7 @@ class _LoanCard extends StatelessWidget {
                         isLoan ? 'Loan' : 'Investment',
                         Loans.sources[l['source']] ?? '',
                         if (isLoan && asInt(l['rate_bp']) > 0) '${_pct(asInt(l['rate_bp']))} ${l['interest_type'] == 'flat' ? 'flat' : ''}'.trim(),
-                        if (isLoan && asInt(l['rate_bp']) == 0) 'bina sud',
+                        if (isLoan && asInt(l['rate_bp']) == 0) 'no interest',
                       ].join(' · '),
                       style: _j(11.5, FontWeight.w600, _muted),
                     ),
@@ -288,7 +288,7 @@ class _LoanCard extends StatelessWidget {
                 ),
                 Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                   Text(Money.rs(out), style: _j(16, FontWeight.w800, isLoan ? (out > 0 ? _red : _green) : _green)),
-                  Text(isLoan ? (out > 0 ? 'baki' : 'shodh ✓') : 'capital', style: _j(10.5, FontWeight.w700, _muted)),
+                  Text(isLoan ? (out > 0 ? 'outstanding' : 'repaid ✓') : 'capital', style: _j(10.5, FontWeight.w700, _muted)),
                 ]),
               ]),
               if (isLoan) ...[
@@ -304,7 +304,7 @@ class _LoanCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 Row(children: [
-                  Text('${(done * 100).round()}% shodh · ${l['paid_n']}/${l['months']} kisti', style: _j(11, FontWeight.w600, _muted)),
+                  Text('${(done * 100).round()}% repaid · ${l['paid_n']}/${l['months']} EMIs', style: _j(11, FontWeight.w600, _muted)),
                   const Spacer(),
                   if (next != null)
                     Text('${late ? 'Late · ' : ''}EMI ${Money.compact(asInt(l['next_emi']))} · ${prettyDate(next)}',
@@ -366,7 +366,7 @@ class _LoanFormState extends State<LoanForm> {
       };
 
   Future<void> _save() async {
-    if (account == null) return toast(context, 'Taka kon account-e elo — select korun', error: true);
+    if (account == null) return toast(context, 'Choose the account the money went into', error: true);
     setState(() => saving = true);
     try {
       final id = await Loans.create(
@@ -387,7 +387,7 @@ class _LoanFormState extends State<LoanForm> {
       if (l != null) await _scheduleLoanAlarm(l);
       if (!mounted) return;
       HapticFeedback.heavyImpact();
-      toast(context, kind == 'loan' ? 'Loan saved · ${Money.rs(p)} account-e jog holo' : 'Investment saved');
+      toast(context, kind == 'loan' ? 'Loan saved · ${Money.rs(p)} added to the account' : 'Investment saved');
       Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => LoanView(id: id)));
     } catch (e) {
       toast(context, '$e', error: true);
@@ -468,7 +468,7 @@ class _LoanFormState extends State<LoanForm> {
           padding: const EdgeInsets.all(4),
           decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: _line)),
           child: Row(children: [
-            for (final k in const [('loan', 'Loan / Udhar', Icons.request_quote_rounded), ('investment', 'Investment / Capital', Icons.savings_rounded)])
+            for (final k in const [('loan', 'Loan / Borrowing', Icons.request_quote_rounded), ('investment', 'Investment / Capital', Icons.savings_rounded)])
               Expanded(
                 child: GestureDetector(
                   onTap: () => setState(() => kind = k.$1),
@@ -494,22 +494,22 @@ class _LoanFormState extends State<LoanForm> {
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
           child: Text(
             isLoan
-                ? 'Bank, finance ba karo kach theke udhar — fert dite hobe (sud soho ba bina sude).'
-                : 'Nijer ba partner-er taka business-e lagano — eta capital, loan na.',
+                ? 'Borrowed from a bank, finance company or a person — to be repaid, with or without interest.'
+                : 'Your own or a partner\'s money put into the business — capital, not a loan.',
             style: _j(12, FontWeight.w500, _muted),
           ),
         ),
-        _card(isLoan ? 'Kar kach theke' : 'Ke taka dilo', [
+        _card(isLoan ? 'Lender' : 'Investor', [
           Wrap(children: [
             for (final s in sources) _chip(Loans.sources[s]!, source == s, () => source = s, icon: _sourceIcon[s]),
           ]),
           const SizedBox(height: 6),
-          _field(lender, isLoan ? (source == 'bank' || source == 'nbfc' ? 'Bank / finance-er naam' : 'Naam') : 'Naam (owner / partner)'),
+          _field(lender, isLoan ? (source == 'bank' || source == 'nbfc' ? 'Bank / finance company name' : 'Name') : 'Name (owner / partner)'),
           _field(phone, 'Phone (optional)', kb: TextInputType.phone),
         ]),
-        _card('Taka', [
+        _card('Amount', [
           _field(amount, isLoan ? 'Loan amount' : 'Investment amount', kb: const TextInputType.numberWithOptions(decimal: true), prefix: '₹ '),
-          Text('Kon account-e elo', style: _j(12, FontWeight.w700, _muted)),
+          Text('Received into', style: _j(12, FontWeight.w700, _muted)),
           const SizedBox(height: 6),
           Wrap(children: [
             for (final a in accounts) _chip('${a['name']}', account == asInt(a['id']), () => account = asInt(a['id'])),
@@ -524,26 +524,26 @@ class _LoanFormState extends State<LoanForm> {
               child: Row(children: [
                 const Icon(Icons.event_rounded, size: 18, color: _purple),
                 const SizedBox(width: 6),
-                Text('Tarikh: ${prettyDate(date)}', style: _j(13, FontWeight.w700, _purple)),
+                Text('Date: ${prettyDate(date)}', style: _j(13, FontWeight.w700, _purple)),
               ]),
             ),
           ),
         ]),
         if (isLoan)
-          _card('Sud ar kisti', [
+          _card('Interest & EMI', [
             Row(children: [
-              Expanded(child: _field(rate, 'Sud (bochore)', kb: const TextInputType.numberWithOptions(decimal: true), suffix: '%')),
+              Expanded(child: _field(rate, 'Interest (per year)', kb: const TextInputType.numberWithOptions(decimal: true), suffix: '%')),
               const SizedBox(width: 10),
-              Expanded(child: _field(months, 'Koto mash', kb: TextInputType.number, suffix: 'mash')),
+              Expanded(child: _field(months, 'Months', kb: TextInputType.number, suffix: 'months')),
             ]),
             Wrap(children: [
-              for (final m in const [6, 12, 18, 24, 36, 60]) _chip('$m mash', n == m, () => months.text = '$m'),
+              for (final m in const [6, 12, 18, 24, 36, 60]) _chip('$m months', n == m, () => months.text = '$m'),
             ]),
             const SizedBox(height: 4),
             Wrap(children: [
               _chip('Reducing (bank)', type == 'reducing', () => type = 'reducing'),
               _chip('Flat', type == 'flat', () => type = 'flat'),
-              _chip('Bina sud', bp == 0, () => rate.text = '0'),
+              _chip('No interest', bp == 0, () => rate.text = '0'),
             ]),
             GestureDetector(
               onTap: () async {
@@ -553,9 +553,9 @@ class _LoanFormState extends State<LoanForm> {
               child: Row(children: [
                 const Icon(Icons.alarm_rounded, size: 18, color: _amber),
                 const SizedBox(width: 6),
-                Text('Prothom EMI: ${prettyDate(due)}', style: _j(13, FontWeight.w700, _amber)),
+                Text('First EMI: ${prettyDate(due)}', style: _j(13, FontWeight.w700, _amber)),
                 const SizedBox(width: 6),
-                Text('(bodlan)', style: _j(12, FontWeight.w600, _muted)),
+                Text('(change)', style: _j(12, FontWeight.w600, _muted)),
               ]),
             ),
           ]),
@@ -574,12 +574,12 @@ class _LoanFormState extends State<LoanForm> {
                 Text('EMI calculator', style: _j(13, FontWeight.w700, const Color(0xD9FFFFFF))),
               ]),
               const SizedBox(height: 6),
-              Text('${Money.rs(emi)} / mash', style: _j(26, FontWeight.w800, Colors.white)),
+              Text('${Money.rs(emi)} / month', style: _j(26, FontWeight.w800, Colors.white)),
               const SizedBox(height: 10),
               Row(children: [
-                _calc('Mot sud', Money.compact(totalInt), const Color(0xFFFFB5C2)),
-                _calc('Mot fert', Money.compact(p + totalInt), Colors.white),
-                _calc('Shesh EMI', sched.isEmpty ? '—' : prettyDate(sched.last.date).substring(3), Colors.white),
+                _calc('Total interest', Money.compact(totalInt), const Color(0xFFFFB5C2)),
+                _calc('Total repayment', Money.compact(p + totalInt), Colors.white),
+                _calc('Last EMI', sched.isEmpty ? '—' : prettyDate(sched.last.date).substring(3), Colors.white),
               ]),
               if (p > 0) ...[
                 const SizedBox(height: 10),
@@ -591,12 +591,12 @@ class _LoanFormState extends State<LoanForm> {
                   ]),
                 ),
                 const SizedBox(height: 4),
-                Text('Sobuj = asol ${(p * 100 / (p + totalInt)).round()}% · golapi = sud ${(totalInt * 100 / (p + totalInt)).round()}%',
+                Text('Green = principal ${(p * 100 / (p + totalInt)).round()}% · pink = interest ${(totalInt * 100 / (p + totalInt)).round()}%',
                     style: _j(11, FontWeight.w600, const Color(0xCCFFFFFF))),
               ],
             ]),
           ),
-        _field(purpose, 'Kiser jonno (stock, dokan, machine…)'),
+        _field(purpose, 'Purpose (stock, shop, equipment…)'),
       ]),
       bottomNavigationBar: SafeArea(
         child: Padding(
@@ -654,7 +654,7 @@ class LoanView extends StatelessWidget {
                   context: context,
                   builder: (c) => AlertDialog(
                     title: const Text('Delete?'),
-                    content: Text('${l['lender']} — ei ${isLoan ? 'loan' : 'investment'} ar tar shob payment muche jabe.'),
+                    content: Text('This ${isLoan ? 'loan' : 'investment'} from ${l['lender']} and all its payments will be deleted.'),
                     actions: [
                       TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
                       TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Delete', style: TextStyle(color: _red))),
@@ -702,10 +702,10 @@ class LoanView extends StatelessWidget {
                 const SizedBox(width: 16),
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(isLoan ? 'Baki asol' : 'Capital in business', style: _j(12, FontWeight.w600, const Color(0xE6FFFFFF))),
+                    Text(isLoan ? 'Principal outstanding' : 'Capital in business', style: _j(12, FontWeight.w600, const Color(0xE6FFFFFF))),
                     Text(Money.rs(out), style: _j(26, FontWeight.w800, Colors.white)),
-                    Text('Newa ${Money.rs(p)} · ${prettyDate('${l['start_date']}')}', style: _j(11.5, FontWeight.w600, const Color(0xE6FFFFFF))),
-                    if (l['account'] != null) Text('Elo: ${l['account']}', style: _j(11.5, FontWeight.w600, const Color(0xE6FFFFFF))),
+                    Text('Taken ${Money.rs(p)} · ${prettyDate('${l['start_date']}')}', style: _j(11.5, FontWeight.w600, const Color(0xE6FFFFFF))),
+                    if (l['account'] != null) Text('Into: ${l['account']}', style: _j(11.5, FontWeight.w600, const Color(0xE6FFFFFF))),
                   ]),
                 ),
               ]),
@@ -714,9 +714,9 @@ class LoanView extends StatelessWidget {
             if (isLoan)
               Row(children: [
                 _kpi('EMI', asInt(l['emi']) > 0 ? Money.compact(asInt(l['emi'])) : '—'),
-                _kpi('Sud', asInt(l['rate_bp']) == 0 ? 'Nei' : '${_pct(asInt(l['rate_bp']))} ${l['interest_type'] == 'flat' ? 'flat' : ''}'),
-                _kpi('Sud dewa', Money.compact(asInt(l['paid_interest']))),
-                _kpi('Kisti', '$paidN/${l['months']}'),
+                _kpi('Interest', asInt(l['rate_bp']) == 0 ? 'None' : '${_pct(asInt(l['rate_bp']))} ${l['interest_type'] == 'flat' ? 'flat' : ''}'),
+                _kpi('Interest paid', Money.compact(asInt(l['paid_interest']))),
+                _kpi('EMIs', '$paidN/${l['months']}'),
               ]),
             if (isLoan && l['next_due'] != null) ...[
               const SizedBox(height: 12),
@@ -727,7 +727,7 @@ class LoanView extends StatelessWidget {
                   const Icon(Icons.alarm_rounded, color: _amber),
                   const SizedBox(width: 10),
                   Expanded(
-                    child: Text('Porer EMI ${Money.rs(asInt(l['next_emi']))} · ${prettyDate('${l['next_due']}')}',
+                    child: Text('Next EMI ${Money.rs(asInt(l['next_emi']))} · ${prettyDate('${l['next_due']}')}',
                         style: _j(13.5, FontWeight.w800, _ink)),
                   ),
                 ]),
@@ -746,20 +746,20 @@ class LoanView extends StatelessWidget {
                     builder: (_) => _PaySheet(l),
                   ),
                   icon: const Icon(Icons.payments_rounded, color: Colors.white),
-                  label: Text(isLoan ? 'EMI / repayment dilam' : 'Capital ferot dilam', style: _j(14.5, FontWeight.w800, Colors.white)),
+                  label: Text(isLoan ? 'Record EMI / repayment' : 'Record capital returned', style: _j(14.5, FontWeight.w800, Colors.white)),
                 ),
               ),
             ],
             if ((l['purpose'] ?? '').toString().isNotEmpty) ...[
               const SizedBox(height: 10),
-              Text('Kiser jonno: ${l['purpose']}', style: _j(12.5, FontWeight.w600, _muted)),
+              Text('Purpose: ${l['purpose']}', style: _j(12.5, FontWeight.w600, _muted)),
             ],
             if (sched.isNotEmpty) ...[
               const SizedBox(height: 16),
               Row(children: [
-                Text('Kisti-r talika', style: _j(15, FontWeight.w800, _ink)),
+                Text('Repayment schedule', style: _j(15, FontWeight.w800, _ink)),
                 const Spacer(),
-                Text('Mot sud ${Money.compact(totalInt)}', style: _j(12, FontWeight.w700, _muted)),
+                Text('Total interest ${Money.compact(totalInt)}', style: _j(12, FontWeight.w700, _muted)),
               ]),
               const SizedBox(height: 8),
               Container(
@@ -775,11 +775,11 @@ class LoanView extends StatelessWidget {
                     dataTextStyle: _j(12.5, FontWeight.w600, _ink),
                     columns: const [
                       DataColumn(label: Text('#')),
-                      DataColumn(label: Text('Tarikh')),
+                      DataColumn(label: Text('Date')),
                       DataColumn(label: Text('EMI')),
-                      DataColumn(label: Text('Asol')),
-                      DataColumn(label: Text('Sud')),
-                      DataColumn(label: Text('Baki')),
+                      DataColumn(label: Text('Principal')),
+                      DataColumn(label: Text('Interest')),
+                      DataColumn(label: Text('Balance')),
                     ],
                     rows: [
                       for (final r in sched)
@@ -802,7 +802,7 @@ class LoanView extends StatelessWidget {
             const SizedBox(height: 16),
             Text('Payment history · ${pays.length}', style: _j(15, FontWeight.w800, _ink)),
             const SizedBox(height: 8),
-            if (pays.isEmpty) Text('Ekhono kono payment nei', style: _j(12.5, FontWeight.w500, _muted)),
+            if (pays.isEmpty) Text('No payments yet', style: _j(12.5, FontWeight.w500, _muted)),
             for (final x in pays)
               Container(
                 margin: const EdgeInsets.only(bottom: 8),
@@ -815,7 +815,7 @@ class LoanView extends StatelessWidget {
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Text(Money.rs(asInt(x['principal']) + asInt(x['interest'])), style: _j(14, FontWeight.w800, _ink)),
                       Text(
-                          '${prettyDate('${x['date']}')} · ${x['account']} · asol ${Money.compact(asInt(x['principal']))}${asInt(x['interest']) > 0 ? ' + sud ${Money.compact(asInt(x['interest']))}' : ''}',
+                          '${prettyDate('${x['date']}')} · ${x['account']} · principal ${Money.compact(asInt(x['principal']))}${asInt(x['interest']) > 0 ? ' + interest ${Money.compact(asInt(x['interest']))}' : ''}',
                           style: _j(11.5, FontWeight.w600, _muted)),
                     ]),
                   ),
@@ -825,7 +825,7 @@ class LoanView extends StatelessWidget {
                       final ok = await showDialog<bool>(
                         context: context,
                         builder: (c) => AlertDialog(
-                          title: const Text('Ei payment muchben?'),
+                          title: const Text('Delete this payment?'),
                           actions: [
                             TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
                             TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Delete', style: TextStyle(color: _red))),
@@ -892,8 +892,8 @@ class _PaySheetState extends State<_PaySheet> {
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
         Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: _line, borderRadius: BorderRadius.circular(2)))),
         const SizedBox(height: 12),
-        Text(isLoan ? 'EMI / repayment' : 'Capital ferot', style: _j(18, FontWeight.w800, _ink)),
-        Text('${widget.l['lender']} · baki ${Money.rs(asInt(widget.l['outstanding']))}', style: _j(12, FontWeight.w600, _muted)),
+        Text(isLoan ? 'EMI / repayment' : 'Return capital', style: _j(18, FontWeight.w800, _ink)),
+        Text('${widget.l['lender']} · outstanding ${Money.rs(asInt(widget.l['outstanding']))}', style: _j(12, FontWeight.w600, _muted)),
         const SizedBox(height: 14),
         Row(children: [
           Expanded(
@@ -901,7 +901,7 @@ class _PaySheetState extends State<_PaySheet> {
               controller: principal,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(labelText: 'Asol (principal)', prefixText: '₹ '),
+              decoration: const InputDecoration(labelText: 'Principal', prefixText: '₹ '),
             ),
           ),
           if (isLoan) ...[
@@ -911,7 +911,7 @@ class _PaySheetState extends State<_PaySheet> {
                 controller: interest,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 onChanged: (_) => setState(() {}),
-                decoration: const InputDecoration(labelText: 'Sud (interest)', prefixText: '₹ '),
+                decoration: const InputDecoration(labelText: 'Interest', prefixText: '₹ '),
               ),
             ),
           ],
@@ -919,11 +919,11 @@ class _PaySheetState extends State<_PaySheet> {
         if (isLoan && s.$2 > 0)
           Padding(
             padding: const EdgeInsets.only(top: 6),
-            child: Text('AI split: asol ${Money.rs(s.$1)} + sud ${Money.rs(s.$2)} (kisti ${asInt(widget.l['paid_n']) + 1})',
+            child: Text('AI split: principal ${Money.rs(s.$1)} + interest ${Money.rs(s.$2)} (EMI ${asInt(widget.l['paid_n']) + 1})',
                 style: _j(11.5, FontWeight.w600, _purple)),
           ),
         const SizedBox(height: 12),
-        Text('Kon account theke dilen', style: _j(12, FontWeight.w700, _muted)),
+        Text('Paid from', style: _j(12, FontWeight.w700, _muted)),
         const SizedBox(height: 6),
         Wrap(spacing: 6, runSpacing: 6, children: [
           for (final a in accounts)

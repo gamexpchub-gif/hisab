@@ -78,15 +78,15 @@ IconData expenseIcon(String name) {
 int? guessHead(String note, List<Rec> heads) {
   final n = note.toLowerCase();
   const rules = {
-    'rent': ['rent', 'bhara', 'ভাড়া'],
-    'electric': ['electric', 'current', 'cesc', 'wbsedcl', 'light bill', 'বিদ্যুৎ'],
-    'salary': ['salary', 'staff', 'wage', 'helper', 'বেতন'],
+    'rent': ['rent', 'bhara'],
+    'electric': ['electric', 'current', 'cesc', 'wbsedcl', 'light bill'],
+    'salary': ['salary', 'staff', 'wage', 'helper'],
     'transport': ['transport', 'courier', 'delivery', 'petrol', 'fuel', 'auto', 'toto', 'cab', 'parcel', 'shipping'],
     'internet': ['internet', 'wifi', 'broadband', 'recharge', 'jio', 'airtel', 'mobile bill'],
     'market': ['ads', 'facebook', 'instagram', 'google', 'banner', 'poster', 'marketing', 'flex', 'leaflet'],
     'repair': ['repair', 'maintenance', 'service', 'fix', 'plumber', 'electrician', 'ac '],
     'bank': ['bank', 'charges', 'fee', 'gst late', 'penalty', 'emi'],
-    'food': ['tea', 'chai', 'food', 'snack', 'lunch', 'coffee', 'water', 'biscuit', 'cha', 'খাবার'],
+    'food': ['tea', 'chai', 'food', 'snack', 'lunch', 'coffee', 'water', 'biscuit', 'cha'],
   };
   for (final e in rules.entries) {
     if (e.value.any(n.contains)) {

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
@@ -5,7 +7,48 @@ import 'package:sqflite/sqflite.dart';
 class AppDb {
   static Database? _db;
 
-  static Future<Database> get instance async => _db ??= await _open();
+  static Completer<void>? _busy; // set while a backup / restore / store switch has the file
+  static Future<Database>? _opening;
+
+  /// The open database. Waits while the file is being backed up or replaced,
+  /// so no screen can open the old file in the middle of a restore.
+  static Future<Database> get instance async {
+    while (_busy != null) {
+      await _busy!.future;
+    }
+    final d = _db;
+    if (d != null) return d;
+    final o = _opening ??= _open();
+    try {
+      return _db = await o;
+    } finally {
+      if (identical(_opening, o)) _opening = null;
+    }
+  }
+
+  /// Closes the database and runs [body] with the file to itself; nothing can
+  /// reopen it until [body] is done. Used for backup, restore and store switch.
+  static Future<T> exclusive<T>(Future<T> Function(String path) body) async {
+    while (_busy != null) {
+      await _busy!.future;
+    }
+    final gate = _busy = Completer<void>();
+    try {
+      final o = _opening;
+      if (o != null) {
+        try {
+          await o;
+        } catch (_) {}
+      }
+      final d = _db;
+      _db = null;
+      await d?.close();
+      return await body(await path());
+    } finally {
+      _busy = null;
+      gate.complete();
+    }
+  }
 
   /// Tests inject an in-memory database here.
   static void useDatabase(Database db) => _db = db;

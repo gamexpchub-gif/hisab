@@ -48,7 +48,7 @@ class DailyReport {
 
     for (final x in await Books.dues()) {
       if ('${x['due_date']}'.compareTo(tm) <= 0) {
-        r.tomorrow.add({'name': x['party'], 'amount': asInt(x['amount']), 'what': x['party_type'] == 'customer' ? 'debe' : 'dite hobe', 'late': '${x['due_date']}'.compareTo(t) < 0});
+        r.tomorrow.add({'name': x['party'], 'amount': asInt(x['amount']), 'what': x['party_type'] == 'customer' ? 'to collect' : 'to pay', 'late': '${x['due_date']}'.compareTo(t) < 0});
       }
     }
     for (final e in await Books.query(
@@ -61,7 +61,7 @@ class DailyReport {
     for (final l in await Loans.list()) {
       final next = l['next_due'] as String?;
       if (next != null && next.compareTo(tm) <= 0) {
-        r.tomorrow.add({'name': l['lender'], 'amount': asInt(l['next_emi']), 'what': 'loan EMI dite hobe', 'late': next.compareTo(t) < 0});
+        r.tomorrow.add({'name': l['lender'], 'amount': asInt(l['next_emi']), 'what': 'loan EMI to pay', 'late': next.compareTo(t) < 0});
       }
     }
 
@@ -89,14 +89,14 @@ class DailyReport {
 
   /// Short line for the notification.
   String headline() => invoices == 0
-      ? 'Aaj kono bikri entry hoyni${tomorrow.isEmpty ? '' : ' · kal ${tomorrow.length} jon-er payment'}'
-      : 'Bikri ${Money.rs(sales)} · lav ${Money.rs(profit)} · collection ${Money.rs(collected)}';
+      ? 'No sales recorded today${tomorrow.isEmpty ? '' : ' · ${tomorrow.length} payments due tomorrow'}'
+      : 'Sales ${Money.rs(sales)} · profit ${Money.rs(profit)} · collected ${Money.rs(collected)}';
 
   String body() => [
         if (invoices > 0) '$invoices bill, $items item${best == null ? '' : ' · best: $best'}',
-        if (expenses > 0) 'Khoroch ${Money.rs(expenses)}',
-        if (tomorrow.isNotEmpty) 'Kal: ${tomorrow.take(3).map((x) => '${x['name']} ${Money.rs(asInt(x['amount']))}').join(', ')}',
-        if (reorder.isNotEmpty) 'Order: ${reorder.take(3).map((x) => '${x['name']} ×${x['need']}').join(', ')}',
+        if (expenses > 0) 'Expenses ${Money.rs(expenses)}',
+        if (tomorrow.isNotEmpty) 'Tomorrow: ${tomorrow.take(3).map((x) => '${x['name']} ${Money.rs(asInt(x['amount']))}').join(', ')}',
+        if (reorder.isNotEmpty) 'Reorder: ${reorder.take(3).map((x) => '${x['name']} ×${x['need']}').join(', ')}',
       ].join('\n');
 
   /// Full text for WhatsApp.
@@ -105,14 +105,14 @@ class DailyReport {
       ..writeln('📊 *$shop — Daily Report*')
       ..writeln(prettyDate(day))
       ..writeln()
-      ..writeln('🧾 Bikri: *${Money.rs(sales)}* ($invoices bill, $items item)')
-      ..writeln('💰 Lav: *${Money.rs(profit)}* ($margin%)')
-      ..writeln('📥 Collection: ${Money.rs(collected)}')
-      ..writeln('📤 Khoroch: ${Money.rs(expenses)}${supplierPaid > 0 ? ' · supplier-ke ${Money.rs(supplierPaid)}' : ''}')
-      ..writeln('🛒 Purchase: ${Money.rs(purchases)}')
-      ..writeln('⏳ Aajker notun baki: ${Money.rs(newDue)} · mot baki ${Money.rs(totalDue)}');
-    if (prevSales > 0 || sales > 0) b.writeln('${change >= 0 ? '📈' : '📉'} Kal-er theke ${change.abs()}% ${change >= 0 ? 'beshi' : 'kom'}');
-    if (best != null) b.writeln('🔥 Best: $best');
+      ..writeln('🧾 Sales: *${Money.rs(sales)}* ($invoices bill, $items item)')
+      ..writeln('💰 Profit: *${Money.rs(profit)}* ($margin%)')
+      ..writeln('📥 Collected: ${Money.rs(collected)}')
+      ..writeln('📤 Expenses: ${Money.rs(expenses)}${supplierPaid > 0 ? ' · paid to suppliers ${Money.rs(supplierPaid)}' : ''}')
+      ..writeln('🛒 Purchases: ${Money.rs(purchases)}')
+      ..writeln('⏳ New dues today: ${Money.rs(newDue)} · total dues ${Money.rs(totalDue)}');
+    if (prevSales > 0 || sales > 0) b.writeln('${change >= 0 ? '📈' : '📉'} ${change.abs()}% ${change >= 0 ? 'up' : 'down'} on yesterday');
+    if (best != null) b.writeln('🔥 Best seller: $best');
     if (cash.isNotEmpty) {
       b
         ..writeln()
@@ -121,7 +121,7 @@ class DailyReport {
     if (tomorrow.isNotEmpty) {
       b
         ..writeln()
-        ..writeln('📅 *Kal collect / pay:*');
+        ..writeln('📅 *Due tomorrow:*');
       for (final x in tomorrow.take(8)) {
         b.writeln('• ${x['name']} — ${Money.rs(asInt(x['amount']))} ${x['what']}${x['late'] == true ? ' (late)' : ''}');
       }
@@ -129,9 +129,9 @@ class DailyReport {
     if (reorder.isNotEmpty) {
       b
         ..writeln()
-        ..writeln('📦 *Order korte hobe:*');
+        ..writeln('📦 *To reorder:*');
       for (final x in reorder.take(8)) {
-        b.writeln('• ${x['name']} — ${x['need']} ta (stock ${x['stock']}${x['days'] == null ? '' : ', ~${x['days']} din cholbe'})');
+        b.writeln('• ${x['name']} — ${x['need']} pcs (stock ${x['stock']}${x['days'] == null ? '' : ', lasts ~${x['days']} days'})');
       }
     }
     b
@@ -170,13 +170,13 @@ class DailyReport {
       final today = await load(now);
       final todayAt = DateTime(now.year, now.month, now.day, h, m);
       if (todayAt.isAfter(now)) {
-        await Alarms.scheduleDaily(0, todayAt, '📊 Aajker report · ${today.headline()}', today.body());
+        await Alarms.scheduleDaily(0, todayAt, '📊 Today\'s report · ${today.headline()}', today.body());
       }
       // tomorrow's, in case the app is not opened tomorrow
       final tm = now.add(const Duration(days: 1));
       final next = await load(tm);
-      await Alarms.scheduleDaily(1, DateTime(tm.year, tm.month, tm.day, h, m), '📊 Aajker report · ${next.headline()}',
-          next.body().isEmpty ? 'App khule aajker hisab dekhun' : next.body());
+      await Alarms.scheduleDaily(1, DateTime(tm.year, tm.month, tm.day, h, m), '📊 Today\'s report · ${next.headline()}',
+          next.body().isEmpty ? 'Open the app to see today\'s numbers' : next.body());
     } catch (_) {
       // a report is a convenience; never disturb the app
     }

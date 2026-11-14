@@ -22,12 +22,12 @@ TextStyle _j(double s, FontWeight w, Color c) => TextStyle(fontFamily: 'Jakarta'
 String _d(DateTime? d) => d == null ? '—' : '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
 
 String _ago(DateTime? d) {
-  if (d == null) return 'kokhono na';
+  if (d == null) return 'never';
   final m = DateTime.now().difference(d).inMinutes;
-  if (m < 2) return 'ekhoni';
-  if (m < 60) return '$m min age';
-  if (m < 60 * 24) return '${m ~/ 60} ghonta age';
-  return '${m ~/ (60 * 24)} din age';
+  if (m < 2) return 'just now';
+  if (m < 60) return '$m min ago';
+  if (m < 60 * 24) return '${m ~/ 60} h ago';
+  return '${m ~/ (60 * 24)} days ago';
 }
 
 /// Hisab AI admin panel: every account, plans, requests and revenue.
@@ -124,15 +124,15 @@ class _AdminScreenState extends State<AdminScreen> {
               Row(children: [
                 const Icon(Icons.shield_rounded, color: Color(0xFFFFE08A), size: 18),
                 const SizedBox(width: 6),
-                Text('Mashik ay (MRR)', style: _j(12.5, FontWeight.w600, const Color(0xD9FFFFFF))),
+                Text('Monthly revenue (MRR)', style: _j(12.5, FontWeight.w600, const Color(0xD9FFFFFF))),
               ]),
               Text('₹$mrr', style: _j(32, FontWeight.w800, Colors.white)),
-              Text('${paid.length} paid · bochore ~₹${mrr * 12}', style: _j(12, FontWeight.w600, const Color(0xD9FFFFFF))),
+              Text('${paid.length} paid · ~₹${mrr * 12} a year', style: _j(12, FontWeight.w600, const Color(0xD9FFFFFF))),
               const SizedBox(height: 14),
               Row(children: [
-                _hs('Mot user', '${accounts.length}'),
-                _hs('7 dine active', '$activeWeek'),
-                _hs('Request', '${pending.length}', hot: pending.isNotEmpty),
+                _hs('Users', '${accounts.length}'),
+                _hs('Active 7 days', '$activeWeek'),
+                _hs('Requests', '${pending.length}', hot: pending.isNotEmpty),
               ]),
             ]),
           ),
@@ -179,13 +179,13 @@ class _AdminScreenState extends State<AdminScreen> {
           ],
           if (pending.isNotEmpty) ...[
             const SizedBox(height: 16),
-            Text('Plan request · ${pending.length}', style: _j(15, FontWeight.w800, _ink)),
+            Text('Plan requests · ${pending.length}', style: _j(15, FontWeight.w800, _ink)),
             const SizedBox(height: 8),
             for (final r in pending) _requestCard(r),
           ],
           if (ending.isNotEmpty) ...[
             const SizedBox(height: 16),
-            Text('Shiggiri shesh hobe · ${ending.length}', style: _j(15, FontWeight.w800, _ink)),
+            Text('Expiring soon · ${ending.length}', style: _j(15, FontWeight.w800, _ink)),
             const SizedBox(height: 8),
             for (final a in ending.take(5)) _userCard(a),
           ],
@@ -194,7 +194,7 @@ class _AdminScreenState extends State<AdminScreen> {
             onChanged: (v) => setState(() => q = v),
             decoration: InputDecoration(
               prefixIcon: const Icon(Icons.search_rounded),
-              hintText: 'Email, naam, dokan, phone…',
+              hintText: 'Email, name, shop, phone…',
               filled: true,
               fillColor: Colors.white,
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: const BorderSide(color: _line)),
@@ -205,7 +205,7 @@ class _AdminScreenState extends State<AdminScreen> {
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(children: [
-              for (final t in const [('all', 'Shob'), ('paid', 'Paid'), ('trial', 'Trial'), ('expired', 'Expired'), ('blocked', 'Blocked')])
+              for (final t in const [('all', 'All'), ('paid', 'Paid'), ('trial', 'Trial'), ('expired', 'Expired'), ('blocked', 'Blocked')])
                 GestureDetector(
                   onTap: () => setState(() => tab = t.$1),
                   child: Container(
@@ -222,7 +222,7 @@ class _AdminScreenState extends State<AdminScreen> {
             ]),
           ),
           const SizedBox(height: 10),
-          if (shown.isEmpty) const EmptyState('Kono account nei'),
+          if (shown.isEmpty) const EmptyState('No accounts'),
           for (final a in shown) _userCard(a),
           const SizedBox(height: 40),
         ],
@@ -280,7 +280,7 @@ class _AdminScreenState extends State<AdminScreen> {
                 try {
                   await Accounts.approve(r, _acc(r.uid));
                   HapticFeedback.heavyImpact();
-                  if (mounted) toast(context, '${r.email} — ${p?.name} ${r.months} mash chalu');
+                  if (mounted) toast(context, '${r.email} — ${p?.name} active for ${r.months} months');
                 } catch (e) {
                   if (mounted) toast(context, '$e', error: true);
                 }
@@ -315,7 +315,7 @@ class _AdminScreenState extends State<AdminScreen> {
         isThreeLine: true,
         trailing: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [
           Text(a.status, style: _j(12, FontWeight.w800, a.blocked || !a.active ? _red : (planColors[a.plan] ?? planColors['premium']!).last)),
-          if (left != null && a.active) Text('$left din', style: _j(11, FontWeight.w700, left <= 5 ? _amber : _muted)),
+          if (left != null && a.active) Text('$left days', style: _j(11, FontWeight.w700, left <= 5 ? _amber : _muted)),
         ]),
         onTap: () => _edit(a),
       ),
@@ -342,7 +342,7 @@ class _AdminScreenState extends State<AdminScreen> {
               Text(a.shop.isNotEmpty ? a.shop : a.email, style: _j(18, FontWeight.w800, _ink)),
               Text('${a.name.isEmpty ? '' : '${a.name} · '}${a.email}', style: _j(12.5, FontWeight.w600, _muted)),
               const SizedBox(height: 4),
-              Text('Ekhon: ${a.status} · shesh ${_d(a.until)} · join ${_d(a.created)}', style: _j(12, FontWeight.w700, _ink)),
+              Text('Now: ${a.status} · ends ${_d(a.until)} · joined ${_d(a.created)}', style: _j(12, FontWeight.w700, _ink)),
               if (a.pending != null) Text('Request: ${a.pending}', style: _j(12, FontWeight.w800, _amber)),
               const SizedBox(height: 14),
               Text('Plan', style: _j(12.5, FontWeight.w700, _muted)),
@@ -352,13 +352,13 @@ class _AdminScreenState extends State<AdminScreen> {
                   ChoiceChip(label: Text(p.$2), selected: plan == p.$1, onSelected: (_) => set(() => plan = p.$1)),
               ]),
               const SizedBox(height: 10),
-              Text('Koto din', style: _j(12.5, FontWeight.w700, _muted)),
+              Text('Duration', style: _j(12.5, FontWeight.w700, _muted)),
               const SizedBox(height: 6),
               Wrap(spacing: 6, children: [
-                for (final m in const [1, 3, 6, 12, 24]) ChoiceChip(label: Text(plan == 'trial' ? '${m * 7} din' : '$m mash'), selected: months == m, onSelected: (_) => set(() => months = m)),
+                for (final m in const [1, 3, 6, 12, 24]) ChoiceChip(label: Text(plan == 'trial' ? '${m * 7} days' : '$m months'), selected: months == m, onSelected: (_) => set(() => months = m)),
               ]),
               const SizedBox(height: 10),
-              TextField(controller: note, decoration: const InputDecoration(labelText: 'Admin note (shudhu apni dekhben)')),
+              TextField(controller: note, decoration: const InputDecoration(labelText: 'Admin note (only you can see it)')),
               const SizedBox(height: 14),
               Row(children: [
                 if (a.phone.isNotEmpty)
@@ -386,13 +386,13 @@ class _AdminScreenState extends State<AdminScreen> {
                         final until = plan == 'trial' ? DateTime.now().add(Duration(days: 7 * months)) : addMonths(start, months);
                         await Accounts.setPlan(a.uid, plan, until);
                         if (note.text != a.note) await Accounts.setNote(a.uid, note.text);
-                        if (mounted) toast(context, 'Plan set: ${planById(plan)?.name ?? 'Trial'} · ${_d(until)} porjonto');
+                        if (mounted) toast(context, 'Plan set: ${planById(plan)?.name ?? 'Trial'} · until ${_d(until)}');
                       } catch (e) {
                         if (mounted) toast(context, '$e', error: true);
                       }
                       _load();
                     },
-                    child: const Text('Plan set korun'),
+                    child: const Text('Set plan'),
                   ),
                 ),
               ]),
@@ -408,18 +408,18 @@ class _AdminScreenState extends State<AdminScreen> {
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(color: const Color(0xFFFDECEC), borderRadius: BorderRadius.circular(18)),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Admin access nei', style: _j(16, FontWeight.w800, _red)),
+          Text('No admin access', style: _j(16, FontWeight.w800, _red)),
           const SizedBox(height: 6),
-          Text('$e\n\nFirebase → Firestore → Rules-e Hisab AI-er rules paste korun, ADMIN_EMAIL-er jaygay apnar admin email din, Publish korun.',
+          Text('$e\n\nIn Firebase → Firestore → Rules, paste the Hisab AI rules, put your admin email in place of ADMIN_EMAIL and press Publish.',
               style: _j(12.5, FontWeight.w600, _ink)),
           const SizedBox(height: 10),
           OutlinedButton.icon(
             onPressed: () async {
               await Clipboard.setData(const ClipboardData(text: firestoreRules));
-              if (mounted) toast(context, 'Rules copy hoyeche — Firebase-e paste korun');
+              if (mounted) toast(context, 'Rules copied — paste them in Firebase');
             },
             icon: const Icon(Icons.copy_rounded),
-            label: const Text('Rules copy korun'),
+            label: const Text('Copy rules'),
           ),
         ]),
       );

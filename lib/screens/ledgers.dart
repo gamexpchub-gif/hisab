@@ -149,7 +149,7 @@ class _LedgersScreenState extends State<LedgersScreen> {
                   Expanded(
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Text('Ledger · Khata', style: _j(22, FontWeight.w800, _navy)),
-                      Text('Udhar given & taken — who, when, why', style: _j(12, FontWeight.w600, const Color(0xFF323B60))),
+                      Text('Credit given & taken — who, when, why', style: _j(12, FontWeight.w600, const Color(0xFF323B60))),
                     ]),
                   ),
                 ]),
@@ -387,8 +387,8 @@ class _LedgersScreenState extends State<LedgersScreen> {
         child: Row(children: [
           for (final f in const [
             ('all', 'All entries'),
-            ('goods', 'Goods udhar'),
-            ('cash', 'Cash udhar'),
+            ('goods', 'Goods on credit'),
+            ('cash', 'Cash lent'),
             ('received', 'Received'),
             ('suppliers', 'Suppliers'),
           ]) ...[

@@ -33,9 +33,9 @@ class PlanDef {
 }
 
 const plans = [
-  PlanDef('basic', 'Basic', 'Choto dokan shuru korar jonno', 199, 1999, 1, 60, 300, 1),
-  PlanDef('gold', 'Gold', 'Barte thaka business-er jonno', 599, 6999, 2, 500, 3000, 3),
-  PlanDef('premium', 'Premium', 'Shob feature, kono limit nei', 999, 9999, 3, 0, 0, 10),
+  PlanDef('basic', 'Basic', 'For small shops getting started', 199, 1999, 1, 60, 300, 1),
+  PlanDef('gold', 'Gold', 'For growing businesses', 599, 6999, 2, 500, 3000, 3),
+  PlanDef('premium', 'Premium', 'Every feature, no limits', 999, 9999, 3, 0, 0, 10),
 ];
 
 PlanDef? planById(String? id) => plans.where((x) => x.id == id).firstOrNull;
@@ -62,7 +62,7 @@ const features = [
   Feature('dashboard', 'Dashboard & home stats', 1),
   // Gold (tier 2)
   Feature('returns', 'Sale return', 2),
-  Feature('emi', 'EMI / kisti tracker', 2),
+  Feature('emi', 'EMI / instalment tracker', 2),
   Feature('imei', 'IMEI & warranty', 2),
   Feature('labels', 'Barcode label print', 2),
   Feature('whatsapp', 'WhatsApp reminder', 2),
@@ -87,7 +87,7 @@ const features = [
   Feature('stores10', 'Up to 10 stores', 3),
   Feature('loan_alarm', 'Loan EMI alarm', 3),
   Feature('priority', 'Priority support', 3),
-  Feature('early', 'Notun feature shobar age', 3),
+  Feature('early', 'Early access to new features', 3),
 ];
 
 int featurePercent(int tier) => (features.where((f) => f.tier <= tier).length * 100 / features.length).round();
@@ -172,11 +172,11 @@ class Sub {
   /// Used by Books before a new product or sale is saved.
   static Future<void> guard(String action) async {
     if (admin) return;
-    if (blocked) throw PlanLimitError('Ei account block kora — admin-er sathe jogajog korun');
+    if (blocked) throw PlanLimitError('This account is blocked — please contact support');
     if (!active) {
       throw PlanLimitError(plan == 'trial'
-          ? 'Free trial shesh — notun ${action == 'product' ? 'product' : 'bill'} korte plan nin (Menu → Plans)'
-          : '$label plan-er meyad shesh — renew korun (Menu → Plans)');
+          ? 'Your free trial has ended — choose a plan to add a new ${action == 'product' ? 'product' : 'bill'} (Menu → Plans)'
+          : 'Your $label plan has expired — renew to continue (Menu → Plans)');
     }
     final d = def;
     if (d == null) return;
@@ -184,12 +184,12 @@ class Sub {
     if (action == 'product' && d.products > 0) {
       final n = asInt((await Books.query('SELECT COUNT(*) AS c FROM products WHERE substr(created_at, 1, 10) >= ?', [since])).first['c']);
       if (n >= d.products) {
-        throw PlanLimitError('${d.name} plan-e 30 dine ${d.products} ta product — ${n >= d.products ? 'limit shesh' : ''}. Gold/Premium-e upgrade korun');
+        throw PlanLimitError('${d.name} plan allows ${d.products} new products every 30 days — limit reached. Upgrade to Gold or Premium');
       }
     }
     if (action == 'sale' && d.sales > 0) {
       final n = asInt((await Books.query('SELECT COUNT(*) AS c FROM sales WHERE date >= ?', [since])).first['c']);
-      if (n >= d.sales) throw PlanLimitError('${d.name} plan-e 30 dine ${d.sales} ta bill — limit shesh. Upgrade korun');
+      if (n >= d.sales) throw PlanLimitError('${d.name} plan allows ${d.sales} bills every 30 days — limit reached. Upgrade your plan');
     }
   }
 

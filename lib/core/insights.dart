@@ -39,18 +39,18 @@ class Insights {
 
   /// WhatsApp text for a payment promised on [date].
   static String dueMessage(Map<String, String> s, String name, int amount, String date, {bool overdue = false}) =>
-      'Namaskar $name 🙏\n${_shop(s)} theke mone korano hocche — apnar ${Money.rs(amount)} '
-      '${overdue ? 'debar tarikh ${prettyDate(date)} periye geche' : 'debar tarikh ${prettyDate(date)}'}.'
-      '${_upi(s)}\nDoya kore somoy moto pay korun. Dhonnobad!\n— ${_shop(s)}${(s['phone'] ?? '').isEmpty ? '' : ', ${s['phone']}'}';
+      'Hello $name 🙏\nA reminder from ${_shop(s)} — your payment of ${Money.rs(amount)} '
+      '${overdue ? 'was due on ${prettyDate(date)}' : 'is due on ${prettyDate(date)}'}.'
+      '${_upi(s)}\nPlease pay on time. Thank you!\n— ${_shop(s)}${(s['phone'] ?? '').isEmpty ? '' : ', ${s['phone']}'}';
 
   static String emiMessage(Map<String, String> s, String name, int amount, String date, String product, int n, int months) =>
-      'Namaskar $name 🙏\n$product-er EMI kisti $n/$months — ${Money.rs(amount)}, tarikh ${prettyDate(date)}.'
-      '${_upi(s)}\nSomoy moto jama korle late charge lagbe na. Dhonnobad!\n— ${_shop(s)}';
+      'Hello $name 🙏\nYour $product EMI $n/$months — ${Money.rs(amount)}, due ${prettyDate(date)}.'
+      '${_upi(s)}\nPay on time to avoid late charges. Thank you!\n— ${_shop(s)}';
 
   static String warrantyMessage(Map<String, String> s, String name, String device, int daysLeft) =>
-      'Namaskar $name 🙏\nApnar $device-er warranty ${daysLeft <= 0 ? 'shesh hoye geche' : '$daysLeft din-e shesh hobe'}. '
-      'Kono somossa thakle ekhoni ${_shop(s)}-e niye ashun — free check-up kore debo. '
-      'Extended warranty, accessories ar exchange offer-o ache!\n— ${_shop(s)}';
+      'Hello $name 🙏\nThe warranty on your $device ${daysLeft <= 0 ? 'has ended' : 'ends in $daysLeft days'}. '
+      'Bring it to ${_shop(s)} for a free check-up if anything is wrong. '
+      'Extended warranty, accessories and exchange offers available!\n— ${_shop(s)}';
 
   static Future<List<Insight>> build({DateTime? now}) async {
     final out = <Insight>[];
@@ -66,13 +66,13 @@ class Insights {
       final amt = asInt(d['amount']);
       final name = '${d['party'] ?? 'Party'}';
       final over = date.compareTo(today) < 0;
-      final when = over ? '${t0.difference(DateTime.parse(date)).inDays} din late' : date == today ? 'aaj' : 'kal';
+      final when = over ? '${t0.difference(DateTime.parse(date)).inDays} days late' : date == today ? 'today' : 'tomorrow';
       out.add(Insight(
         over || date == today ? 'urgent' : 'warn',
         'due',
-        isC ? '$name — ${Money.rs(amt)} collect korun ($when)' : '$name-ke ${Money.rs(amt)} dite hobe ($when)',
-        '${(d['note'] ?? '').toString().isEmpty ? 'Payment' : d['note']} · tarikh ${prettyDate(date)}'
-            '${isC ? ' · WhatsApp-e mone koran' : ''}',
+        isC ? 'Collect ${Money.rs(amt)} from $name ($when)' : 'Pay ${Money.rs(amt)} to $name ($when)',
+        '${(d['note'] ?? '').toString().isEmpty ? 'Payment' : d['note']} · due ${prettyDate(date)}'
+            '${isC ? ' · remind on WhatsApp' : ''}',
         amount: amt,
         phone: d['phone'] as String?,
         message: isC ? dueMessage(s, name, amt, date, overdue: over) : null,
@@ -93,8 +93,8 @@ class Insights {
       out.add(Insight(
         over || date == today ? 'urgent' : 'warn',
         'emi',
-        '${i['customer']} — EMI ${Money.rs(left)} ${over ? 'overdue' : date == today ? 'aaj' : 'kal'}',
-        '${i['product'] ?? 'EMI'} · kisti ${i['n']}/${i['months']} · ${prettyDate(date)}',
+        '${i['customer']} — EMI ${Money.rs(left)} ${over ? 'overdue' : date == today ? 'today' : 'tomorrow'}',
+        '${i['product'] ?? 'EMI'} · instalment ${i['n']}/${i['months']} · ${prettyDate(date)}',
         amount: left,
         phone: i['phone'] as String?,
         message: emiMessage(s, '${i['customer']}', left, date, '${i['product'] ?? 'Phone'}', asInt(i['n']), asInt(i['months'])),
@@ -112,7 +112,7 @@ class Insights {
         over || next == today ? 'urgent' : 'warn',
         'loan',
         'Loan EMI ${Money.rs(asInt(l['next_emi']))} — ${l['lender']}',
-        '${over ? 'Late! ' : ''}Tarikh ${prettyDate(next)} · account-e taka rakhun',
+        '${over ? 'Late! ' : ''}Due ${prettyDate(next)} · keep funds in the account',
         amount: asInt(l['next_emi']),
         target: 'loan',
         targetId: asInt(l['id']),
@@ -135,8 +135,8 @@ class Insights {
       }
       old.sort((a, b) => b.$2.compareTo(a.$2));
       for (final (c, b, days) in old.take(3)) {
-        out.add(Insight('warn', 'collect', '${c['name']}-er ${Money.rs(b)} $days din dhore baki',
-            'Kono tarikh set nei — WhatsApp reminder pathan ba debar tarikh set korun',
+        out.add(Insight('warn', 'collect', '${c['name']} owes ${Money.rs(b)} for $days days',
+            'No due date set — send a WhatsApp reminder or set a date',
             amount: b,
             phone: c['phone'] as String?,
             message: dueMessage(s, '${c['name']}', b, today),
@@ -149,8 +149,8 @@ class Insights {
     for (final w in (await Books.warrantyEndingSoon(days: 7)).take(3)) {
       final left = w.warrantyDaysLeft ?? 0;
       final name = '${w.sale?['party'] ?? 'Customer'}';
-      out.add(Insight('info', 'warranty', '${w.name} — warranty ${left <= 0 ? 'shesh' : '$left din baki'}',
-          '$name · ${w.serial} · service / extended warranty offer korun',
+      out.add(Insight('info', 'warranty', '${w.name} — warranty ${left <= 0 ? 'ended' : 'ends in $left days'}',
+          '$name · ${w.serial} · offer service or extended warranty',
           phone: w.sale?['phone'] as String?,
           message: warrantyMessage(s, name, w.name, left),
           target: w.sale?['party_id'] == null ? null : 'customer',
@@ -169,9 +169,9 @@ class Insights {
       out.add(Insight(
         hot.isNotEmpty ? 'urgent' : 'warn',
         'stock',
-        low.length == 1 ? '${top['name']} — matro ${top['stock']} ta ache' : '${low.length} ta product shesh hoye asche',
+        low.length == 1 ? '${top['name']} — only ${top['stock']} left' : '${low.length} products running low',
         sold > 0
-            ? '${top['name']} mashe $sold ta bikri hoy — ekhoni order din (${(sold / 30 * 7).ceil()}+ ta 1 shoptaher jonno)'
+            ? '${top['name']} sells $sold a month — reorder now (${(sold / 30 * 7).ceil()}+ for a week)'
             : low.take(3).map((p) => '${p['name']} (${p['stock']})').join(', '),
         target: low.length == 1 ? 'product' : 'low',
         targetId: asInt(top['id']),
@@ -187,8 +187,8 @@ class Insights {
         [since, since]);
     if (dead.isNotEmpty) {
       final value = dead.fold<int>(0, (a, p) => a + asInt(p['stock']) * asInt(p['cost']));
-      out.add(Insight('warn', 'dead', '${Money.rs(value)} er maal 60 din dhore bikri hoyni',
-          '${dead.take(2).map((p) => p['name']).join(', ')}${dead.length > 2 ? ' + ${dead.length - 2} more' : ''} · offer / discount diye bechun',
+      out.add(Insight('warn', 'dead', '${Money.rs(value)} of stock unsold for 60 days',
+          '${dead.take(2).map((p) => p['name']).join(', ')}${dead.length > 2 ? ' + ${dead.length - 2} more' : ''} · clear it with an offer or discount',
           amount: value, target: dead.length == 1 ? 'product' : null, targetId: asInt(dead.first['id'])));
     }
 
@@ -200,8 +200,8 @@ class Insights {
         [week]);
     if (loss.isNotEmpty) {
       final lost = loss.fold<int>(0, (a, l) => a - asInt(l['p']));
-      out.add(Insight('warn', 'loss', '${loss.length} ta item kena damer niche bikri hoyeche',
-          '${loss.first['name']} (${loss.first['number']}) · e shoptahe loss ${Money.rs(lost)} · price check korun',
+      out.add(Insight('warn', 'loss', '${loss.length} items sold below cost',
+          '${loss.first['name']} (${loss.first['number']}) · loss this week ${Money.rs(lost)} · check prices',
           amount: lost, target: 'sale', targetId: asInt(loss.first['sale_id'])));
     }
 
@@ -213,7 +213,7 @@ class Insights {
     if (best.isNotEmpty && asInt(best.first['q']) >= 2) {
       final b = best.first;
       out.add(Insight('good', 'best', 'Best seller: ${b['name']}',
-          'Ei shoptahe ${b['q']} ta bikri · lav ${Money.rs(asInt(b['profit']))} · stock-e rakhun',
+          '${b['q']} sold this week · profit ${Money.rs(asInt(b['profit']))} · keep it in stock',
           target: 'product', targetId: asInt(b['product_id'])));
     }
 
@@ -227,9 +227,9 @@ class Insights {
       out.add(Insight(
         pc >= 0 ? 'good' : 'warn',
         'trend',
-        pc >= 0 ? 'Bikri ${pc.abs()}% bereche 📈' : 'Bikri ${pc.abs()}% kome geche',
-        'Shesh 7 din ${Money.rs(cur)} · tar ager 7 din ${Money.rs(prev)}'
-            '${pc < 0 ? ' · purono customer-der offer pathan' : ''}',
+        pc >= 0 ? 'Sales up ${pc.abs()}% 📈' : 'Sales down ${pc.abs()}%',
+        'Last 7 days ${Money.rs(cur)} · 7 days before ${Money.rs(prev)}'
+            '${pc < 0 ? ' · send an offer to past customers' : ''}',
         amount: cur,
       ));
     }
@@ -244,8 +244,8 @@ class Insights {
     final rev = asInt(m['rev']), cost = asInt(m['cost']);
     if (rev > 0) {
       final pct = ((rev - cost) * 100 / rev).round();
-      out.add(Insight(pct < 8 ? 'warn' : 'info', 'margin', 'E mashe gross margin $pct%',
-          'Bikri ${Money.rs(rev)} · lav ${Money.rs(rev - cost)}${pct < 8 ? ' · margin kom — accessories/combo bechun' : ''}',
+      out.add(Insight(pct < 8 ? 'warn' : 'info', 'margin', 'Gross margin this month $pct%',
+          'Sales ${Money.rs(rev)} · profit ${Money.rs(rev - cost)}${pct < 8 ? ' · low margin — sell accessories and combos' : ''}',
           amount: rev - cost));
     }
 
@@ -253,8 +253,8 @@ class Insights {
     final todaySales = await sum(today, today);
     final avg = (await sum(ymd(t0.subtract(const Duration(days: 30))), ymd(t0.subtract(const Duration(days: 1))))) ~/ 30;
     if (todaySales > 0 && avg > 0 && todaySales > avg) {
-      out.add(Insight('good', 'today', 'Aaj darun din! ${Money.rs(todaySales)} bikri',
-          'Dainik gor ${Money.rs(avg)} theke ${Books.pctChange(todaySales, avg)}% beshi', amount: todaySales));
+      out.add(Insight('good', 'today', 'Great day! ${Money.rs(todaySales)} in sales',
+          '${Books.pctChange(todaySales, avg)}% above the daily average of ${Money.rs(avg)}', amount: todaySales));
     }
 
     out.sort((a, b) => a.rank.compareTo(b.rank));

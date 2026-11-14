@@ -485,7 +485,6 @@ class _BulkReminderSheet extends StatefulWidget {
 
 class _BulkReminderSheetState extends State<_BulkReminderSheet> {
   final sent = <int>{};
-  bool bangla = false;
 
   @override
   Widget build(BuildContext context) {
@@ -508,14 +507,6 @@ class _BulkReminderSheetState extends State<_BulkReminderSheet> {
                   Text('Payment reminders', style: _j(18, FontWeight.w800, _navy)),
                   Text('${sent.length} of ${list.length} sent · tone picked by due age', style: _j(12, FontWeight.w500, _muted)),
                 ]),
-              ),
-              GestureDetector(
-                onTap: () => setState(() => bangla = !bangla),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(color: const Color(0xFFE7F8EE), borderRadius: BorderRadius.circular(12)),
-                  child: Text(bangla ? 'বাংলা' : 'English', style: const TextStyle(fontWeight: FontWeight.w800, color: Color(0xFF075E54))),
-                ),
               ),
             ]),
           ),
@@ -547,14 +538,14 @@ class _BulkReminderSheetState extends State<_BulkReminderSheet> {
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(c['name'] as String, style: _j(13.5, FontWeight.w800, _ink)),
-            Text('${Money.rs(due)} · ${days}d · ${Reminders.label(tone, bangla: bangla)}',
+            Text('${Money.rs(due)} · ${days}d · ${Reminders.label(tone)}',
                 style: _j(11.5, FontWeight.w600, days > 60 ? _red : days > 30 ? _amber : _muted)),
           ]),
         ),
         GestureDetector(
           onTap: () async {
             final msg = Reminders.message(
-                tone: tone, bangla: bangla, name: c['name'] as String, due: due, days: days, settings: widget.settings);
+                tone: tone, name: c['name'] as String, due: due, days: days, settings: widget.settings);
             await Contact.whatsapp(c['phone'] as String?, msg);
             await Books.logReminder('customer', id, c['name'] as String, 'WhatsApp');
             if (mounted) setState(() => sent.add(id));
