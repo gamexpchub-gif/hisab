@@ -165,13 +165,13 @@ tbody tr:hover{background:#FAF8FF}
   <form class="login-card" id="loginForm" autocomplete="on">
     <div class="logo">
       <img src="icon.png" alt="">
-      <div><h1>Hisab <span>AI</span> Admin</h1><p>Sign in with your admin account</p></div>
+      <div><h1>Hisab <span>AI</span> Admin</h1><p>Sign in with your admin ID</p></div>
     </div>
     <div id="loginErr" class="err hidden"></div>
-    <label class="field"><span>Email</span><input id="email" type="email" required autocomplete="username" placeholder="admin@example.com"></label>
+    <label class="field"><span>User ID</span><input id="email" type="text" required autocomplete="username" autocapitalize="off" spellcheck="false" placeholder="said8180"></label>
     <label class="field"><span>Password</span><input id="password" type="password" required autocomplete="current-password" placeholder="••••••••"></label>
     <button class="btn btn-primary btn-block" id="loginBtn" type="submit">Sign in</button>
-    <p style="margin-top:16px;text-align:center" class="muted">Only the admin email set in the Firestore rules can open this dashboard.</p>
+    <p style="margin-top:16px;text-align:center" class="muted">Only admins listed in the Firestore rules can open this dashboard.</p>
   </form>
 </section>
 
@@ -227,7 +227,9 @@ tbody tr:hover{background:#FAF8FF}
 const CONFIG = {
   apiKey: 'AIzaSyAk1N6Aw3BJk50Tsw2Z_KPDfQzJlC-5GIU',
   projectId: 'hisab-a7fcd',
+  idDomain: 'deencircle.online', // a User ID like "said8180" signs in as said8180@deencircle.online
 };
+const loginEmail = id => { id = id.trim().toLowerCase(); return id.includes('@') ? id : `${id}@${CONFIG.idDomain}`; };
 const PLANS = [
   { id: 'basic', name: 'Basic', price: 199, yearly: 1999, color: '#1A47C8', grad: 'linear-gradient(135deg,#6AA5FF,#1A47C8)', products: 60, sales: 300, stores: 1 },
   { id: 'gold', name: 'Gold', price: 599, yearly: 6999, color: '#E08A00', grad: 'linear-gradient(135deg,#FFC14D,#E08A00)', products: 500, sales: 3000, stores: 3 },
@@ -264,9 +266,9 @@ let session = store.get();
 function friendly(code) {
   const c = String(code || '').split(' ')[0].split(':')[0];
   return ({
-    EMAIL_NOT_FOUND: 'Wrong email or password', INVALID_PASSWORD: 'Wrong email or password', INVALID_LOGIN_CREDENTIALS: 'Wrong email or password',
+    EMAIL_NOT_FOUND: 'Wrong user ID or password', INVALID_PASSWORD: 'Wrong user ID or password', INVALID_LOGIN_CREDENTIALS: 'Wrong user ID or password',
     USER_DISABLED: 'This account is disabled', TOO_MANY_ATTEMPTS_TRY_LATER: 'Too many attempts — try again in a few minutes',
-    PERMISSION_DENIED: 'This account is not the admin (check ADMIN_EMAIL in the Firestore rules)', INVALID_EMAIL: 'Enter a valid email',
+    PERMISSION_DENIED: 'This account is not an admin (check the admin list in the Firestore rules)', INVALID_EMAIL: 'Enter a valid user ID',
   })[c] || ('Error: ' + code);
 }
 
@@ -645,14 +647,14 @@ function exportCsv() {
 function show(which) {
   $('#login').classList.toggle('hidden', which !== 'login');
   $('#app').classList.toggle('hidden', which !== 'app');
-  if (which === 'app') { $('#whoami').textContent = session?.email || ''; load(); }
+  if (which === 'app') { $('#whoami').textContent = (session?.email || '').replace('@' + CONFIG.idDomain, ''); load(); }
 }
 $('#loginForm').onsubmit = async e => {
   e.preventDefault();
   const btn = $('#loginBtn'), err = $('#loginErr');
   btn.disabled = true; btn.innerHTML = '<span class="spin"></span>'; err.classList.add('hidden');
   try {
-    await signIn($('#email').value.trim(), $('#password').value);
+    await signIn(loginEmail($('#email').value), $('#password').value);
     await call('GET', `${BASE}/accounts?pageSize=1`, null, await token()); // admin check
     show('app');
   } catch (ex) {

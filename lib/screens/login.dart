@@ -330,7 +330,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       keyboardType: TextInputType.emailAddress,
                       autofillHints: const [AutofillHints.email],
                       style: _j(15, FontWeight.w600, _ink),
-                      decoration: _deco('Email address', Icons.alternate_email_rounded),
+                      decoration: _deco(register ? 'Email address' : 'Email or user ID', Icons.alternate_email_rounded),
                     ),
                     const SizedBox(height: 12),
                     TextField(

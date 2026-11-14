@@ -257,13 +257,14 @@ class Accounts {
   }
 }
 
-/// Firestore rules for Hisab AI. Paste into Firebase → Firestore → Rules,
-/// with the admin's email in place of ADMIN_EMAIL.
+/// Firestore rules for Hisab AI. Paste into Firebase → Firestore → Rules.
+/// Admins: the User ID said8180 (signs in as said8180@deencircle.online) and
+/// optionally a second email in place of ADMIN_EMAIL.
 const firestoreRules = r'''rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
-    function isAdmin() { return signedIn() && request.auth.token.email == 'ADMIN_EMAIL'; }
+    function isAdmin() { return signedIn() && request.auth.token.email in ['said8180@deencircle.online', 'ADMIN_EMAIL']; }
 
     match /users/{uid}/{document=**} {
       allow read, write: if signedIn() && (request.auth.uid == uid || isAdmin());

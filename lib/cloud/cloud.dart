@@ -169,10 +169,18 @@ class Cloud {
     return user!;
   }
 
+  /// A User ID without '@' (e.g. an admin ID like "said8180") signs in as
+  /// <id>@[idDomain].
+  static const idDomain = 'deencircle.online';
+  static String loginEmail(String id) {
+    final t = id.trim().toLowerCase();
+    return t.contains('@') ? t : '$t@$idDomain';
+  }
+
   static Future<CloudUser> signIn(String email, String password) async {
     _need();
     final r = await _call('POST', _auth('signInWithPassword'),
-        body: {'email': email.trim(), 'password': password, 'returnSecureToken': true});
+        body: {'email': loginEmail(email), 'password': password, 'returnSecureToken': true});
     return _session(r);
   }
 
