@@ -1,0 +1,45 @@
+name: hisab
+description: GAMEX PC Hub — offline accounting, billing & inventory for Android.
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  sqflite: ^2.3.3
+  path: ^1.9.0
+  image_picker: ^1.1.2
+  path_provider: ^2.1.4
+  mobile_scanner: '>=7.5.0 <8.0.0'
+  qr_flutter: ^4.1.0
+  url_launcher: ^6.3.0
+  flutter_local_notifications: '>=17.2.0 <19.0.0'
+  timezone: '>=0.9.4 <0.11.0'
+  pdf: ^3.11.1
+  printing: ^5.13.4
+  archive: ^3.6.1
+  local_auth: '>=2.3.0 <3.0.0'
+  crypto: ^3.0.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  sqflite_common_ffi: ^2.3.3
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/home/
+    - assets/products/
+    - assets/pdf/
+  fonts:
+    - family: Montserrat
+      fonts:
+        - asset: assets/fonts/Montserrat.ttf
+    - family: Jakarta
+      fonts:
+        - asset: assets/fonts/PlusJakartaSans.ttf
