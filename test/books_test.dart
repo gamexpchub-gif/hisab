@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -9,6 +11,7 @@ import 'package:hisab/core/insights.dart';
 import 'package:hisab/core/daily_report.dart';
 import 'package:hisab/core/analytics.dart';
 import 'package:hisab/core/plan.dart';
+import 'package:hisab/core/stores.dart';
 import 'package:hisab/core/gst_report.dart';
 import 'package:hisab/core/xlsx.dart';
 import 'package:hisab/core/smart.dart';
@@ -605,6 +608,32 @@ void main() {
       Sub.plan = 'trial';
       Sub.until = null;
     }
+  });
+
+  test('Stores: the cloud list adds missing stores, deleted ones stay deleted', () async {
+    Stores.all
+      ..clear()
+      ..add(Store('main', 'Main', 'hisab.db', ''));
+    Stores.deleted.clear();
+    await Stores.mergeCloud(jsonEncode({
+      'stores': [
+        {'id': 'main', 'name': 'Main', 'file': 'hisab.db'},
+        {'id': 'b2', 'name': 'Branch 2', 'file': 'store_b2.db'},
+        {'id': 'b3', 'name': 'Branch 3', 'file': 'store_b3.db'},
+      ],
+      'deleted': ['old'],
+    }));
+    expect(Stores.all.map((s) => s.id).toList(), ['main', 'b2', 'b3']);
+    expect(jsonDecode(Stores.cloudJson())['stores'], hasLength(3));
+    await Stores.mergeCloud(jsonEncode({
+      'stores': [
+        {'id': 'old', 'name': 'Old', 'file': 'store_old.db'},
+      ],
+      'deleted': ['b3'],
+    }));
+    expect(Stores.all.map((s) => s.id).toList(), ['main', 'b2']);
+    Stores.all.clear();
+    Stores.deleted.clear();
   });
 
   test('demo data loads and balances', () async {

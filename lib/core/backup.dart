@@ -1,15 +1,19 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
+import 'package:flutter/widgets.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:sqflite/sqflite.dart' show getDatabasesPath;
 
 import '../cloud/cloud.dart';
 import 'books.dart';
 import 'db.dart';
 import 'money.dart';
 import 'plan.dart';
+import 'stores.dart';
 
 /// One backup file on the phone.
 class BackupFile {
@@ -96,23 +100,156 @@ class Backup {
     return file;
   }
 
-  /// Makes one automatic backup a day (called when the app opens).
-  static Future<void> autoDaily() async {
+  // ---------------------------------------------------------------- automatic backups
+  static bool _running = false;
+  static Timer? _timer;
+  static _AutoObserver? _observer;
+
+  /// Starts automatic backups: a few seconds after the app opens, every 30
+  /// minutes while it is open, and whenever it comes back to the foreground.
+  /// Each run only does what is due, so it is cheap.
+  static void startAuto() {
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(minutes: 30), (_) => autoRun());
+    if (_observer == null) {
+      _observer = _AutoObserver();
+      WidgetsBinding.instance.addObserver(_observer!);
+    }
+    Future<void>.delayed(const Duration(seconds: 8), autoRun);
+  }
+
+  static Future<File> _stateFile() async {
+    final d = await getApplicationSupportDirectory();
+    await d.create(recursive: true);
+    return File(p.join(d.path, 'auto_backup.json'));
+  }
+
+  /// {stores: {id: {local, cloud}}, status: {at, ok, msg}}
+  static Future<Map<String, dynamic>> autoState() async {
+    try {
+      final f = await _stateFile();
+      if (await f.exists()) return jsonDecode(await f.readAsString()) as Map<String, dynamic>;
+    } catch (_) {}
+    return {'stores': <String, dynamic>{}};
+  }
+
+  static Future<void> _saveState(Map<String, dynamic> st) async {
+    try {
+      await (await _stateFile()).writeAsString(jsonEncode(st));
+    } catch (_) {}
+  }
+
+  /// Records a cloud backup made by hand, so the automatic one is not repeated.
+  static Future<void> markCloud(String storeId) async {
+    final st = await autoState();
+    final stores = (st['stores'] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
+    final rec = (stores[storeId] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
+    rec['cloud'] = DateTime.now().toIso8601String();
+    stores[storeId] = rec;
+    st['stores'] = stores;
+    st['status'] = {'at': DateTime.now().toIso8601String(), 'ok': true, 'msg': 'Backed up to cloud'};
+    await _saveState(st);
+  }
+
+  /// One pass: a phone backup of the open store once a day, and a cloud
+  /// backup of every store (with data) every 20 hours when signed in.
+  static Future<void> autoRun() async {
+    if (_running) return;
+    _running = true;
+    final st = await autoState();
+    final stores = (st['stores'] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
+    final now = DateTime.now();
+    final did = <String>[];
     try {
       final s = await Books.settings();
-      if (s['auto_backup'] == '0') return;
-      final last = DateTime.tryParse(s['last_backup_at'] ?? '');
-      final now = DateTime.now();
-      if (last != null && last.year == now.year && last.month == now.month && last.day == now.day) return;
-      if (await phoneIsEmpty()) return; // nothing to protect yet
-      final f = await create(auto: true);
-      // and the same backup to the cloud when signed in
+      final localOn = s['auto_backup'] != '0';
       await Cloud.load();
-      if (Cloud.user != null && s['cloud_auto'] != '0' && Sub.can('cloud')) await Cloud.uploadBackup(f);
-    } catch (_) {
-      // a failed automatic backup must never stop the app
+      final cloudOn = Cloud.user != null && s['cloud_auto'] != '0' && Sub.can('cloud');
+      for (final store in List.of(Stores.all)) {
+        final rec = (stores[store.id] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
+        final lastLocal = DateTime.tryParse('${rec['local'] ?? ''}');
+        final lastCloud = DateTime.tryParse('${rec['cloud'] ?? ''}');
+        final active = store.id == Stores.current;
+        final needLocal = active && localOn && (lastLocal == null || !_sameDay(lastLocal, now));
+        final needCloud = cloudOn && (lastCloud == null || now.difference(lastCloud) >= const Duration(hours: 20));
+        if (!needLocal && !needCloud) continue;
+        File? f;
+        Map<String, int>? counts;
+        if (active) {
+          if (await phoneIsEmpty()) continue; // nothing to protect yet
+          f = await create(auto: true);
+          rec['local'] = now.toIso8601String();
+          if (needLocal) did.add('phone');
+        } else {
+          if (!needCloud) continue;
+          final made = await _zipStore(store);
+          if (made == null) continue;
+          (f, counts) = made;
+        }
+        if (needCloud) {
+          await Cloud.uploadBackup(f!, storeId: store.id, storeName: store.name, counts: counts, auto: true);
+          rec['cloud'] = now.toIso8601String();
+          did.add('cloud · ${store.name}');
+          if (!active) await f.delete().catchError((_) => f!);
+        }
+        stores[store.id] = rec;
+      }
+      st['stores'] = stores;
+      if (did.isNotEmpty) st['status'] = {'at': now.toIso8601String(), 'ok': true, 'msg': 'Backed up: ${did.join(', ')}'};
+    } catch (e) {
+      st['stores'] = stores;
+      st['status'] = {'at': now.toIso8601String(), 'ok': false, 'msg': '$e'};
+    } finally {
+      await _saveState(st);
+      _running = false;
     }
   }
+
+  static bool _sameDay(DateTime a, DateTime b) => a.year == b.year && a.month == b.month && a.day == b.day;
+
+  /// A backup zip of a store that is not open (its database file is idle).
+  static Future<(File, Map<String, int>)?> _zipStore(Store store) async {
+    final path = p.join(await getDatabasesPath(), store.file);
+    final src = File(path);
+    if (!await src.exists()) return null;
+    final counts = await Stores.counts();
+    final c = counts[store.id];
+    if (c == null || (c.$1 == 0 && c.$2 == 0)) return null;
+    final bytes = await src.readAsBytes();
+    if (bytes.length < 100 || ascii.decode(bytes.sublist(0, 15), allowInvalid: true) != _magic) return null;
+    final archive = Archive()..addFile(ArchiveFile('hisab.db', bytes.length, bytes));
+    final meta = utf8.encode(jsonEncode({
+      'app': 'Hisab AI',
+      'created': DateTime.now().toIso8601String(),
+      'schema': AppDb.schemaVersion,
+      'store': store.id,
+      'storeName': store.name,
+      'products': c.$1,
+      'sales': c.$2,
+    }));
+    archive.addFile(ArchiveFile('backup.json', meta.length, meta));
+    final zip = ZipEncoder().encode(archive) ?? (throw AccountingError('Could not create the backup file'));
+    final tmp = await getTemporaryDirectory();
+    final f = File(p.join(tmp.path, 'Hisab-AI-${store.id}-auto.zip'));
+    await f.writeAsBytes(zip, flush: true);
+    return (f, {'products': c.$1, 'sales': c.$2, 'customers': 0});
+  }
+
+  /// Backs up every store now (phone + cloud), ignoring the schedule.
+  static Future<void> forceAll() async {
+    final st = await autoState();
+    st['stores'] = <String, dynamic>{};
+    await _saveState(st);
+    while (_running) {
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    }
+    await autoRun();
+    final status = ((await autoState())['status'] as Map?)?.cast<String, dynamic>();
+    if (status != null && status['ok'] == false) throw AccountingError('${status['msg']}');
+  }
+
+  /// Kept for older callers: runs the automatic backup once.
+  static Future<void> autoDaily() => autoRun();
 
   /// Counts of what is on this phone now (to warn before a restore).
   static Future<Map<String, int>> localCounts() async {
@@ -192,4 +329,12 @@ class Backup {
   static String size(int bytes) => bytes < 1024 * 1024
       ? '${(bytes / 1024).toStringAsFixed(0)} KB'
       : '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+}
+
+/// Runs the automatic backup when the app comes back to the foreground.
+class _AutoObserver with WidgetsBindingObserver {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) Backup.autoRun();
+  }
 }

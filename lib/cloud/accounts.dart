@@ -133,6 +133,12 @@ class Accounts {
         admin = false;
       }
       await Sub.apply(plan: acc.plan, until: acc.until, admin: admin, blocked: acc.blocked, pending: acc.pending);
+      // stores made on other phones of this account
+      try {
+        final remote = await Cloud.loadStores();
+        if (remote != null) await Stores.mergeCloud(remote);
+        await Cloud.saveStores(Stores.cloudJson());
+      } catch (_) {}
       // usage for the admin panel
       final s = await Books.settings();
       final counts = await Stores.counts();

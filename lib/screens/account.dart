@@ -5,6 +5,7 @@ import '../cloud/cloud.dart';
 import '../core/backup.dart';
 import '../core/books.dart';
 import '../core/money.dart';
+import '../core/stores.dart';
 import '../ui/widgets.dart';
 import 'login.dart';
 import 'plans.dart';
@@ -49,6 +50,8 @@ class _AccountScreenState extends State<AccountScreen> {
   double? progress;
   String? progressText;
   Map<String, String> settings = {};
+  Map<String, dynamic> auto = {};
+  String storeFilter = 'all';
 
   @override
   void initState() {
@@ -59,8 +62,14 @@ class _AccountScreenState extends State<AccountScreen> {
   Future<void> _load() async {
     await Cloud.load();
     settings = await Books.settings();
+    auto = await Backup.autoState();
     if (mounted) setState(() {});
     if (Cloud.user == null) return;
+    try {
+      // stores made on other phones of this account
+      final remote = await Cloud.loadStores();
+      if (remote != null) await Stores.mergeCloud(remote);
+    } catch (_) {}
     try {
       final b = await Cloud.listBackups();
       if (!mounted) return;
@@ -99,6 +108,7 @@ class _AccountScreenState extends State<AccountScreen> {
         await Cloud.uploadBackup(f, progress: (v) {
           if (mounted) setState(() => progress = v);
         });
+        await Backup.markCloud(Stores.current);
         HapticFeedback.mediumImpact();
         if (mounted) toast(context, 'Backed up to cloud');
       });
@@ -112,8 +122,8 @@ class _AccountScreenState extends State<AccountScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
         icon: const Icon(Icons.cloud_download_rounded, color: Color(0xFF4318D2), size: 42),
         title: const Text('Restore from cloud?'),
-        content: Text('Backup of ${_when(b.created)} — ${b.sales} sales, ${b.products} products, ${b.customers} customers.\n\n'
-            '⚠️ This phone now has $here — all of it will be REPLACED by the backup.\n'
+        content: Text('Backup of ${_when(b.created)}${_storeOf(b).isEmpty ? '' : ' · store "${_storeOf(b)}"'} — ${b.sales} sales, ${b.products} products.\n\n'
+            '${b.store == Stores.current ? '⚠️ This store now has $here — all of it will be REPLACED by the backup.\n' : 'It is restored into the store "${_storeOf(b)}" on this phone (added if missing) and opened.\n'}'
             'A safety copy of the current data is saved first (Backup & Restore → Automatic).'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
@@ -126,6 +136,11 @@ class _AccountScreenState extends State<AccountScreen> {
       final f = await Cloud.downloadBackup(b, progress: (v) {
         if (mounted) setState(() => progress = v);
       });
+      // a backup belongs to a store: open (or add) that store first
+      if (b.store != Stores.current) {
+        final st = await Stores.ensure(b.store, b.storeName);
+        await Stores.switchTo(st.id);
+      }
       await Backup.restore(f);
       HapticFeedback.heavyImpact();
       if (mounted) toast(context, 'Books restored from cloud');
@@ -198,6 +213,8 @@ class _AccountScreenState extends State<AccountScreen> {
                   }),
                 ),
               ]),
+              const SizedBox(height: 10),
+              _autoStatus(),
               const SizedBox(height: 14),
               _list(),
               const SizedBox(height: 14),
@@ -327,62 +344,165 @@ class _AccountScreenState extends State<AccountScreen> {
         ),
       );
 
-  Widget _list() => Container(
-        padding: const EdgeInsets.fromLTRB(14, 14, 6, 6),
-        decoration: _card(),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Cloud backups', style: _j(15, FontWeight.w800, _ink)),
-          const SizedBox(height: 6),
-          if (listError != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 10),
-              child: Text(listError!, style: _j(12.5, FontWeight.w600, _red)),
-            )
-          else if (backups == null)
-            const Padding(padding: EdgeInsets.all(14), child: Center(child: CircularProgressIndicator()))
-          else if (backups!.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Text('No cloud backup yet — tap Backup now', style: _j(12.5, FontWeight.w600, _muted)),
+  String _storeOf(CloudBackup b) {
+    final here = Stores.all.where((s) => s.id == b.store).firstOrNull;
+    if (here != null) return here.name;
+    return b.storeName.isNotEmpty ? b.storeName : (b.store == 'main' ? 'Main store' : 'Store');
+  }
+
+  Widget _autoStatus() {
+    final st = (auto['status'] as Map?)?.cast<String, dynamic>();
+    final rec = ((auto['stores'] as Map?)?[Stores.current] as Map?)?.cast<String, dynamic>();
+    final lastCloud = DateTime.tryParse('${rec?['cloud'] ?? settings['last_cloud_backup_at'] ?? ''}');
+    final ok = st == null || st['ok'] == true;
+    final on = settings['cloud_auto'] != '0';
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: !on ? const Color(0xFFF1F2F9) : ok ? const Color(0xFFE9FBF2) : const Color(0xFFFDECEC),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(children: [
+        Icon(!on ? Icons.cloud_off_rounded : ok ? Icons.verified_rounded : Icons.error_outline_rounded,
+            color: !on ? _muted : ok ? const Color(0xFF16A36A) : _red),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(
+              !on
+                  ? 'Auto cloud backup is off'
+                  : lastCloud == null
+                      ? 'Auto cloud backup on · first backup soon'
+                      : 'Last cloud backup ${_when(lastCloud)}',
+              style: _j(13, FontWeight.w800, _ink),
             ),
-          for (final b in backups ?? const <CloudBackup>[])
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Row(children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(color: const Color(0xFFEDE7FF), borderRadius: BorderRadius.circular(12)),
-                  child: const Icon(Icons.cloud_rounded, color: Color(0xFF5B2EE0), size: 20),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(_when(b.created), style: _j(13, FontWeight.w700, _ink)),
-                    Text('${b.sales} sales · ${b.products} products · ${Backup.size(b.bytes)}${b.device.isEmpty ? '' : ' · ${b.device}'}',
-                        maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(11, FontWeight.w500, _muted)),
-                  ]),
-                ),
-                PopupMenuButton<String>(
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                  onSelected: (v) async {
-                    if (v == 'restore') await _restore(b);
-                    if (v == 'delete') {
-                      await runDelete(context,
-                          title: 'Delete this cloud backup?',
-                          message: 'The backup of ${_when(b.created)} is removed from the cloud.',
-                          action: () => Cloud.deleteBackup(b),
-                          popAfter: false);
-                      await _load();
-                    }
-                  },
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(value: 'restore', child: Text('Restore this backup')),
-                    PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: _red))),
-                  ],
-                ),
-              ]),
+            Text(
+              !on
+                  ? 'Turn it on to back up every store automatically'
+                  : ok
+                      ? 'Every store backs up about once a day while the app is used'
+                      : 'Last try failed: ${st['msg']}',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: _j(11.5, FontWeight.w600, ok ? _muted : _red),
             ),
+          ]),
+        ),
+        if (on)
+          TextButton(
+            onPressed: progress != null
+                ? null
+                : () => _job('Backing up every store…', () async {
+                      await Backup.forceAll();
+                      if (mounted) toast(context, 'All stores backed up to the cloud');
+                    }),
+            child: const Text('Run now'),
+          ),
+      ]),
+    );
+  }
+
+  Widget _list() {
+    final all = backups ?? const <CloudBackup>[];
+    final ids = <String>{for (final b in all) b.store};
+    final shown = storeFilter == 'all' ? all : all.where((b) => b.store == storeFilter).toList();
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 14, 6, 6),
+      decoration: _card(),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Expanded(child: Text('Cloud backups', style: _j(15, FontWeight.w800, _ink))),
+          Text('${all.length}', style: _j(12.5, FontWeight.w800, _muted)),
+          const SizedBox(width: 10),
         ]),
-      );
+        if (ids.length > 1) ...[
+          const SizedBox(height: 8),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(children: [
+              for (final id in ['all', ...ids])
+                GestureDetector(
+                  onTap: () => setState(() => storeFilter = id),
+                  child: Container(
+                    margin: const EdgeInsets.only(right: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: storeFilter == id ? const Color(0xFF4318D2) : const Color(0xFFF1F2F9),
+                      borderRadius: BorderRadius.circular(11),
+                    ),
+                    child: Text(id == 'all' ? 'All stores' : _storeOf(all.firstWhere((b) => b.store == id)),
+                        style: _j(12, FontWeight.w800, storeFilter == id ? Colors.white : _ink)),
+                  ),
+                ),
+            ]),
+          ),
+        ],
+        const SizedBox(height: 6),
+        if (listError != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Text(listError!, style: _j(12.5, FontWeight.w600, _red)),
+          )
+        else if (backups == null)
+          const Padding(padding: EdgeInsets.all(14), child: Center(child: CircularProgressIndicator()))
+        else if (shown.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Text('No cloud backup yet — tap Backup now', style: _j(12.5, FontWeight.w600, _muted)),
+          ),
+        for (final b in shown)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: b.store == Stores.current ? const Color(0xFFEDE7FF) : const Color(0xFFE6F4EA),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(b.auto ? Icons.cloud_sync_rounded : Icons.cloud_rounded,
+                    color: b.store == Stores.current ? const Color(0xFF5B2EE0) : const Color(0xFF107C41), size: 20),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Flexible(child: Text(_when(b.created), maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(13, FontWeight.w700, _ink))),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                        decoration: BoxDecoration(color: const Color(0xFFF1F2F9), borderRadius: BorderRadius.circular(7)),
+                        child: Text(_storeOf(b), maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(10.5, FontWeight.w800, _muted)),
+                      ),
+                    ),
+                  ]),
+                  Text('${b.sales} sales · ${b.products} products · ${Backup.size(b.bytes)}${b.auto ? ' · auto' : ''}${b.device.isEmpty ? '' : ' · ${b.device}'}',
+                      maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(11, FontWeight.w500, _muted)),
+                ]),
+              ),
+              PopupMenuButton<String>(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                onSelected: (v) async {
+                  if (v == 'restore') await _restore(b);
+                  if (v == 'delete') {
+                    await runDelete(context,
+                        title: 'Delete this cloud backup?',
+                        message: 'The backup of ${_when(b.created)} is removed from the cloud.',
+                        action: () => Cloud.deleteBackup(b),
+                        popAfter: false);
+                    await _load();
+                  }
+                },
+                itemBuilder: (_) => const [
+                  PopupMenuItem(value: 'restore', child: Text('Restore this backup')),
+                  PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: _red))),
+                ],
+              ),
+            ]),
+          ),
+      ]),
+    );
+  }
 }

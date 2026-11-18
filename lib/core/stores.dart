@@ -22,8 +22,67 @@ class Store {
 /// database file); the first store keeps the original 'hisab.db'.
 class Stores {
   static final List<Store> all = [];
+  static final Set<String> deleted = {}; // removed stores (so another phone does not bring them back)
   static String current = 'main';
   static bool _loaded = false;
+
+  /// Called after the list changes (set by the app to sync it to the cloud).
+  static void Function()? onChange;
+
+  /// The list as shared with the cloud account.
+  static String cloudJson() => jsonEncode({
+        'stores': [for (final s in all) s.toJson()],
+        'deleted': deleted.toList(),
+      });
+
+  /// Adds stores created on another phone and drops ones deleted there.
+  /// Returns true when the list on this phone changed.
+  static Future<bool> mergeCloud(String json) async {
+    try {
+      final m = jsonDecode(json) as Map<String, dynamic>;
+      var changed = false;
+      for (final d in (m['deleted'] as List? ?? const [])) {
+        if (deleted.add('$d')) changed = true;
+      }
+      for (final x in (m['stores'] as List? ?? const [])) {
+        final r = Store.from(x as Map<String, dynamic>);
+        if (deleted.contains(r.id)) continue;
+        final here = all.where((s) => s.id == r.id).firstOrNull;
+        if (here == null) {
+          all.add(r);
+          changed = true;
+        } else if (here.name != r.name && r.name.trim().isNotEmpty && here.id != 'main') {
+          here.name = r.name;
+          changed = true;
+        }
+      }
+      final gone = all.where((s) => deleted.contains(s.id) && s.id != current).toList();
+      if (gone.isNotEmpty) {
+        all.removeWhere(gone.contains);
+        changed = true;
+      }
+      if (changed) {
+        await _save();
+        Books.notifyChanged();
+      }
+      return changed;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// A store with this id on this phone (created if needed — e.g. to restore
+  /// a cloud backup of a store made on another phone).
+  static Future<Store> ensure(String id, String name) async {
+    final here = all.where((s) => s.id == id).firstOrNull;
+    if (here != null) return here;
+    deleted.remove(id);
+    final s = Store(id, name.trim().isEmpty ? 'Store' : name.trim(), id == 'main' ? 'hisab.db' : 'store_$id.db', DateTime.now().toIso8601String());
+    all.add(s);
+    await _save();
+    onChange?.call();
+    return s;
+  }
 
   static Store get active => all.isEmpty
       ? Store('main', 'My Store', 'hisab.db', '')
@@ -46,6 +105,9 @@ class Stores {
         all
           ..clear()
           ..addAll([for (final s in (m['stores'] as List? ?? const [])) Store.from(s as Map<String, dynamic>)]);
+        deleted
+          ..clear()
+          ..addAll([for (final d in (m['deleted'] as List? ?? const [])) '$d']);
         current = '${m['current'] ?? 'main'}';
       }
     } catch (_) {}
@@ -63,7 +125,7 @@ class Stores {
 
   static Future<void> _save() async {
     try {
-      await (await _file()).writeAsString(jsonEncode({'current': current, 'stores': [for (final s in all) s.toJson()]}));
+      await (await _file()).writeAsString(jsonEncode({'current': current, 'stores': [for (final s in all) s.toJson()], 'deleted': deleted.toList()}));
     } catch (_) {}
   }
 
@@ -92,6 +154,7 @@ class Stores {
     await _save();
     await switchTo(id);
     await Books.setSetting('business_name', name);
+    onChange?.call();
     return s;
   }
 
@@ -101,6 +164,7 @@ class Stores {
     await _save();
     if (id == current) await Books.setSetting('business_name', s.name);
     Books.notifyChanged();
+    onChange?.call();
   }
 
   /// Deletes a store and its books (not the one in use, not the last one).
@@ -114,8 +178,10 @@ class Stores {
       if (await f.exists()) await f.delete();
     }
     all.remove(s);
+    deleted.add(s.id);
     await _save();
     Books.notifyChanged();
+    onChange?.call();
   }
 
   /// Quick numbers of every store (for the store list and the admin's cloud record).

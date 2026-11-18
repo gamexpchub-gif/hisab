@@ -41,7 +41,10 @@ class CloudBackup {
   final DateTime created;
   final int bytes, chunks, sales, products, customers;
   final String device;
-  CloudBackup(this.id, this.created, this.bytes, this.chunks, this.sales, this.products, this.customers, this.device);
+  final String store, storeName; // which store's books ('main' for the first)
+  final bool auto;
+  CloudBackup(this.id, this.created, this.bytes, this.chunks, this.sales, this.products, this.customers, this.device,
+      {this.store = 'main', this.storeName = '', this.auto = false});
 }
 
 class Cloud {
@@ -226,10 +229,15 @@ class Cloud {
   static const chunkSize = 700 * 1024; // keeps every document under Firestore's 1 MiB limit
 
   /// Uploads a backup zip in chunks; keeps the newest [keep] backups in the cloud.
-  static Future<CloudBackup> uploadBackup(File zip, {int keep = 5, void Function(double)? progress}) async {
+  /// Uploads a backup of a store's books (the store in use unless given);
+  /// keeps the newest [keep] backups of that store.
+  static Future<CloudBackup> uploadBackup(File zip,
+      {int keep = 5, void Function(double)? progress, String? storeId, String? storeName, Map<String, int>? counts, bool auto = false}) async {
     final token = await _token();
     final bytes = await zip.readAsBytes();
-    final id = DateTime.now().toUtc().toIso8601String().replaceAll(RegExp(r'[^0-9]'), '').substring(0, 14);
+    final store = storeId ?? Stores.current;
+    final sName = storeName ?? (Stores.all.isEmpty ? '' : Stores.active.name);
+    final id = '${DateTime.now().toUtc().toIso8601String().replaceAll(RegExp(r'[^0-9]'), '').substring(0, 14)}_${store.replaceAll(RegExp(r'[^A-Za-z0-9]'), '')}';
     final chunks = (bytes.length / chunkSize).ceil().clamp(1, 1 << 20).toInt();
     final root = 'users/$_uid/backups/$id';
     for (var i = 0; i < chunks; i++) {
@@ -238,7 +246,7 @@ class Cloud {
           token: token, body: {'fields': {'data': {'bytesValue': base64Encode(part)}, 'n': {'integerValue': '$i'}}});
       progress?.call((i + 1) / (chunks + 1));
     }
-    Future<int> count(String t) async => asInt((await Books.query('SELECT COUNT(*) AS c FROM $t')).first['c']);
+    Future<int> count(String t) async => counts?[t] ?? asInt((await Books.query('SELECT COUNT(*) AS c FROM $t')).first['c']);
     final meta = {
       'created': {'timestampValue': DateTime.now().toUtc().toIso8601String()},
       'bytes': {'integerValue': '${bytes.length}'},
@@ -247,8 +255,9 @@ class Cloud {
       'products': {'integerValue': '${await count('products')}'},
       'customers': {'integerValue': '${await count('customers')}'},
       'device': {'stringValue': Platform.localHostname},
-      'store': {'stringValue': Stores.current},
-      'storeName': {'stringValue': Stores.all.isEmpty ? '' : Stores.active.name},
+      'store': {'stringValue': store},
+      'storeName': {'stringValue': sName},
+      'auto': {'booleanValue': auto},
       'complete': {'booleanValue': true},
     };
     await _call('PATCH', _doc(root), token: token, body: {'fields': meta});
@@ -260,9 +269,9 @@ class Cloud {
       }
     });
     progress?.call(1);
-    await Books.setSetting('last_cloud_backup_at', DateTime.now().toIso8601String());
+    if (store == Stores.current) await Books.setSetting('last_cloud_backup_at', DateTime.now().toIso8601String());
     final all = await listBackups();
-    for (final old in all.skip(keep)) {
+    for (final old in all.where((b) => b.store == store).skip(keep)) {
       try {
         await deleteBackup(old);
       } catch (_) {}
@@ -278,7 +287,6 @@ class Cloud {
       final m = d as Map<String, dynamic>;
       final f = (m['fields'] ?? {}) as Map<String, dynamic>;
       if (f['complete']?['booleanValue'] != true) continue;
-      if ('${f['store']?['stringValue'] ?? 'main'}' != Stores.current) continue; // this store's backups only
       int n(String k) => int.tryParse('${f[k]?['integerValue'] ?? 0}') ?? 0;
       out.add(CloudBackup(
         '${m['name']}'.split('/').last,
@@ -289,6 +297,9 @@ class Cloud {
         n('products'),
         n('customers'),
         '${f['device']?['stringValue'] ?? ''}',
+        store: '${f['store']?['stringValue'] ?? 'main'}',
+        storeName: '${f['storeName']?['stringValue'] ?? ''}',
+        auto: f['auto']?['booleanValue'] == true,
       ));
     }
     out.sort((a, b) => b.created.compareTo(a.created));
@@ -308,6 +319,32 @@ class Cloud {
     final f = File(p.join(tmp.path, 'cloud-${b.id}.zip'));
     await f.writeAsBytes(out.takeBytes(), flush: true);
     return f;
+  }
+
+  // ---------------------------------------------------------------- store list
+  /// Saves the account's store list so every phone shows the same stores.
+  static Future<void> saveStores(String json) async {
+    if (user == null) return;
+    final token = await _token();
+    await _call('PATCH', _doc('users/$_uid/meta/stores'), token: token, body: {
+      'fields': {
+        'list': {'stringValue': json},
+        'updated': {'timestampValue': DateTime.now().toUtc().toIso8601String()},
+      }
+    });
+  }
+
+  /// The account's store list, or null when none was saved yet.
+  static Future<String?> loadStores() async {
+    if (user == null) return null;
+    final token = await _token();
+    try {
+      final r = await _call('GET', _doc('users/$_uid/meta/stores'), token: token);
+      return r['fields']?['list']?['stringValue'] as String?;
+    } on CloudError {
+      if (_status == 404) return null;
+      rethrow;
+    }
   }
 
   static Future<void> deleteBackup(CloudBackup b) async {

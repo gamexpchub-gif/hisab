@@ -27,6 +27,8 @@ Future<void> main() async {
   await Stores.load();
   await Sub.load();
   Books.guard = Sub.guard;
+  // keep the store list the same on every phone of the account
+  Stores.onChange = () => Cloud.saveStores(Stores.cloudJson()).catchError((_) {});
   showPlans = (context) => open(context, const PlansScreen());
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
@@ -36,8 +38,8 @@ Future<void> main() async {
     systemNavigationBarIconBrightness: Brightness.dark,
   ));
   runApp(const HisabApp());
-  // one automatic backup a day, a few seconds after start
-  Future<void>.delayed(const Duration(seconds: 6), Backup.autoDaily);
+  // automatic backups: phone daily, cloud for every store (on start, on resume, every 30 min)
+  Backup.startAuto();
   // tonight's AI report notification, kept fresh as the books change
   Future<void>.delayed(const Duration(seconds: 9), DailyReport.start);
   // plan, admin rights and usage from the cloud account
