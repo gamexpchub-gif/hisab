@@ -435,6 +435,17 @@ void main() {
     expect(SmartImei.modelName('Blue'), 'Blue');
   });
 
+  test('Smart IMEI: a learned model fills brand, category, RAM and storage', () async {
+    await SmartImei.learn('351234560000010', name: 'Vivo T3 8/256 Blue', brand: 'Vivo');
+    final m = await SmartImei.match('351234560007775');
+    expect(m.product, isNull);
+    expect(m.suggestName, 'Vivo T3');
+    expect(m.suggestBrand, 'Vivo');
+    expect(m.suggestCategory, 'Mobile');
+    expect(m.suggestRam, '8GB');
+    expect(m.suggestStorage, '256GB');
+  });
+
   test('Smart IMEI: check digit, model from TAC, duplicates', () async {
     expect(SmartImei.luhn('490154203237518'), isTrue);
     expect(SmartImei.luhn('490154203237519'), isFalse);

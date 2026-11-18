@@ -2,7 +2,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../core/books.dart';
 import '../core/imei_smart.dart';
@@ -193,21 +192,11 @@ class _ProductFormState extends State<ProductForm> {
   bool looking = false;
   String? pendingImei; // IMEI scanned here — its model is learned on save
   String? smartNote;
-  String? searchTac; // unknown IMEI: offer an online search for its model
-
-  /// Opens a web search for the phone model of this IMEI's TAC.
-  Future<void> _searchModel(String imei) async {
-    final q = Uri.encodeQueryComponent('TAC ${imei.substring(0, 8)} phone model');
-    final ok = await launchUrl(Uri.parse('https://www.google.com/search?q=$q'), mode: LaunchMode.externalApplication)
-        .catchError((_) => false);
-    if (!ok && mounted) toast(context, 'Could not open the browser', error: true);
-  }
 
   /// Smart scan: an IMEI of a known model copies that product's details; a box
   /// barcode becomes the SKU and its name / brand are looked up online.
   Future<void> _smartFill(String code) async {
     final c = SmartImei.clean(code);
-    searchTac = null;
     if (SmartImei.looksLikeImei(c)) {
       setState(() => looking = true);
       final m = await SmartImei.match(c);
@@ -219,20 +208,40 @@ class _ProductFormState extends State<ProductForm> {
           setState(() {
             name.text = m.suggestName!;
             if ((m.suggestBrand ?? '').isNotEmpty) brand.text = m.suggestBrand!;
-            searchTac = null;
-            smartNote = 'Model found from IMEI: ${m.suggestName}'
-                '${m.how == 'tacdb' ? ' (TAC database)' : m.how == 'community' ? ' (Hisab AI community)' : ''} — add storage / colour and save';
           });
           _analyse();
+          // brand, category, RAM / storage from the model name
           if (!guess.isEmpty) await _applyGuess();
+          if ((m.suggestBrand ?? '').isNotEmpty) brand.text = m.suggestBrand!;
+          // a scanned IMEI is a phone: the shared category, else Smart's, else Mobile
+          final cat = m.suggestCategory ?? guess.category ?? 'Mobile';
+          category = await Books.addCategory(cat);
+          await _loadCategories();
+          if (m.suggestRam != null || m.suggestStorage != null) {
+            ram = m.suggestRam ?? ram;
+            storage = m.suggestStorage ?? storage;
+            _composeVariant();
+          }
+          if (!mounted) return;
+          final filled = [
+            brand.text.trim(),
+            _categoryName,
+            [ram, storage].whereType<String>().join('/'),
+          ].whereType<String>().where((x) => x.isNotEmpty).join(' · ');
+          setState(() => smartNote = '✓ ${m.suggestName}${filled.isEmpty ? '' : ' — $filled'}'
+              '${m.how == 'tacdb' ? ' (TAC database)' : m.how == 'community' ? ' (Hisab AI community)' : ''}'
+              ' — filled automatically. Add the colour and price, then save');
         } else {
-          setState(() {
-            searchTac = m.valid ? c : null;
-            smartNote = !m.valid
-                ? '⚠ IMEI check digit looks wrong — please re-scan the number'
-                : 'New model (TAC ${m.tac}) — tap Search online, type the name once and save. '
-                    'Every phone of this model is then named automatically, in every Hisab AI shop';
-          });
+          // a phone IMEI is still a phone: pick the Mobile category now
+          if (m.valid && category == null) {
+            category = await Books.addCategory('Mobile');
+            await _loadCategories();
+          }
+          if (!mounted) return;
+          setState(() => smartNote = !m.valid
+              ? '⚠ IMEI check digit looks wrong — please re-scan the number'
+              : 'First phone of this model (TAC ${m.tac}) in Hisab AI — type its name once and save. '
+                  'From then on brand, category, RAM and storage fill in automatically, in every Hisab AI shop');
         }
         return;
       }
@@ -344,7 +353,8 @@ class _ProductFormState extends State<ProductForm> {
     try {
       final pid = await Books.saveProduct(_values(), id: _id, openingQty: isNew ? qty : 0, openingCost: isNew ? _m(cost) : 0);
       if (pendingImei != null) {
-        await SmartImei.learn(pendingImei!, productId: pid, name: name.text.trim(), brand: brand.text.trim());
+        await SmartImei.learn(pendingImei!,
+            productId: pid, name: name.text.trim(), brand: brand.text.trim(), category: _categoryName, ram: ram, storage: storage);
       }
       if (!mounted) return;
       HapticFeedback.mediumImpact();
@@ -587,19 +597,6 @@ class _ProductFormState extends State<ProductForm> {
                 decoration: BoxDecoration(color: const Color(0x26FFFFFF), borderRadius: BorderRadius.circular(12)),
                 child: Text(smartNote!, style: _j(11.5, FontWeight.w700, Colors.white)),
               ),
-              if (searchTac != null) ...[
-                const SizedBox(height: 8),
-                Row(children: [
-                  Expanded(
-                    child: FilledButton.icon(
-                      style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: const Color(0xFF4318D2)),
-                      onPressed: () => _searchModel(searchTac!),
-                      icon: const Icon(Icons.travel_explore_rounded, size: 18),
-                      label: const Text('Search online'),
-                    ),
-                  ),
-                ]),
-              ],
             ],
           ]),
         ),

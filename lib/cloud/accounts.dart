@@ -49,6 +49,13 @@ class PlanRequest {
   int get amount => planById(plan)?.amount(months) ?? 0;
 }
 
+/// A phone model from the community list.
+class TacInfo {
+  final String model;
+  final String? brand, category, ram, storage;
+  const TacInfo(this.model, [this.brand, this.category, this.ram, this.storage]);
+}
+
 // Firestore value helpers ---------------------------------------------------
 Map<String, dynamic> _v(Object? v) => switch (v) {
       null => {'nullValue': null},
@@ -164,31 +171,44 @@ class Accounts {
   // ---------------------------------------------------------------- community IMEI models
   /// Model name for a TAC (first 8 IMEI digits) from the Hisab AI community
   /// list — every shop that names a phone model teaches it to all shops.
-  static Future<(String, String)?> tacGet(String tac) async {
+  static Future<TacInfo?> tacGet(String tac) async {
     if (Cloud.user == null || !RegExp(r'^\d{8}$').hasMatch(tac)) return null;
     try {
       final token = await Cloud._token();
       final r = await Cloud._call('GET', Cloud._doc('tac/$tac'), token: token);
       final f = (r['fields'] as Map?)?.cast<String, dynamic>() ?? const {};
-      final model = '${_read(f['model'] as Map<String, dynamic>?) ?? ''}'.trim();
+      String g(String k) => '${_read(f[k] as Map<String, dynamic>?) ?? ''}'.trim();
+      final model = g('model');
       if (model.isEmpty) return null;
-      return (model, '${_read(f['brand'] as Map<String, dynamic>?) ?? ''}'.trim());
+      String? n(String v) => v.isEmpty ? null : v;
+      return TacInfo(model, n(g('brand')), n(g('category')), n(g('ram')), n(g('storage')));
     } catch (_) {
       return null;
     }
   }
 
-  /// Shares a model name for a TAC with every Hisab AI shop.
-  static Future<bool> tacPut(String tac, String model, String brand) async {
-    model = model.trim();
-    brand = brand.trim();
+  /// Shares a phone model (name, brand, category, RAM, storage) for a TAC
+  /// with every Hisab AI shop.
+  static Future<bool> tacPut(String tac, TacInfo t) async {
+    String cut(String? v, int n) {
+      final x = (v ?? '').trim();
+      return x.length > n ? x.substring(0, n) : x;
+    }
+
+    final model = cut(t.model, 80);
     if (Cloud.user == null || !RegExp(r'^\d{8}$').hasMatch(tac) || model.length < 2) return false;
-    if (model.length > 80) model = model.substring(0, 80);
-    if (brand.length > 40) brand = brand.substring(0, 40);
     try {
       final token = await Cloud._token();
       await Cloud._call('PATCH', Cloud._doc('tac/$tac'), token: token, body: {
-        'fields': {'model': _v(model), 'brand': _v(brand), 'by': _v(Cloud._uid), 'updated': _v(DateTime.now())}
+        'fields': {
+          'model': _v(model),
+          'brand': _v(cut(t.brand, 40)),
+          'category': _v(cut(t.category, 40)),
+          'ram': _v(cut(t.ram, 20)),
+          'storage': _v(cut(t.storage, 20)),
+          'by': _v(Cloud._uid),
+          'updated': _v(DateTime.now()),
+        }
       });
       return true;
     } catch (_) {
@@ -386,9 +406,12 @@ service cloud.firestore {
       allow create, update: if signedIn()
         && tac.matches('^[0-9]{8}$')
         && (resource == null || resource.data.by == request.auth.uid || isAdmin())
-        && incoming().keys().hasOnly(['model', 'brand', 'by', 'updated'])
+        && incoming().keys().hasOnly(['model', 'brand', 'category', 'ram', 'storage', 'by', 'updated'])
         && incoming().model is string && incoming().model.size() >= 2 && incoming().model.size() <= 80
         && incoming().brand is string && incoming().brand.size() <= 40
+        && incoming().get('category', '') is string && incoming().get('category', '').size() <= 40
+        && incoming().get('ram', '') is string && incoming().get('ram', '').size() <= 20
+        && incoming().get('storage', '') is string && incoming().get('storage', '').size() <= 20
         && incoming().by == request.auth.uid
         && incoming().updated is timestamp;
       allow delete: if isAdmin();

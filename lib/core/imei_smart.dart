@@ -2,6 +2,7 @@ import '../cloud/cloud.dart';
 import 'books.dart';
 import 'money.dart';
 import 'plan.dart';
+import 'smart.dart';
 import 'tac_db.dart';
 
 /// What the app knows about a scanned IMEI / serial.
@@ -15,6 +16,7 @@ class ImeiMatch {
   final Rec? soldOn; // open sale that already has this IMEI
   final Rec? boughtOn; // purchase that brought this IMEI in
   final String? suggestName, suggestBrand; // model name when no product matches yet
+  final String? suggestCategory, suggestRam, suggestStorage;
   const ImeiMatch(this.code,
       {this.isImei = false,
       this.valid = true,
@@ -24,7 +26,10 @@ class ImeiMatch {
       this.soldOn,
       this.boughtOn,
       this.suggestName,
-      this.suggestBrand});
+      this.suggestBrand,
+      this.suggestCategory,
+      this.suggestRam,
+      this.suggestStorage});
 
   String get tac => isImei ? code.substring(0, 8) : '';
 
@@ -102,7 +107,7 @@ class SmartImei {
         }
       }
     }
-    String? sName, sBrand;
+    String? sName, sBrand, sCat, sRam, sStorage;
     if (product == null && isImei) {
       // models taught to the app (Add Product with a scanned IMEI)
       final t = await Books.query('SELECT * FROM imei_models WHERE tac = ?', [code.substring(0, 8)]);
@@ -112,8 +117,13 @@ class SmartImei {
         if (product != null) {
           how = 'learned';
         } else {
-          sName = t.first['name'] as String?;
-          sBrand = t.first['brand'] as String?;
+          final full = '${t.first['name'] ?? ''}';
+          final g = Smart.analyse(full);
+          sName = full.isEmpty ? null : modelName(full);
+          sBrand = t.first['brand'] as String? ?? g.brand;
+          sCat = g.category;
+          sRam = g.ram;
+          sStorage = g.storage;
         }
       }
     }
@@ -121,13 +131,18 @@ class SmartImei {
       // Hisab AI community list: models named by other shops
       final c = await Accounts.tacGet(code.substring(0, 8)).timeout(const Duration(seconds: 8), onTimeout: () => null);
       if (c != null) {
-        sName = c.$1;
-        sBrand = c.$2.isEmpty ? null : c.$2;
+        sName = c.model;
+        sBrand = c.brand;
+        sCat = c.category;
+        sRam = c.ram;
+        sStorage = c.storage;
         how = 'community';
         try {
+          // cached on the phone with RAM / storage in the name (read back by Smart.analyse)
+          final full = [c.model, if (c.ram != null) c.ram!, if (c.storage != null) c.storage!].join(' ');
           await Books.execute(
               'INSERT OR IGNORE INTO imei_models (tac, product_id, name, brand, source, updated_at) VALUES (?, NULL, ?, ?, ?, ?)',
-              [code.substring(0, 8), sName, sBrand, 'community', DateTime.now().toIso8601String()]);
+              [code.substring(0, 8), full, sBrand, 'community', DateTime.now().toIso8601String()]);
         } catch (_) {}
       }
     }
@@ -149,11 +164,15 @@ class SmartImei {
         soldOn: sold.isEmpty ? null : sold.first,
         boughtOn: bought.isEmpty ? null : bought.first,
         suggestName: sName,
-        suggestBrand: sBrand);
+        suggestBrand: sBrand,
+        suggestCategory: sCat,
+        suggestRam: sRam,
+        suggestStorage: sStorage);
   }
 
   /// Remembers that IMEIs starting with this TAC are [productId].
-  static Future<void> learn(String imei, {int? productId, String? name, String? brand}) async {
+  static Future<void> learn(String imei,
+      {int? productId, String? name, String? brand, String? category, String? ram, String? storage}) async {
     final c = clean(imei);
     if (!looksLikeImei(c)) return;
     await Books.execute(
@@ -161,7 +180,13 @@ class SmartImei {
         [c.substring(0, 8), productId, name, brand, 'shop', DateTime.now().toIso8601String()]);
     // teach every Hisab AI shop this model
     if ((name ?? '').trim().length >= 2) {
-      Accounts.tacPut(c.substring(0, 8), modelName(name!), brand ?? '').catchError((_) => false);
+      final g = Smart.analyse(name!);
+      String? n(String? v) => (v ?? '').trim().isEmpty ? null : v!.trim();
+      Accounts.tacPut(
+              c.substring(0, 8),
+              TacInfo(modelName(name), n(brand) ?? g.brand, n(category) ?? g.category ?? 'Mobile', n(ram) ?? g.ram,
+                  n(storage) ?? g.storage))
+          .catchError((_) => false);
     }
   }
 
@@ -185,10 +210,11 @@ class SmartImei {
     final st = await Books.settings();
     if (st['tac_shared'] == '1') return 0;
     final rows = await Books.query(
-        'SELECT substr(x.serial, 1, 8) AS tac, p.name, p.brand, COUNT(*) AS n FROM ('
+        'SELECT substr(x.serial, 1, 8) AS tac, p.name, p.brand, p.variant, c.name AS category, COUNT(*) AS n FROM ('
         'SELECT serial, product_id FROM purchase_items WHERE length(serial) = 15 '
         'UNION ALL SELECT serial, product_id FROM sale_items WHERE length(serial) = 15'
-        ') x JOIN products p ON p.id = x.product_id GROUP BY tac, p.id ORDER BY tac, n DESC');
+        ') x JOIN products p ON p.id = x.product_id LEFT JOIN categories c ON c.id = p.category_id '
+        'GROUP BY tac, p.id ORDER BY tac, n DESC');
     final best = <String, Rec>{};
     for (final r in rows) {
       best.putIfAbsent('${r['tac']}', () => r);
@@ -200,7 +226,13 @@ class SmartImei {
       await Books.execute(
           'INSERT OR IGNORE INTO imei_models (tac, product_id, name, brand, source, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
           [e.key, null, name, e.value['brand'], 'history', DateTime.now().toIso8601String()]);
-      if (await Accounts.tacPut(e.key, modelName(name), '${e.value['brand'] ?? ''}')) n++;
+      final g = Smart.analyse('$name ${e.value['variant'] ?? ''}');
+      final brand = '${e.value['brand'] ?? ''}'.trim();
+      final cat = '${e.value['category'] ?? ''}'.trim();
+      if (await Accounts.tacPut(e.key,
+          TacInfo(modelName(name), brand.isEmpty ? g.brand : brand, cat.isEmpty ? g.category ?? 'Mobile' : cat, g.ram, g.storage))) {
+        n++;
+      }
     }
     await Books.setSetting('tac_shared', '1');
     return n;
