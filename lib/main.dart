@@ -25,7 +25,9 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // the store in use (each store has its own books) and the plan
   await Stores.load();
-  await Sub.load();
+  // the plan of the signed-in ID (each ID keeps its own plan)
+  await Cloud.load();
+  await Sub.load(uid: Cloud.user?.uid);
   Books.guard = Sub.guard;
   // keep the store list the same on every phone of the account
   Stores.onChange = () => Cloud.saveStores(Stores.cloudJson()).catchError((_) {});

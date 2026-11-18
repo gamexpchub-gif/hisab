@@ -427,6 +427,14 @@ void main() {
     await expectBalanced();
   });
 
+  test('Smart IMEI: model name shared with the community', () {
+    expect(SmartImei.modelName('Vivo Y28 8/128 Blue'), 'Vivo Y28');
+    expect(SmartImei.modelName('iPhone 15 Pro Max 256GB Natural Titanium'), 'iPhone 15 Pro Max');
+    expect(SmartImei.modelName('Samsung Galaxy A15 5G (6GB+128GB) Black'), 'Samsung Galaxy A15 5G');
+    expect(SmartImei.modelName('Redmi 13C 4/128'), 'Redmi 13C');
+    expect(SmartImei.modelName('Blue'), 'Blue');
+  });
+
   test('Smart IMEI: check digit, model from TAC, duplicates', () async {
     expect(SmartImei.luhn('490154203237518'), isTrue);
     expect(SmartImei.luhn('490154203237519'), isFalse);

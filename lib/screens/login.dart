@@ -59,7 +59,6 @@ class _AuthGateState extends State<AuthGate> {
     if (pass == null) return const Scaffold(backgroundColor: Color(0xFF1B2163));
     if (pass!) return widget.child;
     return LoginScreen(onDone: () {
-      Accounts.sync();
       setState(() => pass = true);
     });
   }
@@ -108,6 +107,10 @@ class _LoginScreenState extends State<LoginScreen> {
       }
       HapticFeedback.mediumImpact();
       await Books.setSetting('offline_mode', '0');
+      // this ID's plan, admin rights and stores before the app opens
+      try {
+        await Accounts.sync().timeout(const Duration(seconds: 20));
+      } catch (_) {}
       if (!mounted) return;
       await _offerRestore();
       widget.onDone();

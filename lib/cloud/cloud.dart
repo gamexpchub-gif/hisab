@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../core/books.dart';
+import '../core/imei_smart.dart';
 import '../core/plan.dart';
 import '../core/stores.dart';
 
@@ -169,6 +170,8 @@ class Cloud {
     _refreshToken = r['refreshToken'] as String;
     _expires = DateTime.now().add(Duration(seconds: int.tryParse('${r['expiresIn']}') ?? 3600) - const Duration(minutes: 2));
     await _saveSession();
+    // this ID's own plan (never the previous ID's)
+    await Sub.use(_uid);
     return user!;
   }
 
@@ -202,10 +205,10 @@ class Cloud {
   }
 
   static Future<void> signOut() async {
-    if (Sub.admin) await Sub.apply(plan: Sub.plan, until: Sub.until, admin: false, blocked: Sub.blocked, pending: Sub.pending);
     _uid = _email = _name = _idToken = _refreshToken = null;
     _expires = null;
     await _saveSession();
+    await Sub.use(null);
   }
 
   /// A valid ID token, refreshed when it is about to expire.

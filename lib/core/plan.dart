@@ -106,44 +106,86 @@ class Sub {
   static String? pending; // plan requested and waiting for approval
   static bool _loaded = false;
 
+  /// Whose plan is in use: a cloud account's uid, or 'device' when signed out.
+  /// Every account keeps its own plan on the phone, so signing in with another
+  /// ID never carries the previous ID's plan (or admin rights) across.
+  static String owner = 'device';
+  static final Map<String, Map<String, dynamic>> _all = {};
+
   static Future<File> _file() async {
     final d = await getApplicationSupportDirectory();
     await d.create(recursive: true);
     return File(p.join(d.path, 'subscription.json'));
   }
 
-  static Future<void> load() async {
-    if (_loaded) return;
-    _loaded = true;
-    try {
-      final f = await _file();
-      if (await f.exists()) {
-        final m = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
-        plan = '${m['plan'] ?? 'trial'}';
-        until = DateTime.tryParse('${m['until'] ?? ''}');
-        admin = m['admin'] == true;
-        blocked = m['blocked'] == true;
-        pending = m['pending'] as String?;
-      } else {
-        plan = 'trial';
-        until = DateTime.now().add(const Duration(days: trialDays));
-        await save();
-      }
-    } catch (_) {
-      plan = 'trial';
-      until ??= DateTime.now().add(const Duration(days: trialDays));
-    }
-  }
-
-  static Future<void> save() async {
-    try {
-      await (await _file()).writeAsString(jsonEncode({
+  static Map<String, dynamic> _pack() => {
         'plan': plan,
         'until': until?.toIso8601String(),
         'admin': admin,
         'blocked': blocked,
         'pending': pending,
-      }));
+      };
+
+  static void _unpack(Map<String, dynamic> m) {
+    plan = '${m['plan'] ?? 'trial'}';
+    until = DateTime.tryParse('${m['until'] ?? ''}');
+    admin = m['admin'] == true;
+    blocked = m['blocked'] == true;
+    pending = m['pending'] as String?;
+  }
+
+  /// The phone's own free trial (made once, never restarted).
+  static Map<String, dynamic> _deviceTrial() => _all.putIfAbsent(
+      'device', () => {'plan': 'trial', 'until': DateTime.now().add(const Duration(days: trialDays)).toIso8601String()});
+
+  /// Reads the saved plans and switches to [uid]'s (or the phone's when null).
+  static Future<void> load({String? uid}) async {
+    if (!_loaded) {
+      _loaded = true;
+      try {
+        final f = await _file();
+        if (await f.exists()) {
+          final m = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
+          if (m['accounts'] is Map) {
+            for (final e in (m['accounts'] as Map).entries) {
+              if (e.value is Map) _all['${e.key}'] = Map<String, dynamic>.from(e.value as Map);
+            }
+          } else if (m.containsKey('plan')) {
+            // older single-plan file: keep only the phone trial (the cloud
+            // account's real plan is fetched again after sign-in)
+            if (m['plan'] == 'trial') _all['device'] = {'plan': 'trial', 'until': m['until']};
+          }
+        }
+      } catch (_) {}
+    }
+    await use(uid);
+  }
+
+  /// Makes [uid]'s plan the one in use (null = signed out → phone trial).
+  static Future<void> use(String? uid) async {
+    owner = (uid == null || uid.isEmpty) ? 'device' : uid;
+    final d = _deviceTrial();
+    final m = _all[owner];
+    if (m != null) {
+      _unpack(m);
+    } else {
+      // new account on this phone: the phone trial until the cloud answers
+      _unpack({'plan': 'trial', 'until': d['until']});
+    }
+    await save();
+    try {
+      Books.notifyChanged();
+    } catch (_) {}
+  }
+
+  static Future<void> save() async {
+    _all[owner] = _pack();
+    await _write();
+  }
+
+  static Future<void> _write() async {
+    try {
+      await (await _file()).writeAsString(jsonEncode({'v': 2, 'accounts': _all}));
     } catch (_) {}
   }
 
@@ -202,14 +244,22 @@ class Sub {
     );
   }
 
-  /// Applies what the cloud account says.
-  static Future<void> apply({required String plan, DateTime? until, bool admin = false, bool blocked = false, String? pending}) async {
-    Sub.plan = plan;
-    Sub.until = until;
-    Sub.admin = admin;
-    Sub.blocked = blocked;
-    Sub.pending = pending;
+  /// Applies what the cloud account says. [uid] is the account the answer
+  /// belongs to — if the phone has since switched to another ID, it is stored
+  /// for that account only and the plan in use is left alone.
+  static Future<void> apply({required String plan, DateTime? until, bool admin = false, bool blocked = false, String? pending, String? uid}) async {
+    final m = {'plan': plan, 'until': until?.toIso8601String(), 'admin': admin, 'blocked': blocked, 'pending': pending};
+    final key = uid ?? owner;
+    if (key != owner) {
+      if (key != 'device') {
+        _all[key] = m;
+        await _write();
+      }
+      return;
+    }
+    _unpack(m);
     await save();
     Books.notifyChanged();
   }
+
 }

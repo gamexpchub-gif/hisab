@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../core/books.dart';
 import '../core/imei_smart.dart';
@@ -12,8 +13,6 @@ import '../ui/photo.dart';
 import '../ui/widgets.dart';
 import 'products.dart';
 import 'scanner.dart';
-import '../core/plan.dart';
-import '../core/tac_db.dart';
 
 // =============================================================================
 // Add / Edit Product — photo, Smart Assist, barcode scanning, variant builder,
@@ -75,8 +74,8 @@ class _ProductFormState extends State<ProductForm> {
   final mrp = TextEditingController();
   final cost = TextEditingController();
   int qty = 0;
-  int low = 2;
-  int gstBp = 1800;
+  int low = 0;
+  int gstBp = 0;
   int warrantyMonths = 0;
   String condition = 'new';
   int? category;
@@ -168,7 +167,8 @@ class _ProductFormState extends State<ProductForm> {
     if ((all || only == 'brand') && g.brand != null) brand.text = g.brand!;
     if ((all || only == 'hsn') && g.hsn != null) {
       hsn.text = g.hsn!;
-      if (g.gstBp != null) gstBp = g.gstBp!;
+      // GST stays as the user set it (0 by default) unless the HSN hint is tapped
+      if (g.gstBp != null && only == 'hsn') gstBp = g.gstBp!;
     }
     if ((all || only == 'variant') && g.variant.isNotEmpty) {
       ram = g.ram;
@@ -193,11 +193,21 @@ class _ProductFormState extends State<ProductForm> {
   bool looking = false;
   String? pendingImei; // IMEI scanned here — its model is learned on save
   String? smartNote;
+  String? searchTac; // unknown IMEI: offer an online search for its model
+
+  /// Opens a web search for the phone model of this IMEI's TAC.
+  Future<void> _searchModel(String imei) async {
+    final q = Uri.encodeQueryComponent('TAC ${imei.substring(0, 8)} phone model');
+    final ok = await launchUrl(Uri.parse('https://www.google.com/search?q=$q'), mode: LaunchMode.externalApplication)
+        .catchError((_) => false);
+    if (!ok && mounted) toast(context, 'Could not open the browser', error: true);
+  }
 
   /// Smart scan: an IMEI of a known model copies that product's details; a box
   /// barcode becomes the SKU and its name / brand are looked up online.
   Future<void> _smartFill(String code) async {
     final c = SmartImei.clean(code);
+    searchTac = null;
     if (SmartImei.looksLikeImei(c)) {
       setState(() => looking = true);
       final m = await SmartImei.match(c);
@@ -209,19 +219,20 @@ class _ProductFormState extends State<ProductForm> {
           setState(() {
             name.text = m.suggestName!;
             if ((m.suggestBrand ?? '').isNotEmpty) brand.text = m.suggestBrand!;
-            smartNote = 'Model found from IMEI: ${m.suggestName}${m.how == 'tacdb' ? ' (TAC database)' : ''} — add storage / colour and save';
+            searchTac = null;
+            smartNote = 'Model found from IMEI: ${m.suggestName}'
+                '${m.how == 'tacdb' ? ' (TAC database)' : m.how == 'community' ? ' (Hisab AI community)' : ''} — add storage / colour and save';
           });
           _analyse();
           if (!guess.isEmpty) await _applyGuess();
         } else {
-          final why = !Sub.can('smart_imei')
-              ? ' (online model lookup is in Premium)'
-              : TacDb.lastError != null
-                  ? ' (${TacDb.lastError})'
-                  : '';
-          setState(() => smartNote = 'Model not found for IMEI ${m.tac}…$why — type the name once and save; '
-              'the next phone of this model is named automatically'
-              '${!m.valid ? '. ⚠ IMEI check digit looks wrong' : ''}');
+          setState(() {
+            searchTac = m.valid ? c : null;
+            smartNote = !m.valid
+                ? '⚠ IMEI check digit looks wrong — please re-scan the number'
+                : 'New model (TAC ${m.tac}) — tap Search online, type the name once and save. '
+                    'Every phone of this model is then named automatically, in every Hisab AI shop';
+          });
         }
         return;
       }
@@ -576,6 +587,19 @@ class _ProductFormState extends State<ProductForm> {
                 decoration: BoxDecoration(color: const Color(0x26FFFFFF), borderRadius: BorderRadius.circular(12)),
                 child: Text(smartNote!, style: _j(11.5, FontWeight.w700, Colors.white)),
               ),
+              if (searchTac != null) ...[
+                const SizedBox(height: 8),
+                Row(children: [
+                  Expanded(
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: const Color(0xFF4318D2)),
+                      onPressed: () => _searchModel(searchTac!),
+                      icon: const Icon(Icons.travel_explore_rounded, size: 18),
+                      label: const Text('Search online'),
+                    ),
+                  ),
+                ]),
+              ],
             ],
           ]),
         ),

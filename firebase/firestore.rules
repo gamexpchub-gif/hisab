@@ -9,6 +9,7 @@ rules_version = '2';
 //                            and notes are changed by the admin only
 //   requests/{id}            plan requests: the owner creates a pending one;
 //                            the admin approves or rejects
+//   tac/{tac}                community phone model names (IMEI first 8 digits)
 // Everything else is denied.
 // =============================================================================
 service cloud.firestore {
@@ -71,6 +72,22 @@ service cloud.firestore {
 
       allow get: if signedIn() && (resource.data.uid == request.auth.uid || isAdmin());
       allow list, update, delete: if isAdmin();
+    }
+
+    // ---------------------------------------------------------------- community IMEI models
+    // tac/{8 digits}: phone model names shared by every Hisab AI shop. Any
+    // signed-in shop reads; the shop that named a model (or the admin) may fix it.
+    match /tac/{tac} {
+      allow read: if signedIn();
+      allow create, update: if signedIn()
+        && tac.matches('^[0-9]{8}$')
+        && (resource == null || resource.data.by == request.auth.uid || isAdmin())
+        && incoming().keys().hasOnly(['model', 'brand', 'by', 'updated'])
+        && incoming().model is string && incoming().model.size() >= 2 && incoming().model.size() <= 80
+        && incoming().brand is string && incoming().brand.size() <= 40
+        && incoming().by == request.auth.uid
+        && incoming().updated is timestamp;
+      allow delete: if isAdmin();
     }
 
     // ---------------------------------------------------------------- everything else

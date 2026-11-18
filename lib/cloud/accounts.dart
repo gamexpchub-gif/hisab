@@ -132,7 +132,7 @@ class Accounts {
       } on CloudError {
         admin = false;
       }
-      await Sub.apply(plan: acc.plan, until: acc.until, admin: admin, blocked: acc.blocked, pending: acc.pending);
+      await Sub.apply(plan: acc.plan, until: acc.until, admin: admin, blocked: acc.blocked, pending: acc.pending, uid: uid);
       // stores made on other phones of this account
       try {
         final remote = await Cloud.loadStores();
@@ -154,8 +154,45 @@ class Accounts {
       };
       await Cloud._call('PATCH', Cloud._doc('accounts/$uid', _mask(usage.keys)),
           token: token, body: {'fields': {for (final e in usage.entries) e.key: _v(e.value)}});
+      // teach the community model list from this shop's past IMEIs (once)
+      SmartImei.shareHistory().catchError((_) => 0);
     } catch (_) {
       // offline or rules not updated yet: keep what the phone knows
+    }
+  }
+
+  // ---------------------------------------------------------------- community IMEI models
+  /// Model name for a TAC (first 8 IMEI digits) from the Hisab AI community
+  /// list — every shop that names a phone model teaches it to all shops.
+  static Future<(String, String)?> tacGet(String tac) async {
+    if (Cloud.user == null || !RegExp(r'^\d{8}$').hasMatch(tac)) return null;
+    try {
+      final token = await Cloud._token();
+      final r = await Cloud._call('GET', Cloud._doc('tac/$tac'), token: token);
+      final f = (r['fields'] as Map?)?.cast<String, dynamic>() ?? const {};
+      final model = '${_read(f['model'] as Map<String, dynamic>?) ?? ''}'.trim();
+      if (model.isEmpty) return null;
+      return (model, '${_read(f['brand'] as Map<String, dynamic>?) ?? ''}'.trim());
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Shares a model name for a TAC with every Hisab AI shop.
+  static Future<bool> tacPut(String tac, String model, String brand) async {
+    model = model.trim();
+    brand = brand.trim();
+    if (Cloud.user == null || !RegExp(r'^\d{8}$').hasMatch(tac) || model.length < 2) return false;
+    if (model.length > 80) model = model.substring(0, 80);
+    if (brand.length > 40) brand = brand.substring(0, 40);
+    try {
+      final token = await Cloud._token();
+      await Cloud._call('PATCH', Cloud._doc('tac/$tac'), token: token, body: {
+        'fields': {'model': _v(model), 'brand': _v(brand), 'by': _v(Cloud._uid), 'updated': _v(DateTime.now())}
+      });
+      return true;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -177,7 +214,7 @@ class Accounts {
     await Cloud._call('PATCH', Cloud._doc('accounts/${Cloud._uid}', _mask(['pending'])), token: token, body: {
       'fields': {'pending': _v('$plan × $months')}
     });
-    await Sub.apply(plan: Sub.plan, until: Sub.until, admin: Sub.admin, blocked: Sub.blocked, pending: '$plan × $months');
+    await Sub.apply(plan: Sub.plan, until: Sub.until, admin: Sub.admin, blocked: Sub.blocked, pending: '$plan × $months', uid: Cloud._uid);
   }
 
   // ---------------------------------------------------------------- admin
@@ -276,6 +313,7 @@ const firestoreRules = r'''rules_version = '2';
 //                            and notes are changed by the admin only
 //   requests/{id}            plan requests: the owner creates a pending one;
 //                            the admin approves or rejects
+//   tac/{tac}                community phone model names (IMEI first 8 digits)
 // Everything else is denied.
 // =============================================================================
 service cloud.firestore {
@@ -338,6 +376,22 @@ service cloud.firestore {
 
       allow get: if signedIn() && (resource.data.uid == request.auth.uid || isAdmin());
       allow list, update, delete: if isAdmin();
+    }
+
+    // ---------------------------------------------------------------- community IMEI models
+    // tac/{8 digits}: phone model names shared by every Hisab AI shop. Any
+    // signed-in shop reads; the shop that named a model (or the admin) may fix it.
+    match /tac/{tac} {
+      allow read: if signedIn();
+      allow create, update: if signedIn()
+        && tac.matches('^[0-9]{8}$')
+        && (resource == null || resource.data.by == request.auth.uid || isAdmin())
+        && incoming().keys().hasOnly(['model', 'brand', 'by', 'updated'])
+        && incoming().model is string && incoming().model.size() >= 2 && incoming().model.size() <= 80
+        && incoming().brand is string && incoming().brand.size() <= 40
+        && incoming().by == request.auth.uid
+        && incoming().updated is timestamp;
+      allow delete: if isAdmin();
     }
 
     // ---------------------------------------------------------------- everything else

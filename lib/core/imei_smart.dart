@@ -1,3 +1,4 @@
+import '../cloud/cloud.dart';
 import 'books.dart';
 import 'money.dart';
 import 'plan.dart';
@@ -116,6 +117,20 @@ class SmartImei {
         }
       }
     }
+    if (product == null && sName == null && isImei) {
+      // Hisab AI community list: models named by other shops
+      final c = await Accounts.tacGet(code.substring(0, 8)).timeout(const Duration(seconds: 8), onTimeout: () => null);
+      if (c != null) {
+        sName = c.$1;
+        sBrand = c.$2.isEmpty ? null : c.$2;
+        how = 'community';
+        try {
+          await Books.execute(
+              'INSERT OR IGNORE INTO imei_models (tac, product_id, name, brand, source, updated_at) VALUES (?, NULL, ?, ?, ?, ?)',
+              [code.substring(0, 8), sName, sBrand, 'community', DateTime.now().toIso8601String()]);
+        } catch (_) {}
+      }
+    }
     if (product == null && sName == null && isImei && Sub.can('smart_imei')) {
       // public TAC database (online, cached on the phone)
       final m = await TacDb.lookup(code);
@@ -144,6 +159,51 @@ class SmartImei {
     await Books.execute(
         'INSERT OR REPLACE INTO imei_models (tac, product_id, name, brand, source, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
         [c.substring(0, 8), productId, name, brand, 'shop', DateTime.now().toIso8601String()]);
+    // teach every Hisab AI shop this model
+    if ((name ?? '').trim().length >= 2) {
+      Accounts.tacPut(c.substring(0, 8), modelName(name!), brand ?? '').catchError((_) => false);
+    }
+  }
+
+  /// The model part of a product name: drops colour, storage (8/128, 128GB)
+  /// and condition words so one name fits every phone with that TAC.
+  static String modelName(String name) {
+    var s = ' ${name.trim()} ';
+    s = s.replaceAll(RegExp(r'\(.*?\)|\[.*?\]'), ' ');
+    s = s.replaceAll(RegExp(r'\b\d{1,2}\s*(gb)?\s*[/+|]\s*\d{2,4}\s*(gb|tb)?\b', caseSensitive: false), ' ');
+    s = s.replaceAll(RegExp(r'\b\d{1,4}\s*(gb|tb)\b(\s*(ram|rom|storage))?', caseSensitive: false), ' ');
+    const words = 'black|white|blue|red|green|gold|silver|grey|gray|purple|pink|yellow|orange|violet|midnight|starlight|graphite|titanium|natural|desert|mint|cream|lavender|bronze|navy|teal|new|used|refurbished|box|pack';
+    s = s.replaceAll(RegExp('\\b($words)\\b', caseSensitive: false), ' ');
+    s = s.replaceAll(RegExp(r'[\s,\-/|]+$'), '').replaceAll(RegExp(r'\s+'), ' ').trim();
+    return s.length >= 2 ? s : name.trim();
+  }
+
+  /// Shares the models in this shop's past purchases and sales (phones with a
+  /// valid IMEI) with the community list — once per store. Returns how many.
+  static Future<int> shareHistory() async {
+    if (Cloud.user == null) return 0;
+    final st = await Books.settings();
+    if (st['tac_shared'] == '1') return 0;
+    final rows = await Books.query(
+        'SELECT substr(x.serial, 1, 8) AS tac, p.name, p.brand, COUNT(*) AS n FROM ('
+        'SELECT serial, product_id FROM purchase_items WHERE length(serial) = 15 '
+        'UNION ALL SELECT serial, product_id FROM sale_items WHERE length(serial) = 15'
+        ') x JOIN products p ON p.id = x.product_id GROUP BY tac, p.id ORDER BY tac, n DESC');
+    final best = <String, Rec>{};
+    for (final r in rows) {
+      best.putIfAbsent('${r['tac']}', () => r);
+    }
+    var n = 0;
+    for (final e in best.entries.take(300)) {
+      if (!RegExp(r'^\d{8}$').hasMatch(e.key)) continue;
+      final name = '${e.value['name'] ?? ''}';
+      await Books.execute(
+          'INSERT OR IGNORE INTO imei_models (tac, product_id, name, brand, source, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+          [e.key, null, name, e.value['brand'], 'history', DateTime.now().toIso8601String()]);
+      if (await Accounts.tacPut(e.key, modelName(name), '${e.value['brand'] ?? ''}')) n++;
+    }
+    await Books.setSetting('tac_shared', '1');
+    return n;
   }
 
   static Future<Rec?> _product(int id) async {
