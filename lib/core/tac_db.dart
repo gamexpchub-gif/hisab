@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -18,6 +19,21 @@ class TacDb {
   static const url = 'https://tacdb.osmocom.org/export/tacdb.csv';
   static Map<String, TacModel>? _map;
   static DateTime? _failedAt; // don't retry a failed download for 10 minutes
+  /// Why the last download failed (shown to the user), or null.
+  static String? lastError;
+
+  /// Models known on this phone (0 until downloaded).
+  static Future<int> count() async => (await _load(download: false)).length;
+
+  /// When the database was last downloaded.
+  static Future<DateTime?> updated() async {
+    try {
+      final f = await _file();
+      return await f.exists() ? await f.lastModified() : null;
+    } catch (_) {
+      return null;
+    }
+  }
 
   static Future<File> _file() async {
     final dir = await getApplicationSupportDirectory();
@@ -78,37 +94,54 @@ class TacDb {
 
   /// Downloads (or refreshes) the database. Returns how many models it has.
   static Future<int> download() async {
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 20);
     try {
       final req = await client.getUrl(Uri.parse(url));
-      final res = await req.close().timeout(const Duration(seconds: 60));
-      if (res.statusCode != 200) return 0;
+      req.headers.set(HttpHeaders.userAgentHeader, 'HisabAI/1.0');
+      final res = await req.close().timeout(const Duration(seconds: 90));
+      if (res.statusCode != 200) {
+        lastError = 'Model database server answered ${res.statusCode}';
+        return 0;
+      }
       final text = await res.transform(utf8.decoder).join();
       final map = _parse(text);
-      if (map.isEmpty) return 0;
+      if (map.isEmpty) {
+        lastError = 'Model database download was empty';
+        return 0;
+      }
       await (await _file()).writeAsString(text, flush: true);
       _map = map;
+      lastError = null;
+      _failedAt = null;
       return map.length;
-    } catch (_) {
+    } on SocketException {
+      lastError = 'No internet — connect once to download phone models';
+      return 0;
+    } on TimeoutException {
+      lastError = 'Model database download timed out';
+      return 0;
+    } catch (e) {
+      lastError = 'Model database download failed';
       return 0;
     } finally {
       client.close();
     }
   }
 
-  static Future<Map<String, TacModel>> _load() async {
+  static Future<Map<String, TacModel>> _load({bool download = true}) async {
     if (_map != null) return _map!;
     try {
       final f = await _file();
       if (await f.exists()) {
         _map = _parse(await f.readAsString());
         final age = DateTime.now().difference(await f.lastModified()).inDays;
-        if (age > 30) download(); // refresh in the background
+        if (age > 30) TacDb.download(); // refresh in the background
         return _map!;
       }
     } catch (_) {}
+    if (!download) return const {};
     if (_failedAt != null && DateTime.now().difference(_failedAt!).inMinutes < 10) return const {};
-    if (await download() == 0) _failedAt = DateTime.now();
+    if (await TacDb.download() == 0) _failedAt = DateTime.now();
     return _map ?? const {};
   }
 

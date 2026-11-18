@@ -9,6 +9,8 @@ import '../ui/widgets.dart';
 import 'parties.dart';
 import 'sales.dart' show SaleView, PurchaseView;
 import 'scanner.dart';
+import '../core/tac_db.dart';
+import '../core/plan.dart';
 
 // =============================================================================
 // IMEI & Warranty — scan or type any IMEI / serial to see the device's whole
@@ -119,6 +121,8 @@ class _ImeiScreenState extends State<ImeiScreen> {
             ]),
             const SizedBox(height: 14),
             _scanCard(),
+            const SizedBox(height: 12),
+            const _ModelDbCard(),
             const SizedBox(height: 14),
             if (q.isNotEmpty && q.length < 3)
               Text('Type at least 3 digits', style: _j(12.5, FontWeight.w600, _muted)),
@@ -434,5 +438,79 @@ class _DeviceCard extends StatelessWidget {
             Flexible(child: Text(l, maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(12, FontWeight.w800, c))),
           ]),
         ),
+      );
+}
+
+
+/// Status of the phone model database used to name phones from their IMEI.
+class _ModelDbCard extends StatefulWidget {
+  const _ModelDbCard();
+  @override
+  State<_ModelDbCard> createState() => _ModelDbCardState();
+}
+
+class _ModelDbCardState extends State<_ModelDbCard> {
+  int count = 0, learned = 0;
+  DateTime? updated;
+  bool busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _read();
+  }
+
+  Future<void> _read() async {
+    final c = await TacDb.count();
+    final u = await TacDb.updated();
+    final l = asInt((await Books.query('SELECT COUNT(*) AS c FROM imei_models')).first['c']);
+    if (mounted) {
+      setState(() {
+        count = c;
+        updated = u;
+        learned = l;
+      });
+    }
+  }
+
+  Future<void> _download() async {
+    setState(() => busy = true);
+    final n = await TacDb.download();
+    if (!mounted) return;
+    setState(() => busy = false);
+    toast(context, n > 0 ? '$n phone models downloaded' : (TacDb.lastError ?? 'Download failed'), error: n == 0);
+    _read();
+  }
+
+  @override
+  Widget build(BuildContext context) => Container(
+        decoration: _card(),
+        padding: const EdgeInsets.all(14),
+        child: Row(children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(13),
+              gradient: const LinearGradient(colors: [Color(0xFF8B5CF6), Color(0xFF4318D2)]),
+            ),
+            child: const Icon(Icons.phone_android_rounded, color: Colors.white),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Phone model names from IMEI', style: _j(13.5, FontWeight.w800, _ink)),
+              Text(
+                count > 0
+                    ? '$count models on this phone${updated == null ? '' : ' · updated ${updated!.day}/${updated!.month}/${updated!.year}'} · $learned learned'
+                    : 'Not downloaded yet · $learned learned from your products',
+                style: _j(11.5, FontWeight.w600, _muted),
+              ),
+            ]),
+          ),
+          busy
+              ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4))
+              : TextButton(onPressed: Sub.can('smart_imei') ? _download : null, child: Text(count > 0 ? 'Update' : 'Download')),
+        ]),
       );
 }

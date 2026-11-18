@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../core/books.dart';
+import '../core/drafts.dart';
 import '../core/imei_smart.dart';
 import '../core/money.dart';
 import '../ui/photo.dart';
@@ -87,7 +88,7 @@ class PurchaseForm extends StatefulWidget {
   State<PurchaseForm> createState() => _PurchaseFormState();
 }
 
-class _PurchaseFormState extends State<PurchaseForm> {
+class _PurchaseFormState extends State<PurchaseForm> with WidgetsBindingObserver {
   List<Rec> products = [], suppliers = [], accounts = [];
   Map<int, int> payables = {};
   Map<int, int> lastRates = {};
@@ -104,10 +105,14 @@ class _PurchaseFormState extends State<PurchaseForm> {
   final search = TextEditingController();
   final paidCtrl = TextEditingController();
   final note = TextEditingController();
+  String? draftNote;
+  bool _finished = false;
+  bool _draftChecked = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     search.addListener(() => setState(() {}));
     billNo.addListener(_checkBill);
     _load();
@@ -115,6 +120,8 @@ class _PurchaseFormState extends State<PurchaseForm> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _saveDraft();
     for (final l in lines) {
       l.serial.dispose();
     }
@@ -144,7 +151,81 @@ class _PurchaseFormState extends State<PurchaseForm> {
       }
     }
     if (widget.editPurchaseId != null && !_editLoaded) await _loadEdit(widget.editPurchaseId!);
+    if (!editing && lines.isEmpty && !_draftChecked) {
+      _draftChecked = true;
+      final d = await Drafts.load('purchase');
+      if (d != null) _restoreDraft(d);
+    }
     if (mounted) setState(() {});
+  }
+
+  // ---------------------------------------------------------------- draft
+  Map<String, dynamic> _draft() => {
+        'supplier': supplier == null ? null : asInt(supplier!['id']),
+        'date': date,
+        'billNo': billNo.text,
+        'note': note.text,
+        'payMode': payMode,
+        'paid': paidCtrl.text,
+        'account': account,
+        'interState': interState,
+        'billImage': billImage,
+        'lines': [for (final l in lines) {'p': l.id, 'qty': l.qty, 'rate': l.rate, 'serial': l.serial.text}],
+      };
+
+  void _saveDraft() {
+    if (editing || _finished) return;
+    if (lines.isEmpty) {
+      Drafts.clear('purchase');
+    } else {
+      Drafts.save('purchase', _draft());
+    }
+  }
+
+  void _restoreDraft(Map<String, dynamic> d) {
+    for (final l in (d['lines'] as List)) {
+      final m = l as Map<String, dynamic>;
+      final p = products.where((x) => asInt(x['id']) == asInt(m['p'])).firstOrNull;
+      if (p == null) continue;
+      final line = _PLine(p, qty: asInt(m['qty']), rate: asInt(m['rate']), lastRate: lastRates[asInt(m['p'])]);
+      line.serial.text = '${m['serial'] ?? ''}';
+      lines.add(line);
+    }
+    if (lines.isEmpty) return;
+    final sid = d['supplier'];
+    if (sid != null && supplier == null) supplier = suppliers.where((x) => asInt(x['id']) == asInt(sid)).firstOrNull;
+    date = '${d['date'] ?? date}';
+    billNo.text = '${d['billNo'] ?? ''}';
+    note.text = '${d['note'] ?? ''}';
+    payMode = '${d['payMode'] ?? 'credit'}';
+    paidCtrl.text = '${d['paid'] ?? ''}';
+    interState = d['interState'] == true;
+    billImage = d['billImage'] as String?;
+    final acc = d['account'];
+    if (acc != null && accounts.any((a) => asInt(a['id']) == asInt(acc))) account = asInt(acc);
+    draftNote = 'Unfinished purchase restored · ${Drafts.summary(d)}';
+  }
+
+  void _discardDraft() {
+    Drafts.clear('purchase');
+    setState(() {
+      for (final l in lines) {
+        l.serial.dispose();
+      }
+      lines.clear();
+      supplier = null;
+      billNo.clear();
+      note.clear();
+      paidCtrl.clear();
+      billImage = null;
+      payMode = 'credit';
+      draftNote = null;
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive || state == AppLifecycleState.detached) _saveDraft();
   }
 
   bool _editLoaded = false;
@@ -415,6 +496,8 @@ class _PurchaseFormState extends State<PurchaseForm> {
         note: noteText.isEmpty ? null : noteText,
         billImage: billImage,
       );
+      _finished = true;
+      if (!editing) await Drafts.clear('purchase');
       if (!mounted) return;
       HapticFeedback.heavyImpact();
       if (editing) {
@@ -442,6 +525,7 @@ class _PurchaseFormState extends State<PurchaseForm> {
             padding: EdgeInsets.fromLTRB(16, 8, 16, 150 + safe),
             children: [
               _header(),
+              if (draftNote != null) ...[const SizedBox(height: 10), _draftBanner()],
               const SizedBox(height: 14),
               _supplierCard(),
               const SizedBox(height: 14),
@@ -466,6 +550,17 @@ class _PurchaseFormState extends State<PurchaseForm> {
       ]),
     );
   }
+
+  Widget _draftBanner() => Container(
+        padding: const EdgeInsets.fromLTRB(14, 8, 6, 8),
+        decoration: BoxDecoration(color: const Color(0xFFEFF6FF), borderRadius: BorderRadius.circular(14), border: Border.all(color: const Color(0xFFBFDBFE))),
+        child: Row(children: [
+          const Icon(Icons.history_rounded, color: Color(0xFF2563EB), size: 20),
+          const SizedBox(width: 8),
+          Expanded(child: Text(draftNote!, style: _j(12.5, FontWeight.w700, const Color(0xFF1E3A8A)))),
+          TextButton(onPressed: _discardDraft, child: const Text('Discard')),
+        ]),
+      );
 
   Widget _header() => Row(children: [
         _round(Icons.arrow_back_rounded, () => Navigator.of(context).pop()),

@@ -12,6 +12,8 @@ import '../ui/photo.dart';
 import '../ui/widgets.dart';
 import 'products.dart';
 import 'scanner.dart';
+import '../core/plan.dart';
+import '../core/tac_db.dart';
 
 // =============================================================================
 // Add / Edit Product — photo, Smart Assist, barcode scanning, variant builder,
@@ -212,7 +214,13 @@ class _ProductFormState extends State<ProductForm> {
           _analyse();
           if (!guess.isEmpty) await _applyGuess();
         } else {
-          setState(() => smartNote = 'New model (IMEI ${m.tac}…) — type the name once and save; this model is then recognised automatically'
+          final why = !Sub.can('smart_imei')
+              ? ' (online model lookup is in Premium)'
+              : TacDb.lastError != null
+                  ? ' (${TacDb.lastError})'
+                  : '';
+          setState(() => smartNote = 'Model not found for IMEI ${m.tac}…$why — type the name once and save; '
+              'the next phone of this model is named automatically'
               '${!m.valid ? '. ⚠ IMEI check digit looks wrong' : ''}');
         }
         return;

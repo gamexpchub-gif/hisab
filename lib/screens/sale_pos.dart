@@ -6,6 +6,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../core/books.dart';
+import '../core/drafts.dart';
 import '../core/imei_smart.dart';
 import '../core/money.dart';
 import '../print/print_screen.dart';
@@ -87,7 +88,7 @@ class SaleForm extends StatefulWidget {
   State<SaleForm> createState() => _SaleFormState();
 }
 
-class _SaleFormState extends State<SaleForm> {
+class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
   List<Rec> products = [], customers = [], accounts = [], quick = [];
   Map<int, int> dues = {};
   Map<String, String> settings = {};
@@ -113,10 +114,13 @@ class _SaleFormState extends State<SaleForm> {
   String? cat; // category filter of the product strip
   bool saving = false;
   String nextNo = '';
+  String? draftNote; // shown when an unfinished sale was restored
+  bool _finished = false; // saved — no draft
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     search.addListener(() => setState(() {}));
     discountCtrl.addListener(_recalc);
     _load();
@@ -143,10 +147,104 @@ class _SaleFormState extends State<SaleForm> {
       }
     }
     if (widget.editSaleId != null && !_editLoaded) await _loadEdit(widget.editSaleId!);
+    if (!editing && cart.isEmpty && !_draftChecked) {
+      _draftChecked = true;
+      final d = await Drafts.load('sale');
+      if (d != null) _restoreDraft(d);
+    }
     if (mounted) setState(() {});
   }
 
   bool _editLoaded = false;
+  bool _draftChecked = false;
+
+  // ---------------------------------------------------------------- draft
+  Map<String, dynamic> _draft() => {
+        'customer': customer == null ? null : asInt(customer!['id']),
+        'date': date,
+        'note': note.text,
+        'discount': discountCtrl.text,
+        'discountPct': discountPct,
+        'roundOff': roundOff,
+        'payMode': payMode,
+        'advancePct': advancePct,
+        'advance': advanceCtrl.text,
+        'received': received.text,
+        'receivedTouched': receivedTouched,
+        'account': account,
+        'lines': [
+          for (final l in cart) {'p': l.id, 'qty': l.qty, 'rate': l.rate, 'serial': l.serial.text, 'opp': l.opp.text},
+        ],
+        'splits': [for (final sp in splits) {'account': sp.account, 'amount': sp.ctrl.text}],
+      };
+
+  void _saveDraft() {
+    if (editing || _finished) return;
+    if (cart.isEmpty) {
+      Drafts.clear('sale');
+    } else {
+      Drafts.save('sale', _draft());
+    }
+  }
+
+  void _restoreDraft(Map<String, dynamic> d) {
+    for (final l in (d['lines'] as List)) {
+      final m = l as Map<String, dynamic>;
+      final p = products.where((x) => asInt(x['id']) == asInt(m['p'])).firstOrNull;
+      if (p == null) continue;
+      final line = _Line(p, qty: asInt(m['qty']))..rate = asInt(m['rate']);
+      line.serial.text = '${m['serial'] ?? ''}';
+      line.opp.text = '${m['opp'] ?? ''}';
+      cart.add(line);
+    }
+    if (cart.isEmpty) return;
+    final cid = d['customer'];
+    if (cid != null && customer == null) customer = customers.where((c) => asInt(c['id']) == asInt(cid)).firstOrNull;
+    date = '${d['date'] ?? date}';
+    note.text = '${d['note'] ?? ''}';
+    discountCtrl.text = '${d['discount'] ?? ''}';
+    discountPct = d['discountPct'] == true;
+    roundOff = d['roundOff'] != false;
+    payMode = '${d['payMode'] ?? 'full'}';
+    advancePct = asInt(d['advancePct']);
+    advanceCtrl.text = '${d['advance'] ?? ''}';
+    received.text = '${d['received'] ?? ''}';
+    receivedTouched = d['receivedTouched'] == true;
+    final acc = d['account'];
+    if (acc != null && accounts.any((a) => asInt(a['id']) == asInt(acc))) account = asInt(acc);
+    for (final sp in (d['splits'] as List? ?? const [])) {
+      final m = sp as Map<String, dynamic>;
+      splits.add(_Split()
+        ..account = m['account'] == null ? null : asInt(m['account'])
+        ..ctrl.text = '${m['amount'] ?? ''}');
+    }
+    draftNote = 'Unfinished sale restored · ${Drafts.summary(d)}';
+  }
+
+  void _discardDraft() {
+    Drafts.clear('sale');
+    setState(() {
+      for (final l in cart) {
+        l.serial.dispose();
+        l.opp.dispose();
+      }
+      cart.clear();
+      splits.clear();
+      customer = null;
+      note.clear();
+      discountCtrl.clear();
+      advanceCtrl.clear();
+      received.clear();
+      receivedTouched = false;
+      payMode = 'full';
+      draftNote = null;
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive || state == AppLifecycleState.detached) _saveDraft();
+  }
 
   /// Fills the form from an existing sale. Its units count as in stock again.
   Future<void> _loadEdit(int id) async {
@@ -204,6 +302,8 @@ class _SaleFormState extends State<SaleForm> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _saveDraft();
     for (final l in cart) {
       l.serial.dispose();
       l.opp.dispose();
@@ -512,6 +612,8 @@ class _SaleFormState extends State<SaleForm> {
           minute: promiseAt.minute,
         );
       }
+      _finished = true;
+      if (!editing) await Drafts.clear('sale');
       if (!mounted) return;
       HapticFeedback.heavyImpact();
       if (editing) {
@@ -546,6 +648,7 @@ class _SaleFormState extends State<SaleForm> {
             padding: EdgeInsets.fromLTRB(16, 8, 16, 150 + safe),
             children: [
               _header(),
+              if (draftNote != null) ...[const SizedBox(height: 10), _draftBanner()],
               const SizedBox(height: 14),
               _customerCard(),
               const SizedBox(height: 14),
@@ -568,6 +671,17 @@ class _SaleFormState extends State<SaleForm> {
       ]),
     );
   }
+
+  Widget _draftBanner() => Container(
+        padding: const EdgeInsets.fromLTRB(14, 8, 6, 8),
+        decoration: BoxDecoration(color: const Color(0xFFEFF6FF), borderRadius: BorderRadius.circular(14), border: Border.all(color: const Color(0xFFBFDBFE))),
+        child: Row(children: [
+          const Icon(Icons.history_rounded, color: Color(0xFF2563EB), size: 20),
+          const SizedBox(width: 8),
+          Expanded(child: Text(draftNote!, style: _j(12.5, FontWeight.w700, const Color(0xFF1E3A8A)))),
+          TextButton(onPressed: _discardDraft, child: const Text('Discard')),
+        ]),
+      );
 
   Widget _header() => Row(children: [
         _round(Icons.arrow_back_rounded, () => Navigator.of(context).pop()),

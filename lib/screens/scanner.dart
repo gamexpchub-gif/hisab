@@ -70,6 +70,17 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> with Single
     super.dispose();
   }
 
+  /// Back: a single scan returns nothing; batch mode returns how many were added.
+  void _back() {
+    if (done) return;
+    done = true;
+    if (batch) {
+      Navigator.of(context).pop(count);
+    } else {
+      Navigator.of(context).pop();
+    }
+  }
+
   static void beep() {
     SystemSound.play(SystemSoundType.click);
     HapticFeedback.heavyImpact();
@@ -247,7 +258,7 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> with Single
                         begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xAA000000), Color(0x00000000)]),
                   ),
                   child: Row(children: [
-                    _glassBtn(Icons.arrow_back_rounded, () => Navigator.of(context).pop(count)),
+                    _glassBtn(Icons.arrow_back_rounded, _back),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(widget.title,
