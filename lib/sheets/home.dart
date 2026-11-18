@@ -280,6 +280,7 @@ class _SheetsHomeState extends State<SheetsHome> {
                   style: _j(14.5, FontWeight.w600, Colors.white),
                   cursorColor: Colors.white,
                   decoration: InputDecoration(
+                    filled: false,
                     prefixIcon: const Icon(Icons.search_rounded, color: Colors.white),
                     hintText: 'Search templates and workbooks',
                     hintStyle: _j(13.5, FontWeight.w500, const Color(0xCCFFFFFF)),
