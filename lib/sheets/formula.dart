@@ -292,10 +292,13 @@ class Formula {
           args.add(() {
             final save = _i;
             _i = start;
-            final v = _expr();
-            if (_i != end) throw errValue;
-            _i = save;
-            return v;
+            try {
+              final v = _expr();
+              if (_i != end) throw errValue;
+              return v;
+            } finally {
+              _i = save; // an error inside an argument must not lose our place
+            }
           });
           if (_p.t == _T.comma) {
             _next();
@@ -394,7 +397,7 @@ class Formula {
         final l = _nums(a).toList();
         return l.isEmpty ? 0 : l.reduce(math.max);
       case 'COUNT':
-        return _flat(a).where((v) => v is num).length.toDouble();
+        return _flat(a).whereType<num>().length.toDouble();
       case 'COUNTA':
         return _flat(a).where((v) => v != null && v != '').length.toDouble();
       case 'PRODUCT':
