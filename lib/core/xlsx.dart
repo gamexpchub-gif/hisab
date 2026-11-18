@@ -10,6 +10,20 @@ class Money2 {
   const Money2(this.paise);
 }
 
+/// A formula cell for Excel, with its last computed value.
+class XFormula {
+  final String formula; // without '='
+  final Object? value;
+  final bool bold, money;
+  const XFormula(this.formula, this.value, {this.bold = false, this.money = false});
+}
+
+/// Bold text.
+class XBold {
+  final Object? value;
+  const XBold(this.value);
+}
+
 class Sheet {
   final String name;
   final List<String> header;
@@ -54,6 +68,15 @@ class Xlsx {
   // styles: 0 normal · 1 header · 2 money · 3 bold text · 4 bold money · 5 integer
   static String _cell(String ref, Object? v, {bool bold = false}) {
     if (v == null) return '';
+    if (v is XBold) return _cell(ref, v.value, bold: true);
+    if (v is XFormula) {
+      final f = '<f>${_esc(v.formula)}</f>';
+      final b = bold || v.bold;
+      final r = v.value;
+      if (r is num) return '<c r="$ref" s="${v.money ? (b ? 4 : 2) : (b ? 3 : 0)}">$f<v>$r</v></c>';
+      if (r is bool) return '<c r="$ref" t="b"${b ? ' s="3"' : ''}>$f<v>${r ? 1 : 0}</v></c>';
+      return '<c r="$ref" t="str"${b ? ' s="3"' : ''}>$f<v>${_esc('${r ?? ''}')}</v></c>';
+    }
     if (v is Money2) return '<c r="$ref" s="${bold ? 4 : 2}"><v>${(v.paise / 100).toStringAsFixed(2)}</v></c>';
     if (v is int) return '<c r="$ref" s="${bold ? 4 : 5}"><v>$v</v></c>';
     if (v is double) return '<c r="$ref" s="${bold ? 4 : 2}"><v>$v</v></c>';

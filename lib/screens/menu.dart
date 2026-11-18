@@ -26,6 +26,7 @@ import 'sales.dart';
 import 'search.dart';
 import 'settings.dart';
 import 'smart_ai.dart';
+import '../sheets/home.dart';
 import 'plans.dart';
 import 'stores.dart';
 import 'admin.dart';
@@ -73,6 +74,7 @@ const _lock = <String, String>{
   'Trial Balance': 'balance_sheet',
   'GST Report': 'gst',
   'Excel Export': 'excel',
+  'Hisab Sheets': 'excel',
   'Security': 'lock',
 };
 
@@ -118,6 +120,10 @@ class _MenuScreenState extends State<MenuScreen> {
   List<(String, List<_Item>)> _groups(_MenuData d) {
     void go(Widget w) => open(context, w);
     return [
+      ('Hisab Sheets', [
+        _Item('Hisab Sheets', 'Excel on your phone · formulas, charts, live shop data', Icons.grid_on_rounded,
+            const [Color(0xFF21A366), Color(0xFF0B5A30)], () => go(const SheetsHome()), badge: 'NEW'),
+      ]),
       ('Smart AI', [
         _Item('Smart Business AI', 'What to do today: dues, EMIs, stock, profit', Icons.auto_awesome_rounded,
             const [Color(0xFF7B3FF2), Color(0xFF1B1F6B)], () => go(const SmartAiScreen())),
