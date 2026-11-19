@@ -217,6 +217,19 @@ class Backup {
   /// runs in the database's own queue, between sales). Phones with an old
   /// SQLite (before 3.27) fall back to the closed-file copy.
   static Future<List<int>> snapshot() async {
+    // fastest and smallest: the file itself, read inside a write
+    // transaction (nothing can change it meanwhile; without WAL the file
+    // holds exactly the saved books). Its pages keep their places, so the
+    // live backup only sends the few pieces a change touched.
+    try {
+      final db = await AppDb.instance;
+      final mode = '${(await db.rawQuery('PRAGMA journal_mode')).first.values.first}'.toLowerCase();
+      final path = await AppDb.path();
+      if (mode != 'wal' && mode != 'memory' && await File(path).exists()) {
+        final b = await db.transaction((_) => File(path).readAsBytes());
+        if (b.length >= 100 && ascii.decode(b.sublist(0, 15), allowInvalid: true) == _magic) return b;
+      }
+    } catch (_) {}
     try {
       final tmp = File(p.join((await getTemporaryDirectory()).path, 'hisab-live-${DateTime.now().microsecondsSinceEpoch}.db'));
       final db = await AppDb.instance;
@@ -348,6 +361,39 @@ class Backup {
     }
     await Books.setSetting('last_restore_at', DateTime.now().toIso8601String());
     Books.notifyChanged();
+  }
+
+  /// Brings every store of the account back from the cloud onto this phone
+  /// (a new phone, or the app's data was cleared): for each store, its
+  /// newest copy — usually the live copy, seconds old — goes into that
+  /// store. Ends in the store used most recently. Returns how many stores.
+  static Future<int> restoreAccount({void Function(String step, double progress)? status}) async {
+    final list = await Cloud.listBackups(); // newest first
+    final newest = <String, CloudBackup>{};
+    for (final b in list) {
+      newest.putIfAbsent(b.store, () => b);
+    }
+    if (newest.isEmpty) return 0;
+    LiveSync.paused = true;
+    try {
+      var n = 0;
+      for (final b in newest.values) {
+        final name = b.storeName.isNotEmpty ? b.storeName : (b.store == 'main' ? 'Main store' : 'Store');
+        status?.call('Store ${n + 1} of ${newest.length} · $name', n / newest.length);
+        final f = await Cloud.downloadBackup(b, progress: (v) => status?.call('Store ${n + 1} of ${newest.length} · $name', (n + v) / newest.length));
+        final st = await Stores.ensure(b.store, name);
+        await Stores.switchTo(st.id);
+        await restore(f);
+        await f.delete().catchError((_) => f);
+        n++;
+      }
+      // open the store that was worked in last
+      await Stores.switchTo(list.first.store);
+      status?.call('Done', 1);
+      return n;
+    } finally {
+      LiveSync.paused = false;
+    }
   }
 
   static String size(int bytes) => bytes < 1024 * 1024

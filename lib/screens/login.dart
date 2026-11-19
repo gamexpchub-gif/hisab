@@ -125,33 +125,77 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   /// On a fresh phone, offer the newest cloud backup.
+  /// A phone with no books (new phone, or the app's data was cleared):
+  /// bring the whole account back — every store, from its newest copy.
   Future<void> _offerRestore() async {
     try {
-      // only a phone with no books at all is offered the cloud copy
       if (!await Backup.phoneIsEmpty()) return;
       final list = await Cloud.listBackups();
       if (list.isEmpty || !mounted) return;
-      // the newest copy (the live copy is usually seconds old)
+      final stores = <String, CloudBackup>{};
+      for (final b in list) {
+        stores.putIfAbsent(b.store, () => b);
+      }
       final b = list.first;
+      String when(DateTime t) => '${prettyDate(ymd(t))} ${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
       final ok = await showDialog<bool>(
         context: context,
+        barrierDismissible: false,
         builder: (c) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
           icon: const Icon(Icons.cloud_download_rounded, color: Color(0xFF4318D2), size: 44),
-          title: const Text('Restore your books?'),
-          content: Text('${b.live ? 'Your live copy' : 'A cloud backup'} from ${prettyDate(ymd(b.created))} '
-              '${b.created.hour.toString().padLeft(2, '0')}:${b.created.minute.toString().padLeft(2, '0')} was found — '
-              '${b.sales} sales, ${b.products} products, ${b.customers} customers.'),
+          title: const Text('Your books are in the cloud'),
+          content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('${stores.length} store${stores.length == 1 ? '' : 's'} · last saved ${when(b.created)}${b.live ? ' (live copy)' : ''}'),
+            const SizedBox(height: 8),
+            for (final x in stores.values)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                    '• ${x.storeName.isNotEmpty ? x.storeName : (x.store == 'main' ? 'Main store' : 'Store')} — '
+                    '${x.sales} sales, ${x.products} products · ${when(x.created)}',
+                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+              ),
+          ]),
           actions: [
             TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Start fresh')),
-            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Restore')),
+            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Restore everything')),
           ],
         ),
       );
-      if (ok != true) return;
-      final f = await Cloud.downloadBackup(b);
-      await Backup.restore(f);
-      if (mounted) toast(context, 'Your books are restored');
+      if (ok != true || !mounted) return;
+      final step = ValueNotifier<(String, double)>(('Starting…', 0));
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (c) => PopScope(
+          canPop: false,
+          child: AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
+            title: const Text('Restoring your books'),
+            content: ValueListenableBuilder<(String, double)>(
+              valueListenable: step,
+              builder: (_, v, __) => Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                LinearProgressIndicator(value: v.$2 <= 0 ? null : v.$2, minHeight: 8, borderRadius: BorderRadius.circular(8)),
+                const SizedBox(height: 10),
+                Text(v.$1),
+              ]),
+            ),
+          ),
+        ),
+      );
+      try {
+        final n = await Backup.restoreAccount(status: (t, p) => step.value = (t, p));
+        if (mounted) {
+          Navigator.of(context, rootNavigator: true).pop();
+          toast(context, '$n store${n == 1 ? '' : 's'} restored — your books are back');
+        }
+      } catch (e) {
+        if (mounted) {
+          Navigator.of(context, rootNavigator: true).pop();
+          toast(context, 'Restore stopped: $e', error: true);
+        }
+      }
     } catch (e) {
       if (mounted) toast(context, '$e', error: true);
     }

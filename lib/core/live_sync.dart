@@ -40,6 +40,9 @@ class LiveSync {
 
   static Timer? _wait, _retry;
   static bool _busy = false, _again = false, _started = false;
+
+  /// Set while the whole account is being restored (no upload in between).
+  static bool paused = false;
   static int _pending = 0;
   static Map<String, dynamic>? _st;
 
@@ -126,6 +129,7 @@ class LiveSync {
 
   // ---------------------------------------------------------------- one pass
   static Future<void> run() async {
+    if (paused) return;
     if (_busy) {
       _again = true; // send again right after this pass
       return;
@@ -145,12 +149,18 @@ class LiveSync {
         for (final t in ['sales', 'products', 'customers']) t: asInt((await Books.query('SELECT COUNT(*) AS c FROM $t')).first['c']),
       };
       final db = await Backup.snapshot();
+      // the store was switched while copying: this copy is not that store's
+      if (Stores.current != store.id || paused) {
+        _again = true;
+        return;
+      }
       // 1 · the phone copy (instant, works offline)
       await _phoneCopy(db, store.id);
       await Cloud.load();
       if (Cloud.user == null || !Sub.can('cloud')) {
         _pending = max(0, _pending - taken);
-        _status('phone', Cloud.user == null ? 'Saved on phone · sign in for cloud' : 'Saved on phone');
+        _status('phone',
+            Cloud.user == null ? 'Saved on phone · sign in for the cloud copy' : 'Saved on phone · cloud copy needs the ${Sub.need('cloud')} plan (Menu → Plans)');
         return;
       }
       // a different account on this phone: start a fresh upload list
@@ -167,17 +177,24 @@ class LiveSync {
 
       Future<List<String>> pieces(List<int> bytes) async {
         final keys = <String>[];
+        final todo = <(String, List<int>)>[];
         for (var i = 0; i < bytes.length || (i == 0 && bytes.isEmpty); i += piece) {
           final part = bytes.sublist(i, min(i + piece, bytes.length));
           final key = '${install}_${sha1.convert(part)}';
-          if (!uploaded.contains(key)) {
-            await Cloud.putBlob(key, GZipEncoder().encode(part)!);
-            uploaded.add(key);
-            sent += part.length;
-            st['uploaded'] = uploaded.toList();
-          }
+          if (!uploaded.contains(key) && !todo.any((t) => t.$1 == key)) todo.add((key, part));
           keys.add(key);
           if (bytes.isEmpty) break;
+        }
+        // 4 pieces at a time: a change reaches the cloud in a second or two
+        for (var i = 0; i < todo.length; i += 4) {
+          await Future.wait([
+            for (final (key, part) in todo.skip(i).take(4))
+              Cloud.putBlob(key, GZipEncoder().encode(part)!).then((_) {
+                uploaded.add(key);
+                sent += part.length;
+              }),
+          ]);
+          st['uploaded'] = uploaded.toList();
         }
         return keys;
       }
