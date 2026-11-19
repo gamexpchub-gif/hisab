@@ -352,6 +352,8 @@ class SaleView extends StatelessWidget {
       const SizedBox(width: 8),
       tile(Icons.send_rounded, 'WhatsApp', const [Color(0xFF25D366), Color(0xFF128C7E)],
           () => Contact.whatsapp(d.sale['phone'] as String?, invoiceText(d.settings, d.sale, d.items))),
+      const SizedBox(width: 8),
+      tile(Icons.replay_rounded, 'Repeat', const [Color(0xFFFFB84D), Color(0xFFF97316)], () => open(context, SaleForm(repeatSaleId: id))),
     ]);
   }
 

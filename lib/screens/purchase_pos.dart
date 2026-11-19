@@ -2,10 +2,13 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../core/books.dart';
 import '../core/drafts.dart';
 import '../core/imei_smart.dart';
+import '../core/quick.dart';
 import '../core/money.dart';
 import '../ui/photo.dart';
 import '../ui/widgets.dart';
@@ -802,15 +805,159 @@ class _PurchaseFormState extends State<PurchaseForm> with WidgetsBindingObserver
           const SizedBox(width: 10),
           Expanded(child: TextField(controller: search, style: _j(14, FontWeight.w600, _ink), decoration: _bare('Add product — search name, brand, barcode'))),
           if (search.text.isNotEmpty) GestureDetector(onTap: search.clear, child: const Icon(Icons.close_rounded, color: _muted, size: 20)),
+          const SizedBox(width: 6),
+          GestureDetector(
+            onTap: _scanBill,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(colors: [Color(0xFF38BDF8), Color(0xFF2563EB)]),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.document_scanner_rounded, color: Colors.white, size: 17),
+                const SizedBox(width: 4),
+                Text('Bill photo', style: _j(11, FontWeight.w800, Colors.white)),
+              ]),
+            ),
+          ),
         ]),
       );
 
+  /// Purchase bill photo → lines: reads the supplier's printed bill on the
+  /// phone (no internet), matches products, quantities, rates and IMEIs.
+  Future<void> _scanBill() async {
+    final src = await showModalBottomSheet<ImageSource>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: const Icon(Icons.photo_camera_rounded, color: _purple),
+            title: const Text('Take a photo of the bill'),
+            subtitle: const Text('Flat, bright, the whole bill in the frame'),
+            onTap: () => Navigator.pop(c, ImageSource.camera),
+          ),
+          ListTile(
+            leading: const Icon(Icons.photo_library_rounded, color: _purple),
+            title: const Text('Choose from gallery'),
+            onTap: () => Navigator.pop(c, ImageSource.gallery),
+          ),
+        ]),
+      ),
+    );
+    if (src == null || !mounted) return;
+    final img = await ImagePicker().pickImage(source: src, imageQuality: 95, maxWidth: 2600);
+    if (img == null || !mounted) return;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+    String text = '';
+    BillScanResult? r;
+    String? fail;
+    final reader = TextRecognizer(script: TextRecognitionScript.latin);
+    try {
+      text = (await reader.processImage(InputImage.fromFilePath(img.path))).text;
+      r = await BillScan.parse(text, products, imeiProduct: (i) async => (await SmartImei.match(i)).product);
+    } catch (e) {
+      fail = 'Could not read the bill ($e)';
+    } finally {
+      await reader.close();
+    }
+    if (!mounted) return;
+    Navigator.of(context, rootNavigator: true).pop();
+    if (fail != null || r == null) {
+      toast(context, fail ?? 'Could not read the bill', error: true);
+      return;
+    }
+    if (r.lines.isEmpty && r.imeis.isEmpty) {
+      toast(context, text.trim().isEmpty ? 'No text found — take a clearer photo' : 'No known product on this bill — add the products first', error: true);
+      return;
+    }
+    final res = r;
+    final ok = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(26))),
+      builder: (c) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(c).size.height * .75),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+              child: Text('Read from the bill', style: _j(17, FontWeight.w800, _ink)),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Text(
+                  [
+                    '${res.lines.length} product${res.lines.length == 1 ? '' : 's'}',
+                    '${res.imeis.length} IMEI${res.imeis.length == 1 ? '' : 's'}',
+                    if (res.billNo != null) 'bill ${res.billNo}',
+                  ].join(' · '),
+                  style: _j(12, FontWeight.w600, _muted)),
+            ),
+            Flexible(
+              child: ListView(shrinkWrap: true, padding: const EdgeInsets.symmetric(horizontal: 12), children: [
+                for (final l in res.lines)
+                  ListTile(
+                    leading: ProductThumb(l.product, width: 40, height: 44),
+                    title: Text('${l.product['name']}', style: _j(13.5, FontWeight.w800, _ink)),
+                    subtitle: Text(
+                        [
+                          'Qty ${l.qty}',
+                          l.rate == null ? 'rate: last / cost' : 'rate ${Money.rs(l.rate!)}',
+                          if (l.serials.isNotEmpty) '${l.serials.length} IMEI',
+                        ].join(' · '),
+                        style: _j(11.5, FontWeight.w600, _muted)),
+                  ),
+                if (res.unmatched.isNotEmpty)
+                  ListTile(
+                    leading: const Icon(Icons.help_outline_rounded, color: _red),
+                    title: Text('${res.unmatched.length} IMEI of an unknown model', style: _j(13, FontWeight.w700, _red)),
+                    subtitle: Text(res.unmatched.join('\n'), style: _j(11, FontWeight.w600, _muted)),
+                  ),
+              ]),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(50)),
+                onPressed: res.lines.isEmpty ? null : () => Navigator.pop(c, true),
+                icon: const Icon(Icons.playlist_add_check_rounded),
+                label: const Text('Add to this purchase'),
+              ),
+            ),
+          ]),
+        ),
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() {
+      for (final l in res.lines) {
+        final pid = asInt(l.product['id']);
+        final p = products.where((x) => asInt(x['id']) == pid).firstOrNull ?? l.product;
+        final last = lastRates[pid];
+        final rate = l.rate ?? last ?? asInt(p['cost']);
+        final have = {for (final x in lines) x.serial.text.trim()};
+        final serials = l.serials.where((s) => !have.contains(s)).toList();
+        for (final sn in serials) {
+          lines.add(_PLine(p, rate: rate, lastRate: last)..serial.text = sn);
+        }
+        final rest = l.qty - serials.length;
+        if (rest > 0) lines.add(_PLine(p, qty: rest, rate: rate, lastRate: last));
+      }
+      if (billNo.text.trim().isEmpty && res.billNo != null) billNo.text = res.billNo!;
+    });
+    HapticFeedback.mediumImpact();
+    toast(context, 'Bill added — check the rates and save');
+  }
+
   Widget _results() {
-    final q = search.text.trim().toLowerCase();
-    final r = products
-        .where((p) => [p['name'], p['brand'], p['sku'], p['variant'], p['category']].any((v) => v != null && '$v'.toLowerCase().contains(q)))
-        .take(8)
-        .toList();
+    final r = SmartSearch.rank(products, search.text);
     return Container(
       margin: const EdgeInsets.only(top: 10),
       decoration: _card(),

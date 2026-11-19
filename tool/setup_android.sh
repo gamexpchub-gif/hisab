@@ -62,6 +62,25 @@ if ! grep -q 'androidx.core.content.FileProvider' "$MANIFEST"; then
   sed -i 's|</application>|    <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.files" android:exported="false" android:grantUriPermissions="true">\n            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/gamex_file_paths" />\n        </provider>\n    </application>|' "$MANIFEST"
 fi
 
+# Voice billing (speech_to_text): microphone + the speech service query.
+if ! grep -q 'android.permission.RECORD_AUDIO' "$MANIFEST"; then
+  sed -i 's|<application|<uses-permission android:name="android.permission.RECORD_AUDIO"/>\n    <application|' "$MANIFEST"
+fi
+if ! grep -q 'android.speech.RecognitionService' "$MANIFEST"; then
+  if grep -q '<queries>' "$MANIFEST"; then
+    sed -i 's|<queries>|<queries>\n        <intent>\n            <action android:name="android.speech.RecognitionService" />\n        </intent>|' "$MANIFEST"
+  else
+    sed -i 's|</manifest>|    <queries>\n        <intent>\n            <action android:name="android.speech.RecognitionService" />\n        </intent>\n    </queries>\n</manifest>|' "$MANIFEST"
+  fi
+fi
+# Home-screen widget (home_widget): the provider class and its receiver.
+if [ -n "$MA" ]; then
+  sed "s/__PACKAGE__/$PKG/" tool/android/HisabWidgetProvider.kt > "$(dirname "$MA")/HisabWidgetProvider.kt"
+fi
+if ! grep -q 'HisabWidgetProvider' "$MANIFEST"; then
+  sed -i 's|</application>|    <receiver android:name=".HisabWidgetProvider" android:exported="true" android:label="Hisab AI · Today">\n            <intent-filter>\n                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />\n            </intent-filter>\n            <meta-data android:name="android.appwidget.provider" android:resource="@xml/hisab_widget_info" />\n        </receiver>\n    </application>|' "$MANIFEST"
+fi
+
 # Gradle defaults to an 8 GB heap, which gets the build killed on machines
 # with less RAM ("Gradle build daemon disappeared unexpectedly").
 PROPS=android/gradle.properties

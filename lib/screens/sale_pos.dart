@@ -8,6 +8,8 @@ import 'package:url_launcher/url_launcher.dart';
 import '../core/books.dart';
 import '../core/drafts.dart';
 import '../core/imei_smart.dart';
+import '../core/quick.dart';
+import '../ui/voice.dart';
 import '../core/money.dart';
 import '../print/print_screen.dart';
 import '../ui/widgets.dart';
@@ -83,7 +85,8 @@ class _Split {
 class SaleForm extends StatefulWidget {
   final int? customerId;
   final int? editSaleId; // edit an existing sale in place
-  const SaleForm({super.key, this.customerId, this.editSaleId});
+  final int? repeatSaleId; // a new bill with the same items (one-tap repeat)
+  const SaleForm({super.key, this.customerId, this.editSaleId, this.repeatSaleId});
   @override
   State<SaleForm> createState() => _SaleFormState();
 }
@@ -147,6 +150,10 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
       }
     }
     if (widget.editSaleId != null && !_editLoaded) await _loadEdit(widget.editSaleId!);
+    if (widget.repeatSaleId != null && !_draftChecked) {
+      _draftChecked = true;
+      await _loadRepeat(widget.repeatSaleId!);
+    }
     if (!editing && cart.isEmpty && !_draftChecked) {
       _draftChecked = true;
       final d = await Drafts.load('sale');
@@ -157,6 +164,73 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
 
   bool _editLoaded = false;
   bool _draftChecked = false;
+
+  /// One-tap repeat: the same customer and items at today's prices; phones
+  /// get the next IMEIs in stock.
+  Future<void> _loadRepeat(int id) async {
+    final sale = (await Books.query('SELECT * FROM sales WHERE id = ?', [id])).firstOrNull;
+    if (sale == null) return;
+    final cid = sale['customer_id'];
+    if (cid != null) customer = customers.where((c) => asInt(c['id']) == asInt(cid)).firstOrNull ?? customer;
+    final items = await Books.query('SELECT product_id, SUM(qty) AS qty FROM sale_items WHERE sale_id = ? GROUP BY product_id ORDER BY MIN(id)', [id]);
+    final missing = <String>[];
+    for (final i in items) {
+      final p = products.where((p) => asInt(p['id']) == asInt(i['product_id'])).firstOrNull;
+      if (p == null) continue;
+      if (asInt(p['stock']) <= 0) missing.add('${p['name']}');
+      cart.add(_Line(p, qty: asInt(i['qty']) < 1 ? 1 : asInt(i['qty'])));
+    }
+    draftNote = 'Repeat of ${sale['number']}${missing.isEmpty ? '' : ' · out of stock: ${missing.join(', ')}'}';
+    for (final l in [...cart]) {
+      await _autoSerial(l.p);
+    }
+  }
+
+  /// Voice billing: "Vivo T3 ekta 18 hajar Rahim cash".
+  Future<void> _voice() async {
+    final said = await VoiceSheet.listen(context, title: 'Speak the bill', hint: 'e.g. Vivo T3 ekta 18 hajar, Rahim, cash');
+    if (said == null || !mounted) return;
+    final o = VoiceBill.parse(said, products, customers);
+    if (o.isEmpty && o.customer == null) {
+      toast(context, 'No product found in “$said” — try the product name as it is saved', error: true);
+      return;
+    }
+    setState(() {
+      for (final v in o.lines) {
+        final l = _Line(v.product, qty: v.qty);
+        if (v.rate != null) {
+          // spoken prices include GST; the line keeps the price before GST
+          final gst = asInt(v.product['gst_bp']);
+          l.rate = gst > 0 ? (v.rate! * 10000 / (10000 + gst)).round() : v.rate!;
+        }
+        cart.add(l);
+      }
+      if (o.customer != null) customer = o.customer;
+      if (o.pay == 'due') {
+        payMode = 'due';
+      } else if (o.pay != null) {
+        payMode = 'full';
+        final want = switch (o.pay) { 'cash' => ['cash'], 'upi' => ['upi', 'gpay', 'phonepe', 'paytm', 'bank'], _ => ['card', 'bank'] };
+        final a = accounts.where((a) {
+          final n = '${a['name']} ${a['code'] ?? ''}'.toLowerCase();
+          return want.any(n.contains) || (o.pay == 'cash' && a['code'] == cashCode);
+        }).firstOrNull;
+        if (a != null) account = asInt(a['id']);
+      }
+    });
+    for (final v in o.lines) {
+      await _autoSerial(v.product);
+    }
+    if (!mounted) return;
+    HapticFeedback.mediumImpact();
+    final got = [
+      '${o.lines.length} item${o.lines.length == 1 ? '' : 's'}',
+      if (o.customer != null) '${o.customer!['name']}',
+      if (o.pay != null) o.pay == 'due' ? 'on credit' : o.pay!.toUpperCase(),
+    ].join(' · ');
+    toast(context, o.unknown.isEmpty ? 'Bill ready: $got — check and save' : 'Added $got · not found: ${o.unknown.join(', ')}',
+        error: o.unknown.isNotEmpty);
+  }
 
   // ---------------------------------------------------------------- draft
   Map<String, dynamic> _draft() => {
@@ -895,7 +969,21 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
             ]),
           ),
         ),
-        const SizedBox(width: 10),
+        const SizedBox(width: 8),
+        GestureDetector(
+          onTap: _voice,
+          child: Container(
+            width: 48,
+            height: 52,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(18),
+              gradient: const LinearGradient(colors: [Color(0xFFFF6B8B), Color(0xFFE0245E)]),
+              boxShadow: const [BoxShadow(color: Color(0x55E0245E), blurRadius: 14, offset: Offset(0, 5), spreadRadius: -4)],
+            ),
+            child: const Icon(Icons.mic_rounded, color: Colors.white),
+          ),
+        ),
+        const SizedBox(width: 8),
         GestureDetector(
           onTap: _scan,
           child: Container(
@@ -912,12 +1000,7 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
       ]);
 
   Widget _results() {
-    final q = search.text.trim().toLowerCase();
-    final r = products
-        .where((p) => [p['name'], p['brand'], p['sku'], p['variant'], p['category']]
-            .any((v) => v != null && '$v'.toLowerCase().contains(q)))
-        .take(8)
-        .toList();
+    final r = SmartSearch.rank(products, search.text);
     return Container(
       margin: const EdgeInsets.only(top: 10),
       decoration: _card(),
