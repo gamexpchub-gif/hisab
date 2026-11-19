@@ -520,6 +520,55 @@ void main() {
     await expectBalanced();
   });
 
+  test('Mobile shop: repair job, exchange phone, finance payout, IMEI history', () async {
+    final cash = asInt((await Books.moneyAccounts()).first['id']);
+    // repair: ₹500 advance, delivered for ₹1,500, ₹1,000 paid at pickup
+    final cid = await Shop.customerFor('Repair Raju', '98300 11111');
+    expect(await Shop.customerFor('', '+91 9830011111'), cid); // same phone = same customer
+    final job = await Shop.createRepair(customerId: cid, device: 'Redmi Note 12', imei: '351234560000010', problem: 'Screen broken',
+        estimate: 150000, advance: 50000, accountId: cash);
+    await Shop.repairStatus(job, 'ready', charge: 150000, partsCost: 90000);
+    expect((await Shop.repairs(status: 'open')).single['status'], 'ready');
+    final left = await Shop.deliverRepair(job, charge: 150000, partsCost: 90000, paidNow: 100000, accountId: cash);
+    expect(left, 0);
+    expect((await Books.partyBalances('customer'))[cid] ?? 0, 0);
+    expect(await Books.balanceByCode(serviceIncomeCode), 150000);
+    expect(await Books.balance(cash, 'asset'), 150000);
+    await expectBalanced();
+
+    // exchange: buy a used iPhone for ₹20,000 → in stock as a used product
+    final ex = await Shop.buyUsed(sellerName: 'Old Phone Owner', sellerPhone: '9830022222', model: 'iPhone 11 64GB', brand: 'Apple',
+        imei: '351234560007775', price: 2000000, resale: 2400000, grade: 'A', battery: 86, accountId: cash);
+    final e = (await Shop.exchanges()).single;
+    expect(asInt(e['id']), ex);
+    expect(asInt(e['stock']), 1);
+    final p = (await Books.query('SELECT * FROM products WHERE id = ?', [e['product_id']])).single;
+    expect(p['condition'], 'used');
+    expect(asInt(p['price']), 2400000);
+    expect(await SmartImei.inStock(asInt(p['id'])), ['351234560007775']);
+    await expectBalanced();
+
+    // finance company sale: ₹30,000 phone, ₹5,000 down, ₹25,000 from Bajaj later
+    final c2 = await Books.saveParty('customer', {'name': 'Finance Buyer'});
+    final ph = await Books.saveProduct({'name': 'Samsung A35', 'gst_bp': 0, 'price': 3000000}, openingQty: 1, openingCost: 2500000);
+    final sale = await Books.createSale(items: [ItemIn(ph, 1, 3000000, '490154203237518', 'OPP-77')], customerId: c2, paid: 500000, accountId: cash);
+    final plan = await Books.createEmiPlan(customerId: c2, kind: 'finance', emi: 250000, months: 10, startDate: ymd(DateTime.now()),
+        saleId: sale, financer: 'Bajaj Finserv', imei: '490154203237518', price: 3000000, downPayment: 500000);
+    expect(asInt((await Shop.financePending()).single['expected']), 2500000);
+    await Shop.financeReceivedOn(plan, 2500000, accountId: cash);
+    expect(await Shop.financePending(), isEmpty);
+    expect((await Books.partyBalances('customer'))[c2] ?? 0, 0);
+    await expectBalanced();
+
+    // IMEI history: repair + sale + finance in one timeline
+    final h1 = await Shop.imeiHistory('351234560000010');
+    expect(h1.map((x) => x.kind), contains('repair'));
+    final h2 = await Shop.imeiHistory('490154203237518');
+    expect(h2.map((x) => x.kind), containsAll(['sold', 'emi']));
+    final h3 = await Shop.imeiHistory('351234560007775');
+    expect(h3.map((x) => x.kind), containsAll(['bought', 'exchange']));
+  });
+
   test('Product purchase cost is kept with no opening stock', () async {
     final p = await Books.saveProduct({'name': 'Cost Keeper', 'gst_bp': 0, 'price': 150000}, openingCost: 100000);
     var r = (await Books.query('SELECT stock, cost FROM products WHERE id = ?', [p])).first;

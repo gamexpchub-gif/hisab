@@ -4,9 +4,11 @@ import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 
 import 'db.dart';
+import 'imei_smart.dart';
 import 'money.dart';
 
 part 'loans.dart';
+part 'shop.dart';
 
 /// Double-entry accounting engine.
 ///

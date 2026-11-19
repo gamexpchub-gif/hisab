@@ -78,7 +78,7 @@ class AppDb {
     );
   }
 
-  static const schemaVersion = 12;
+  static const schemaVersion = 13;
 
   static Future<void> upgrade(Database db, int from, int to) async {
     if (from < 2) {
@@ -137,7 +137,40 @@ class AppDb {
       await db.execute("INSERT OR IGNORE INTO accounts (code, name, type, kind, is_system) VALUES ('2500', 'Loans & Borrowings', 'liability', NULL, 1)");
       await db.execute("INSERT OR IGNORE INTO accounts (code, name, type, kind, is_system) VALUES ('6100', 'Loan Interest', 'expense', NULL, 1)");
     }
+    if (from < 13) {
+      await db.execute(_repairs);
+      await db.execute(_exchanges);
+      await _addColumn(db, 'emi_plans', 'disbursed INTEGER NOT NULL DEFAULT 0');
+      await _addColumn(db, 'emi_plans', 'disbursed_on TEXT');
+      await _addColumn(db, 'emi_plans', 'disbursed_amount INTEGER NOT NULL DEFAULT 0');
+      await _addColumn(db, 'audit_log', 'staff TEXT');
+      await db.execute("INSERT OR IGNORE INTO accounts (code, name, type, kind, is_system) VALUES ('4100', 'Service & Repair Income', 'income', NULL, 1)");
+    }
   }
+
+  /// ALTER TABLE … ADD COLUMN, skipped when the column is already there.
+  static Future<void> _addColumn(Database db, String table, String def) async {
+    final name = def.split(' ').first;
+    final cols = await db.rawQuery('PRAGMA table_info($table)');
+    if (cols.any((c) => c['name'] == name)) return;
+    await db.execute('ALTER TABLE $table ADD COLUMN $def');
+  }
+
+  /// Repair job cards: device in → ready → delivered.
+  static const _repairs = '''CREATE TABLE repairs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, number TEXT NOT NULL UNIQUE, date TEXT NOT NULL,
+      customer_id INTEGER REFERENCES customers(id), device TEXT NOT NULL, imei TEXT, problem TEXT NOT NULL,
+      condition TEXT, lock_code TEXT, estimate INTEGER NOT NULL DEFAULT 0, advance INTEGER NOT NULL DEFAULT 0,
+      charge INTEGER NOT NULL DEFAULT 0, parts_cost INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'received',
+      promised TEXT, ready_at TEXT, delivered_at TEXT, technician TEXT, note TEXT, created_at TEXT NOT NULL)''';
+
+  /// Second-hand / exchange phones bought from customers.
+  static const _exchanges = '''CREATE TABLE exchanges (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, number TEXT NOT NULL UNIQUE, date TEXT NOT NULL,
+      customer_id INTEGER REFERENCES customers(id), supplier_id INTEGER REFERENCES suppliers(id),
+      purchase_id INTEGER REFERENCES purchases(id), product_id INTEGER REFERENCES products(id),
+      model TEXT NOT NULL, imei TEXT, grade TEXT, battery INTEGER, accessories TEXT, id_proof TEXT, photo TEXT,
+      price INTEGER NOT NULL, resale INTEGER NOT NULL DEFAULT 0, note TEXT, created_at TEXT NOT NULL)''';
 
   static Future<void> configure(Database db) async {
     await db.execute('PRAGMA foreign_keys = ON');
@@ -174,7 +207,8 @@ class AppDb {
       customer_id INTEGER NOT NULL REFERENCES customers(id), kind TEXT NOT NULL, financer TEXT,
       opp_id TEXT, loan_no TEXT, product TEXT, imei TEXT, price INTEGER NOT NULL DEFAULT 0,
       down_payment INTEGER NOT NULL DEFAULT 0, emi INTEGER NOT NULL, months INTEGER NOT NULL,
-      start_date TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', note TEXT, created_at TEXT NOT NULL)''';
+      start_date TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', note TEXT, created_at TEXT NOT NULL,
+      disbursed INTEGER NOT NULL DEFAULT 0, disbursed_on TEXT, disbursed_amount INTEGER NOT NULL DEFAULT 0)''';
 
   static const _emiInstallments = '''CREATE TABLE emi_installments (
       id INTEGER PRIMARY KEY AUTOINCREMENT, plan_id INTEGER NOT NULL REFERENCES emi_plans(id),
@@ -289,13 +323,15 @@ class AppDb {
     _imeiModels,
     _loans,
     _loanPayments,
+    _repairs,
+    _exchanges,
     '''CREATE TABLE transfers (
       id INTEGER PRIMARY KEY AUTOINCREMENT, number TEXT NOT NULL UNIQUE, date TEXT NOT NULL,
       from_id INTEGER NOT NULL REFERENCES accounts(id), to_id INTEGER NOT NULL REFERENCES accounts(id),
       amount INTEGER NOT NULL, note TEXT, created_at TEXT NOT NULL)''',
     '''CREATE TABLE audit_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, message TEXT NOT NULL, ref TEXT,
-      amount INTEGER, created_at TEXT NOT NULL)''',
+      amount INTEGER, created_at TEXT NOT NULL, staff TEXT)''',
   ];
 
   /// Chart of accounts: code, name, type, kind.

@@ -6,6 +6,7 @@ import '../core/money.dart';
 import '../print/print_screen.dart' show quickPrint;
 import '../ui/contact.dart';
 import '../ui/widgets.dart';
+import 'shop_work.dart' show DeviceTimeline;
 import 'parties.dart';
 import 'sales.dart' show SaleView, PurchaseView;
 import 'scanner.dart';
@@ -136,6 +137,7 @@ class _ImeiScreenState extends State<ImeiScreen> {
                   child: EmptyState('No device with "$q" in purchases or sales'),
                 ),
               for (final r in d.$1) _DeviceCard(r: r, settings: d.$3),
+              if (q.replaceAll(RegExp(r'\D'), '').length >= 8) DeviceTimeline(q.trim()),
             ],
             if (q.isEmpty) ...[
               Row(children: [

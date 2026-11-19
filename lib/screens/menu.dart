@@ -28,6 +28,7 @@ import 'settings.dart';
 import 'smart_ai.dart';
 import 'autopilot.dart';
 import 'brain.dart';
+import 'shop_work.dart';
 import '../sheets/home.dart';
 import 'plans.dart';
 import 'stores.dart';
@@ -149,6 +150,12 @@ class _MenuScreenState extends State<MenuScreen> {
             const [Color(0xFFFF5C7A), Color(0xFFD81E4A)], () => go(const BankScreen()), badge: Money.compact(d.money)),
         _Item('Loans & Investment', 'Bank and personal loans, partner capital, EMIs, interest', Icons.request_quote_rounded,
             const [Color(0xFF0F1240), Color(0xFF6B35EE)], () => go(const LoansScreen())),
+        _Item('Repair jobs', 'Job cards, status, "ready" message, billing', Icons.build_circle_rounded,
+            const [Color(0xFF38BDF8), Color(0xFF4318D2)], () => go(const RepairsScreen())),
+        _Item('Exchange & used phones', 'Buy old phones, resell, profit', Icons.swap_horizontal_circle_rounded,
+            const [Color(0xFFFFB84D), Color(0xFFE0245E)], () => go(const ExchangeScreen())),
+        _Item('Finance payouts', 'Bajaj, HDB… money still to come', Icons.account_balance_rounded,
+            const [Color(0xFF2DD4BF), Color(0xFF1A47C8)], () => go(const FinancePayoutsScreen())),
         _Item('EMI / Instalments', 'Finance & shop instalments, reminders', Icons.calendar_month_rounded,
             const [Color(0xFF2DD4BF), Color(0xFF0E7490)], () => go(const EmiScreen())),
       ]),
