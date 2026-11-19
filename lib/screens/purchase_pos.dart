@@ -313,6 +313,28 @@ class _PurchaseFormState extends State<PurchaseForm> with WidgetsBindingObserver
     });
   }
 
+  /// Removes one product from the bill (with Undo).
+  void _removeLine(_PLine l) {
+    final at = lines.indexOf(l);
+    if (at < 0) return;
+    HapticFeedback.mediumImpact();
+    setState(() => lines.removeAt(at));
+    final m = ScaffoldMessenger.of(context);
+    m.hideCurrentSnackBar();
+    m.showSnackBar(SnackBar(
+      behavior: SnackBarBehavior.floating,
+      duration: const Duration(seconds: 4),
+      content: Text('${l.p['name']} removed'),
+      action: SnackBarAction(
+        label: 'UNDO',
+        onPressed: () {
+          if (!mounted) return;
+          setState(() => lines.insert(at.clamp(0, lines.length), l));
+        },
+      ),
+    ));
+  }
+
   Future<void> _scanProduct() async {
     final code = await BarcodeScannerScreen.scan(context, title: 'Scan barcode or IMEI');
     if (code == null || !mounted) return;
@@ -879,7 +901,7 @@ class _PurchaseFormState extends State<PurchaseForm> with WidgetsBindingObserver
         decoration: BoxDecoration(color: const Color(0xFFFDE4EA), borderRadius: BorderRadius.circular(16)),
         child: const Icon(Icons.delete_rounded, color: _red),
       ),
-      onDismissed: (_) => setState(() => lines.remove(l)),
+      onDismissed: (_) => _removeLine(l),
       child: Container(
         margin: const EdgeInsets.only(top: 10),
         padding: const EdgeInsets.all(10),
@@ -894,7 +916,20 @@ class _PurchaseFormState extends State<PurchaseForm> with WidgetsBindingObserver
             const SizedBox(width: 10),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(l.p['name'] as String, maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(13.5, FontWeight.w800, _ink)),
+                Row(children: [
+                  Expanded(
+                    child: Text(l.p['name'] as String, maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(13.5, FontWeight.w800, _ink)),
+                  ),
+                  InkWell(
+                    borderRadius: BorderRadius.circular(10),
+                    onTap: () => _removeLine(l),
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(color: const Color(0xFFFDE4EA), borderRadius: BorderRadius.circular(10)),
+                      child: const Icon(Icons.delete_outline_rounded, size: 17, color: _red),
+                    ),
+                  ),
+                ]),
                 Text('Stock ${l.p['stock']} → ${asInt(l.p['stock']) + l.qty}', style: _j(11, FontWeight.w600, _green)),
                 const SizedBox(height: 4),
                 GestureDetector(
@@ -926,13 +961,11 @@ class _PurchaseFormState extends State<PurchaseForm> with WidgetsBindingObserver
                 decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: _line)),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
                   _qtyBtn(Icons.remove_rounded, () {
-                    setState(() {
-                      if (l.qty > 1) {
-                        l.qty--;
-                      } else {
-                        lines.remove(l);
-                      }
-                    });
+                    if (l.qty > 1) {
+                      setState(() => l.qty--);
+                    } else {
+                      _removeLine(l);
+                    }
                   }),
                   SizedBox(width: 30, child: Text('${l.qty}', textAlign: TextAlign.center, style: _j(14, FontWeight.w800, _ink))),
                   _qtyBtn(Icons.add_rounded, () => setState(() => l.qty++)),

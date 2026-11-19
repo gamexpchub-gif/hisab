@@ -914,10 +914,19 @@ class Books {
         if (d.isNotEmpty) throw AccountingError('SKU already used by another product');
       }
       if (id != null) {
-        await x.update('products', values, where: 'id = ?', whereArgs: [id]);
+        final upd = {...values};
+        if (upd.containsKey('cost')) {
+          // the cost can be set by hand only while nothing is in stock (with
+          // stock it is the average cost the books are kept at)
+          final st = await x.query('products', columns: ['stock'], where: 'id = ?', whereArgs: [id]);
+          if (st.isEmpty || asInt(st.first['stock']) != 0) upd.remove('cost');
+        }
+        await x.update('products', upd, where: 'id = ?', whereArgs: [id]);
         return id;
       }
-      final pid = await x.insert('products', {...values, 'stock': 0, 'cost': 0, 'created_at': _now()});
+      // the purchase cost typed on Add Product is kept even with no opening
+      // stock, so the first purchase of it starts at that cost
+      final pid = await x.insert('products', {...values, 'stock': 0, 'cost': openingCost < 0 ? 0 : openingCost, 'created_at': _now()});
       if (openingQty > 0) {
         await x.update('products', {'stock': openingQty, 'cost': openingCost}, where: 'id = ?', whereArgs: [pid]);
         final value = openingQty * openingCost;

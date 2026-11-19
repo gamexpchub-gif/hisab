@@ -334,7 +334,11 @@ class _ProductFormState extends State<ProductForm> {
         'condition': condition,
         'image': image,
         'warranty_months': warrantyMonths,
+        if (_costEditable && !isNew) 'cost': _m(cost),
       };
+
+  /// Cost can be typed for a new product, or for one with no stock yet.
+  bool get _costEditable => isNew || asInt(widget.product!['stock']) == 0;
 
   Future<void> _save({bool another = false}) async {
     if (saving) return;
@@ -787,7 +791,7 @@ class _ProductFormState extends State<ProductForm> {
           const SizedBox(width: 8),
           Expanded(child: _field(mrp, 'MRP', number: true, prefix: '₹')),
           const SizedBox(width: 8),
-          Expanded(child: _field(cost, isNew ? 'Cost' : 'Avg cost', number: true, prefix: '₹', enabled: isNew)),
+          Expanded(child: _field(cost, isNew ? 'Purchase cost' : _costEditable ? 'Purchase cost' : 'Avg cost', number: true, prefix: '₹', enabled: _costEditable)),
         ]),
         _inline('GST', [
           for (final g in _gstRates) _pill('${g ~/ 100}%', gstBp == g, () => setState(() => gstBp = g)),

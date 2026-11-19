@@ -427,6 +427,18 @@ void main() {
     await expectBalanced();
   });
 
+  test('Product purchase cost is kept with no opening stock', () async {
+    final p = await Books.saveProduct({'name': 'Cost Keeper', 'gst_bp': 0, 'price': 150000}, openingCost: 100000);
+    var r = (await Books.query('SELECT stock, cost FROM products WHERE id = ?', [p])).first;
+    expect(asInt(r['stock']), 0);
+    expect(asInt(r['cost']), 100000);
+    // no stock yet: the cost can be corrected
+    await Books.saveProduct({'name': 'Cost Keeper', 'gst_bp': 0, 'price': 150000, 'cost': 110000}, id: p);
+    r = (await Books.query('SELECT cost FROM products WHERE id = ?', [p])).first;
+    expect(asInt(r['cost']), 110000);
+    await expectBalanced();
+  });
+
   test('Smart IMEI: model name shared with the community', () {
     expect(SmartImei.modelName('Vivo Y28 8/128 Blue'), 'Vivo Y28');
     expect(SmartImei.modelName('iPhone 15 Pro Max 256GB Natural Titanium'), 'iPhone 15 Pro Max');
