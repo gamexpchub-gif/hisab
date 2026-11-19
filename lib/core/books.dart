@@ -148,8 +148,19 @@ class Books {
   static Future<void> log(String kind, String message, [String? ref, int? amount]) => _write((x) => _log(x, kind, message, ref, amount));
 
   static Future<T> _write<T>(Future<T> Function(Transaction t) body) async {
-    final db = await _db;
-    final result = await db.transaction(body);
+    Database db;
+    while (true) {
+      db = await _db;
+      AppDb.writers++;
+      if (!AppDb.isBusy) break; // the file is being swapped: wait and take the new one
+      AppDb.writers--;
+    }
+    final T result;
+    try {
+      result = await db.transaction(body);
+    } finally {
+      AppDb.writers--;
+    }
     changes.value++;
     return result;
   }

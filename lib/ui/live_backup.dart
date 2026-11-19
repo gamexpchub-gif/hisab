@@ -37,6 +37,35 @@ class _LiveBackupCardState extends State<LiveBackupCard> with SingleTickerProvid
 
   @override
   Widget build(BuildContext context) {
+    return Column(mainAxisSize: MainAxisSize.min, children: [
+      ValueListenableBuilder<Map<String, dynamic>?>(
+        valueListenable: LiveSync.offer,
+        builder: (context, o, _) => o == null
+            ? const SizedBox.shrink()
+            : Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(color: const Color(0xFFFFF4E5), borderRadius: BorderRadius.circular(16), border: Border.all(color: const Color(0xFFFFC27A))),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  const Text('Your other phone has newer books',
+                      style: TextStyle(fontFamily: 'Jakarta', fontSize: 13.5, fontWeight: FontWeight.w800, color: Color(0xFF9A4D00))),
+                  const SizedBox(height: 4),
+                  const Text('Use them on this phone too (this phone\'s books are kept as a backup), or keep this phone\'s books for both.',
+                      style: TextStyle(fontFamily: 'Jakarta', fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF5A3A12))),
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    Expanded(child: OutlinedButton(onPressed: LiveSync.keepMine, child: const Text('Keep mine'))),
+                    const SizedBox(width: 8),
+                    Expanded(child: FilledButton(onPressed: LiveSync.acceptOffer, child: const Text('Use them'))),
+                  ]),
+                ]),
+              ),
+      ),
+      _card(context),
+    ]);
+  }
+
+  Widget _card(BuildContext context) {
     return ValueListenableBuilder<LiveState>(
       valueListenable: Backup.live,
       builder: (context, st, _) {
@@ -47,6 +76,7 @@ class _LiveBackupCardState extends State<LiveBackupCard> with SingleTickerProvid
                 'phone' => const Color(0xFF2563EB),
                 'sending' => const Color(0xFF7B3FF2),
                 'waiting' => const Color(0xFFF97316),
+                'offer' => const Color(0xFFF97316),
                 _ => const Color(0xFF0BA360),
               };
         final text = !on

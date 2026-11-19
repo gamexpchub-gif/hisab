@@ -408,8 +408,12 @@ class _AutoObserver with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       Backup.autoRun();
       LiveSync.flush();
+      LiveSync.foreground(true);
     }
     // leaving the app: send the last change at once
-    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) LiveSync.flush();
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+      LiveSync.flush();
+      LiveSync.foreground(false);
+    }
   }
 }

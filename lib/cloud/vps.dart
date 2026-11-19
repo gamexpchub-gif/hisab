@@ -78,6 +78,15 @@ class Vps {
   static Future<void> putManifest(String store, String slot, Map<String, Object?> m) =>
       _ok('PUT', 'manifest/$store/$slot', body: utf8.encode(jsonEncode(m)), type: 'application/json');
 
+  /// Waits (up to [hold] seconds) for a copy of [store] newer than [after];
+  /// returns the newest {created, slot, install, changed}.
+  static Future<Map<String, dynamic>> wait(String store, String after, {int hold = 25}) async {
+    final (code, bytes) = await _send('GET', 'wait/$store?after=${Uri.encodeQueryComponent(after)}&hold=$hold',
+        timeout: Duration(seconds: hold + 15));
+    if (code != 200) throw VpsError(code, 'wait failed');
+    return (jsonDecode(utf8.decode(bytes)) as Map).cast<String, dynamic>();
+  }
+
   static Future<List<Map<String, dynamic>>> manifests() async =>
       [for (final x in jsonDecode(utf8.decode(await _ok('GET', 'manifests'))) as List) (x as Map).cast<String, dynamic>()];
 

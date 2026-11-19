@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart';
@@ -12,6 +13,7 @@ import 'package:path_provider/path_provider.dart';
 import '../cloud/cloud.dart';
 import 'backup.dart';
 import 'books.dart';
+import 'db.dart';
 import 'plan.dart';
 import 'stores.dart';
 
@@ -43,6 +45,12 @@ class LiveSync {
 
   /// Set while the whole account is being restored (no upload in between).
   static bool paused = false;
+
+  // two phones, one account: changes made on the other phone come in here
+  static bool _applying = false, _pulling = false, _foreground = true;
+
+  /// Books from another phone waiting for "Use them" (first sync only).
+  static final offer = ValueNotifier<Map<String, dynamic>?>(null);
   static int _pending = 0;
   static Map<String, dynamic>? _st;
 
@@ -87,6 +95,7 @@ class LiveSync {
     _retry = Timer.periodic(const Duration(seconds: 60), (_) {
       if (_pending > 0) run();
     });
+    _pullLoop();
     _state().then((s) {
       final last = (s['status'] as Map?)?.cast<String, dynamic>();
       if (last != null && state.value.kind == 'idle') {
@@ -107,7 +116,15 @@ class LiveSync {
     if (_pending > 0) run();
   }
 
+  /// App in front / in the background: other phones' changes are followed
+  /// while the app is open.
+  static void foreground(bool on) {
+    _foreground = on;
+    if (on) _pullLoop();
+  }
+
   static void _changed() {
+    if (_applying) return; // the books just came from the other phone
     _pending++;
     _wait?.cancel();
     // a save writes a few rows in a row; wait a moment for it to finish
@@ -242,15 +259,27 @@ class LiveSync {
         Object? err;
         if (vps) {
           try {
+            // another phone changed the books since we last took them: keep
+            // both — theirs stay the books, ours become a conflict copy
+            final remote = await Vps.wait(key, _applied(st, key), hold: 0);
+            final rc = remote['created'] as String?;
+            if (rc != null && rc.compareTo(_applied(st, key)) > 0 && remote['install'] != install && _applied(st, key).isNotEmpty) {
+              throw _Conflict(rc, '${remote['slot']}');
+            }
+            final created = DateTime.now().toUtc().toIso8601String();
             await Vps.putManifest(key, slot, {
               ...body,
-              'created': DateTime.now().toUtc().toIso8601String(),
+              'created': created,
+              'install': install,
               'storeName': store.name,
               'bytes': db.length,
               'device': Platform.localHostname,
               ...counts,
             });
             where.add('your server');
+            (st['applied'] ??= <String, dynamic>{})[key] = created;
+          } on _Conflict {
+            rethrow;
           } catch (e) {
             err = e;
             _log('Server manifest failed: $e', ok: false);
@@ -331,6 +360,8 @@ class LiveSync {
       st['uploaded'] = uploaded.toList();
       st['uploadedVps'] = uploadedVps.toList();
       _status('cloud', 'Saved to $savedTo${sent == 0 ? ' · up to date' : ' · ${_size(sent)} sent'}${newFiles > 0 ? ' · $newFiles photo${newFiles == 1 ? '' : 's'}' : ''}');
+    } on _Conflict catch (c) {
+      await _conflict(c);
     } catch (e) {
       final offline = e is SocketException || '$e'.contains('internet') || '$e'.contains('host lookup') || '$e'.contains('Connection');
       _status('waiting', offline ? 'Saved on phone · will send when the internet is back' : 'Cloud copy waiting: $e');
@@ -342,6 +373,163 @@ class LiveSync {
         _again = false;
         Timer(const Duration(milliseconds: 300), run);
       }
+    }
+  }
+
+  static String _applied(Map<String, dynamic> st, String key) => '${((st['applied'] as Map?) ?? const {})[key] ?? ''}';
+
+  static String _key(String storeId) => storeId.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
+
+  // ---------------------------------------------------------------- other phones → this phone
+  /// While the app is open, waits on your server for a copy made by another
+  /// phone and takes it within a second or two.
+  static Future<void> _pullLoop() async {
+    if (_pulling) return;
+    _pulling = true;
+    try {
+      while (_started && _foreground) {
+        await Cloud.load();
+        if (paused || Cloud.user == null || !Sub.can('cloud') || !await Vps.available()) {
+          await Future<void>.delayed(const Duration(seconds: 15));
+          continue;
+        }
+        final st = await _state();
+        final store = Stores.active;
+        final key = _key(store.id);
+        final applied = _applied(st, key);
+        Map<String, dynamic> r;
+        try {
+          r = await Vps.wait(key, applied);
+        } catch (_) {
+          await Future<void>.delayed(const Duration(seconds: 5));
+          continue;
+        }
+        final created = r['created'] as String?;
+        if (!_started || Stores.current != store.id || created == null || created.compareTo(applied) <= 0) continue;
+        if (r['install'] == st['install']) {
+          (st['applied'] ??= <String, dynamic>{})[key] = created;
+          await _save();
+          continue;
+        }
+        // our own change is still on its way: send it first (it meets this
+        // newer copy there and is kept as a conflict copy)
+        if (_pending > 0 || _busy) {
+          await Future<void>.delayed(const Duration(milliseconds: 800));
+          continue;
+        }
+        // first sync of a phone that already has books: ask before replacing
+        if (applied.isEmpty && !await Backup.phoneIsEmpty()) {
+          offer.value = {'store': store.id, 'key': key, 'slot': r['slot'], 'created': created};
+          _status('offer', 'Newer books from another phone — tap "Use them"');
+          await Future<void>.delayed(const Duration(seconds: 20));
+          continue;
+        }
+        try {
+          await _apply(store.id, key, '${r['slot']}', created);
+        } catch (e) {
+          _log('Could not take the other phone\'s books: $e', ok: false);
+          await Future<void>.delayed(const Duration(seconds: 5));
+        }
+      }
+    } finally {
+      _pulling = false;
+    }
+  }
+
+  /// "Use them": take the other phone's books (first sync).
+  static Future<void> acceptOffer() async {
+    final o = offer.value;
+    if (o == null) return;
+    offer.value = null;
+    final dir = await Backup.folder();
+    await _keepCopy(await Backup.snapshot(), dir, 'before-sync');
+    await _apply('${o['store']}', '${o['key']}', '${o['slot']}', '${o['created']}');
+  }
+
+  /// "Keep mine": this phone's books become the newest copy for both.
+  static Future<void> keepMine() async {
+    final o = offer.value;
+    if (o == null) return;
+    offer.value = null;
+    final st = await _state();
+    (st['applied'] ??= <String, dynamic>{})['${o['key']}'] = '${o['created']}';
+    await _save();
+    await now();
+  }
+
+  static Future<void> _keepCopy(List<int> db, Directory dir, String tag) async {
+    final archive = Archive()..addFile(ArchiveFile('hisab.db', db.length, db));
+    final meta = utf8.encode(jsonEncode({'app': 'Hisab AI', 'created': DateTime.now().toIso8601String(), 'store': Stores.current, 'tag': tag}));
+    archive.addFile(ArchiveFile('backup.json', meta.length, meta));
+    final t = DateTime.now();
+    String two(int n) => n.toString().padLeft(2, '0');
+    await File(p.join(dir.path, 'Hisab-AI-$tag-${t.year}-${two(t.month)}-${two(t.day)}_${two(t.hour)}${two(t.minute)}${two(t.second)}.zip'))
+        .writeAsBytes(ZipEncoder().encode(archive)!, flush: true);
+  }
+
+  /// Puts another phone's copy in place of this phone's books.
+  static Future<void> _apply(String storeId, String key, String slot, String created) async {
+    final m = await Vps.manifest(key, slot);
+    final keys = [for (final k in (m['db'] as Map)['keys'] as List) '$k'];
+    final out = BytesBuilder(copy: false);
+    for (final k in keys) {
+      out.add(m['dbAt'] == 'vps' ? await Vps.getBlob(k) : await Cloud.getBlob(k));
+    }
+    final db = out.takeBytes();
+    if (db.length < 100 || ascii.decode(db.sublist(0, 15), allowInvalid: true) != 'SQLite format 3') throw StateError('damaged copy');
+    if (Stores.current != storeId) return;
+    _applying = true;
+    try {
+      await AppDb.exclusive((path) async {
+        for (final s in ['-wal', '-shm', '-journal']) {
+          final f = File('$path$s');
+          if (await f.exists()) await f.delete();
+        }
+        final tmp = File('$path.sync');
+        await tmp.writeAsBytes(db, flush: true);
+        await tmp.rename(path);
+      });
+      final st = await _state();
+      (st['applied'] ??= <String, dynamic>{})[key] = created;
+      Books.notifyChanged();
+    } finally {
+      _applying = false;
+    }
+    final sales = asInt((await Books.query('SELECT COUNT(*) AS c FROM sales')).first['c']);
+    _log('Books ← other phone · $sales sales');
+    _status('cloud', 'Updated from your other phone');
+    await _save();
+    // photos the other phone added
+    final files = ((m['files'] as Map?) ?? const {}).map((k, v) => MapEntry('$k', [for (final x in v as List) '$x']));
+    final docs = await getApplicationDocumentsDirectory();
+    for (final e in files.entries) {
+      if (e.key.contains('..')) continue;
+      final f = File(p.join(docs.path, e.key));
+      if (await f.exists()) continue;
+      try {
+        final b = BytesBuilder(copy: false);
+        for (final k in e.value) {
+          b.add(await Cloud.getBlob(k));
+        }
+        await f.parent.create(recursive: true);
+        await f.writeAsBytes(b.takeBytes(), flush: true);
+      } catch (_) {}
+    }
+  }
+
+  /// Both phones changed the books at the same moment: the other phone's
+  /// books are kept (they reached the server first); this phone's version
+  /// is saved as a conflict copy in Backup & Restore.
+  static Future<void> _conflict(_Conflict c) async {
+    try {
+      final dir = await Backup.folder();
+      await _keepCopy(await Backup.snapshot(), dir, 'conflict');
+      _pending = 0;
+      await _apply(Stores.current, _key(Stores.current), c.slot, c.created);
+      _log('Both phones changed at once — the other phone\'s books kept; yours saved as a conflict copy (Backup & Restore)', ok: false);
+      _status('cloud', 'Updated from your other phone · your last change is in a conflict copy');
+    } catch (e) {
+      _log('Conflict could not be settled: $e', ok: false);
     }
   }
 
@@ -372,4 +560,9 @@ class LiveSync {
     await tmp.writeAsBytes(zip, flush: true);
     await tmp.rename(p.join(dir.path, 'Hisab-AI-live-$storeId.zip'));
   }
+}
+
+class _Conflict implements Exception {
+  final String created, slot;
+  _Conflict(this.created, this.slot);
 }

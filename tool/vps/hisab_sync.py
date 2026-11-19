@@ -20,6 +20,11 @@ API (all under /hisab/api/, JSON unless noted):
   PUT    manifest/<store>/<slot> (JSON) → {"ok": true}
   GET    manifests                      → [{"store","slot","created",...}]
   GET    manifest/<store>/<slot>        → the manifest JSON
+  GET    wait/<store>?after=<created>   → waits (up to 25 s) until a copy newer
+                                          than <created> arrives; returns the
+                                          newest {"created","slot","device"}
+                                          — phones use it to see each other's
+                                          changes at once
 Standard library only (Python 3.8+). No database, no pip.
 """
 import hashlib
@@ -46,6 +51,7 @@ SLOT_RE = re.compile(r'^[ab]$')
 
 _tokens = {}   # sha256(token) -> (uid, expires)
 _lock = threading.Lock()
+_changed = threading.Condition()   # notified on every new manifest
 
 
 def uid_for(token):
@@ -95,6 +101,22 @@ def used_bytes(uid):
             except OSError:
                 pass
     return total
+
+
+def newest(uid, store):
+    """The newest manifest of a store: (created, slot, device) or None."""
+    best = None
+    for slot in ('a', 'b'):
+        path = user_dir(uid, 'manifests', f'{store}_{slot}.json')
+        try:
+            with open(path) as f:
+                m = json.load(f)
+        except (OSError, ValueError):
+            continue
+        c = str(m.get('created') or '')
+        if best is None or c > best[0]:
+            best = (c, slot, m.get('install') or m.get('device') or '')
+    return best
 
 
 def write_atomic(path, data):
@@ -179,6 +201,25 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(404, {'error': 'not found'})
                 with open(path, 'rb') as f:
                     return self.send(200, f.read())
+            if len(parts) == 2 and parts[0] == 'wait' and STORE_RE.match(parts[1]):
+                after, hold = '', 25.0
+                if '?' in self.path:
+                    from urllib.parse import parse_qs
+                    q = parse_qs(self.path.split('?', 1)[1])
+                    after = (q.get('after') or [''])[0]
+                    try:
+                        hold = max(0.0, min(25.0, float((q.get('hold') or ['25'])[0])))
+                    except ValueError:
+                        pass
+                deadline = time.time() + hold
+                n = newest(uid, parts[1])
+                with _changed:
+                    while (n is None or n[0] <= after) and time.time() < deadline:
+                        _changed.wait(timeout=max(0.1, deadline - time.time()))
+                        n = newest(uid, parts[1])
+                if n is None:
+                    return self.send(200, {'created': None})
+                return self.send(200, {'created': n[0], 'slot': n[1], 'install': n[2], 'changed': n[0] > after})
             if parts == ['usage']:
                 return self.send(200, {'bytes': used_bytes(uid), 'limit': MAX_USER_BYTES})
         except ValueError as e:
@@ -216,6 +257,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(409, {'error': 'pieces missing', 'missing': missing[:20]})
                 m['store'], m['slot'], m['received'] = parts[1], parts[2], int(time.time())
                 write_atomic(user_dir(uid, 'manifests', f'{parts[1]}_{parts[2]}.json'), json.dumps(m).encode())
+                with _changed:
+                    _changed.notify_all()
                 return self.send(200, {'ok': True})
         except (ValueError, UnicodeDecodeError) as e:
             return self.send(400, {'error': str(e)})

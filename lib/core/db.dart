@@ -28,12 +28,20 @@ class AppDb {
 
   /// Closes the database and runs [body] with the file to itself; nothing can
   /// reopen it until [body] is done. Used for backup, restore and store switch.
+  /// Saves in progress (Books writes): the file is never taken away mid-save.
+  static int writers = 0;
+  static bool get isBusy => _busy != null;
+
   static Future<T> exclusive<T>(Future<T> Function(String path) body) async {
     while (_busy != null) {
       await _busy!.future;
     }
     final gate = _busy = Completer<void>();
     try {
+      // let a save that already started finish first (new ones wait at the gate)
+      while (writers > 0) {
+        await Future<void>.delayed(const Duration(milliseconds: 15));
+      }
       final o = _opening;
       if (o != null) {
         try {
