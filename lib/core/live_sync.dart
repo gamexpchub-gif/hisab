@@ -67,6 +67,9 @@ class LiveSync {
     };
   }
 
+  /// The last copy that reached the cloud: (time, sales, products, customers).
+  static Future<Map<String, dynamic>?> lastCloud() async => ((await _state())['last'] as Map?)?.cast<String, dynamic>();
+
   static Future<void> _save() async {
     try {
       await (await _file()).writeAsString(jsonEncode(_st));
@@ -179,12 +182,48 @@ class LiveSync {
         return keys;
       }
 
-      // 2 · books: only the changed pieces
+      // 2 · books: only the changed pieces — and the manifest right away, so
+      //     the books are safe in the cloud within seconds, before any photo
       final dbKeys = await pieces(db);
-      // 3 · photos & documents: only new or changed files
       final files = (st['files'] as Map).cast<String, dynamic>();
+      final slots = (st['slot'] as Map).cast<String, dynamic>();
+      // a fresh install does not know which slot is newer: ask the cloud and
+      // write over the OLDER one, so the newest copy is never lost
+      if (slots[store.id] == null) {
+        final ta = await Cloud.liveSlotTime('live_${store.id.replaceAll(RegExp(r'[^A-Za-z0-9]'), '')}_a');
+        final tb = await Cloud.liveSlotTime('live_${store.id.replaceAll(RegExp(r'[^A-Za-z0-9]'), '')}_b');
+        // slots[] holds the slot written LAST; the next write goes to the other
+        slots[store.id] = (ta != null && (tb == null || ta.isAfter(tb))) ? 'a' : 'b';
+      }
+      final slot = slots[store.id] == 'a' ? 'b' : 'a';
+      final key = store.id.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
+      Future<void> writeManifest(Map<String, List<String>> withFiles) async {
+        final manifest = jsonEncode({
+          'v': 2,
+          'db': {'size': db.length, 'keys': dbKeys},
+          'files': withFiles,
+        });
+        await Cloud.putLiveManifest('live_${key}_$slot',
+            manifest: manifest, storeId: store.id, storeName: store.name, counts: counts, bytes: db.length);
+      }
+
+      // photos already in the cloud go into the first manifest too
+      final ready = <String, List<String>>{
+        for (final e in files.entries)
+          if (((e.value as Map)['keys'] as List).every((k) => uploaded.contains(k))) e.key: ((e.value as Map)['keys'] as List).cast<String>(),
+      };
+      await writeManifest(ready);
+      slots[store.id] = slot;
+      st['uploaded'] = uploaded.toList();
+      st['last'] = {'at': DateTime.now().toIso8601String(), ...counts};
+      _pending = max(0, _pending - taken);
+      _status('cloud', 'Books saved to cloud${sent == 0 ? '' : ' · ${_size(sent)} sent'}');
+      await _save();
+
+      // 3 · photos & documents: only new or changed files, then the manifest again
       final manifestFiles = <String, List<String>>{};
       final docs = await getApplicationDocumentsDirectory();
+      var newFiles = 0;
       await for (final e in docs.list(recursive: true, followLinks: false)) {
         if (e is! File) continue;
         final rel = p.relative(e.path, from: docs.path);
@@ -193,28 +232,19 @@ class LiveSync {
         final sig = '${stat.size}:${stat.modified.millisecondsSinceEpoch}';
         final known = (files[rel] as Map?)?.cast<String, dynamic>();
         List<String> keys;
-        if (known != null && known['sig'] == sig) {
+        if (known != null && known['sig'] == sig && ((known['keys'] as List).cast<String>()).every(uploaded.contains)) {
           keys = (known['keys'] as List).cast<String>();
-          if (keys.any((k) => !uploaded.contains(k))) keys = await pieces(await e.readAsBytes());
         } else {
           keys = await pieces(await e.readAsBytes());
+          newFiles++;
         }
         files[rel] = {'sig': sig, 'keys': keys};
         manifestFiles[rel] = keys;
+        if (newFiles > 0 && newFiles % 10 == 0) await _save(); // long first sync: keep progress
       }
       files.removeWhere((k, _) => !manifestFiles.containsKey(k));
-      // 4 · the manifest, in the slot not written last time
-      final slots = (st['slot'] as Map).cast<String, dynamic>();
-      final slot = slots[store.id] == 'a' ? 'b' : 'a';
-      final key = store.id.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
-      final manifest = jsonEncode({
-        'v': 2,
-        'db': {'size': db.length, 'keys': dbKeys},
-        'files': manifestFiles,
-      });
-      final total = db.length + manifestFiles.length;
-      await Cloud.putLiveManifest('live_${key}_$slot', manifest: manifest, storeId: store.id, storeName: store.name, counts: counts, bytes: total);
-      slots[store.id] = slot;
+      final changedFiles = newFiles > 0 || manifestFiles.length != ready.length;
+      if (changedFiles) await writeManifest(manifestFiles);
       // 5 · forget pieces no copy uses any more (this store's last two + other stores)
       final refs = (st['refs'] as Map).cast<String, dynamic>();
       final prev = ((refs[store.id] as Map?)?['cur'] as List?)?.cast<String>() ?? const <String>[];
@@ -229,8 +259,7 @@ class LiveSync {
         } catch (_) {}
       }
       st['uploaded'] = uploaded.toList();
-      _pending = max(0, _pending - taken);
-      _status('cloud', sent == 0 ? 'Saved to cloud · up to date' : 'Saved to cloud · ${_size(sent)} sent');
+      _status('cloud', 'Saved to cloud${sent == 0 ? ' · up to date' : ' · ${_size(sent)} sent'}${newFiles > 0 ? ' · $newFiles photo${newFiles == 1 ? '' : 's'}' : ''}');
     } catch (e) {
       final offline = e is SocketException || '$e'.contains('internet') || '$e'.contains('host lookup') || '$e'.contains('Connection');
       _status('waiting', offline ? 'Saved on phone · will send when the internet is back' : 'Cloud copy waiting: $e');

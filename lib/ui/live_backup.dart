@@ -82,6 +82,18 @@ class _LiveBackupCardState extends State<LiveBackupCard> with SingleTickerProvid
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontFamily: 'Jakarta', fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF3A4155))),
+                if (on)
+                  FutureBuilder<Map<String, dynamic>?>(
+                    key: ValueKey(st.at),
+                    future: LiveSync.lastCloud(),
+                    builder: (context, snap) {
+                      final l = snap.data;
+                      final at = DateTime.tryParse('${l?['at'] ?? ''}');
+                      if (at == null) return const SizedBox.shrink();
+                      return Text('Cloud copy: ${l!['sales'] ?? 0} sales · ${l['customers'] ?? 0} customers · ${_time(at)}',
+                          style: const TextStyle(fontFamily: 'Jakarta', fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF0E7A4A)));
+                    },
+                  ),
               ]),
             ),
             if (on)

@@ -374,6 +374,19 @@ class Cloud {
     await _call('DELETE', _doc('users/$_uid/blobs/$key'), token: token);
   }
 
+  /// When each live slot of a store was last written (null = empty slot).
+  static Future<DateTime?> liveSlotTime(String slotId) async {
+    final token = await _token();
+    try {
+      final r = await _call('GET', _doc('users/$_uid/backups/$slotId'), token: token);
+      final f = (r['fields'] ?? {}) as Map<String, dynamic>;
+      if (f['complete']?['booleanValue'] != true) return null;
+      return DateTime.tryParse('${f['created']?['timestampValue']}');
+    } on CloudError {
+      return null;
+    }
+  }
+
   /// Writes a live copy's manifest (one small document — all or nothing).
   static Future<void> putLiveManifest(String slotId,
       {required String manifest, required String storeId, required String storeName, required Map<String, int> counts, required int bytes}) async {

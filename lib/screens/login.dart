@@ -131,6 +131,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!await Backup.phoneIsEmpty()) return;
       final list = await Cloud.listBackups();
       if (list.isEmpty || !mounted) return;
+      // the newest copy (the live copy is usually seconds old)
       final b = list.first;
       final ok = await showDialog<bool>(
         context: context,
@@ -138,7 +139,8 @@ class _LoginScreenState extends State<LoginScreen> {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
           icon: const Icon(Icons.cloud_download_rounded, color: Color(0xFF4318D2), size: 44),
           title: const Text('Restore your books?'),
-          content: Text('A cloud backup from ${prettyDate(ymd(b.created))} was found — '
+          content: Text('${b.live ? 'Your live copy' : 'A cloud backup'} from ${prettyDate(ymd(b.created))} '
+              '${b.created.hour.toString().padLeft(2, '0')}:${b.created.minute.toString().padLeft(2, '0')} was found — '
               '${b.sales} sales, ${b.products} products, ${b.customers} customers.'),
           actions: [
             TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Start fresh')),
