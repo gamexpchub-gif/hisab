@@ -749,14 +749,17 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
       if (ok != true) return;
     }
     // AI credit score: warn before giving credit to a risky customer
-    if (customer != null && due > 0 && score != null && score!.score < 40) {
+    // the score of THIS customer, fresh (not one still loading for another)
+    final sc = customer != null && due > 0 ? await Brain.customerScore(asInt(customer!['id'])).catchError((_) => const CustomerScore(100, 0, 0, 0, 0, 0)) : null;
+    if (!mounted) return;
+    if (customer != null && due > 0 && sc != null && sc.score < 40) {
       final ok = await showDialog<bool>(
         context: context,
         builder: (c) => AlertDialog(
           icon: const Icon(Icons.shield_rounded, color: Color(0xFFE0245E), size: 40),
-          title: Text('Risky credit · score ${score!.score}'),
-          content: Text('${customer!['name']} already owes ${Money.rs(score!.due)}'
-              '${score!.daysLate > 0 ? ' for ${score!.daysLate} days' : ''}. ${score!.advice}. Give ${Money.rs(due)} more credit?'),
+          title: Text('Risky credit · score ${sc.score}'),
+          content: Text('${customer!['name']} already owes ${Money.rs(sc.due)}'
+              '${sc.daysLate > 0 ? ' for ${sc.daysLate} days' : ''}. ${sc.advice}. Give ${Money.rs(due)} more credit?'),
           actions: [
             TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Take payment')),
             TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Give credit')),

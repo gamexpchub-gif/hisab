@@ -388,7 +388,11 @@ class Books {
     if (isC) {
       final emi = await n('SELECT COUNT(*) AS c FROM emi_plans WHERE customer_id = ?', [id]);
       if (emi > 0) out.add('$emi EMI plan${emi == 1 ? '' : 's'}');
+      final jobs = await n('SELECT COUNT(*) AS c FROM repairs WHERE customer_id = ?', [id]);
+      if (jobs > 0) out.add('$jobs repair job${jobs == 1 ? '' : 's'}');
     }
+    final ex = await n('SELECT COUNT(*) AS c FROM exchanges WHERE ${isC ? 'customer_id' : 'supplier_id'} = ?', [id]);
+    if (ex > 0) out.add('$ex exchange phone${ex == 1 ? '' : 's'}');
     return out;
   }
 

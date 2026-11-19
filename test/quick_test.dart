@@ -56,6 +56,14 @@ void main() {
     expect(VoiceBill.normalise('18 hajar 500'), '18500');
   });
 
+  test('bill scan: phone numbers split by spaces are not IMEIs', () {
+    // 98300 11111 98300 2222x: try every last digit — none may be read as an IMEI
+    for (var d = 0; d < 10; d++) {
+      expect(BillScan.imeis('Ph: 98300 11111 98300 2222$d'), isEmpty);
+    }
+    expect(BillScan.imeis('IMEI 3512 3456 0000 010'), ['351234560000010']);
+  });
+
   test('bill scan: lines, quantities, rates and IMEIs', () async {
     const text = 'ABC MOBILE DISTRIBUTORS\nInvoice No: INV-2291\n'
         'Vivo T3 8/128 Blue  2  16500.00  33000.00\n'

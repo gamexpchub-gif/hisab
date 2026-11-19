@@ -608,6 +608,34 @@ void main() {
     await expectBalanced();
   });
 
+  test('Review fixes: buy-back IMEI back in stock, links block delete, repair dues age', () async {
+    final cash = asInt((await Books.moneyAccounts()).first['id']);
+    final sup = await Books.saveParty('supplier', {'name': 'RF Supplier'});
+    final a = await Books.saveParty('customer', {'name': 'RF Buyer', 'phone': '9830033333'});
+    final p = await Books.saveProduct({'name': 'RF Phone', 'gst_bp': 0, 'price': 1000000});
+    await Books.createPurchase(items: [ItemIn(p, 1, 800000, '351234560000010')], supplierId: sup);
+    await Books.createSale(items: [ItemIn(p, 1, 1000000, '351234560000010')], customerId: a, paid: 1000000, accountId: cash);
+    expect(await SmartImei.inStock(p), isEmpty);
+    // the customer sells the same phone back (exchange)
+    await Shop.buyUsed(sellerName: 'RF Buyer', sellerPhone: '9830033333', model: 'RF Phone used', imei: '351234560000010', price: 600000, accountId: cash);
+    final used = asInt((await Shop.exchanges()).first['product_id']);
+    expect(await SmartImei.inStock(used), ['351234560000010']);
+    expect(await SmartImei.inStock(p), isEmpty);
+    expect((await SmartImei.match('351234560000010')).soldOn, isNull);
+
+    // a customer with only a repair job cannot be deleted (friendly message, no FK crash)
+    final r = await Shop.customerFor('RF Repair', '9830044444');
+    final job = await Shop.createRepair(customerId: r, device: 'Old phone', problem: 'Battery');
+    expect(await Books.partyLinks('customer', r), contains('1 repair job'));
+    await expectLater(Books.deleteParty('customer', r), throwsA(isA<AccountingError>()));
+
+    // a repair charge left due is aged from its delivery date
+    await Shop.deliverRepair(job, charge: 150000, date: ymd(DateTime.now().subtract(const Duration(days: 9))));
+    final t = (await Autopilot.today()).where((x) => x.kind == 'due' && x.customerId == r).single;
+    expect(t.level, 2);
+    await expectBalanced();
+  });
+
   test('Product purchase cost is kept with no opening stock', () async {
     final p = await Books.saveProduct({'name': 'Cost Keeper', 'gst_bp': 0, 'price': 150000}, openingCost: 100000);
     var r = (await Books.query('SELECT stock, cost FROM products WHERE id = ?', [p])).first;

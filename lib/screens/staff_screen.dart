@@ -282,23 +282,34 @@ class _WhoIsWorkingState extends State<_WhoIsWorking> {
       setState(() => pin = pin.isEmpty ? '' : pin.substring(0, pin.length - 1));
       return;
     }
+    if (d == '✓') {
+      await _submit();
+      return;
+    }
     if (pin.length >= 6) return;
     setState(() {
       pin += d;
       error = null;
     });
-    if (pin.length >= 4) {
-      try {
-        await Staff.signIn(pin);
-      } on AccountingError {
-        if (pin.length >= 6 && mounted) {
-          HapticFeedback.heavyImpact();
-          setState(() {
-            error = 'Wrong PIN';
-            pin = '';
-          });
-        }
-      }
+    // a full 6-digit PIN signs in by itself; shorter PINs with ✓ (so a PIN
+    // that starts like someone else's never signs in the wrong person)
+    if (pin.length == 6) await _submit();
+  }
+
+  Future<void> _submit() async {
+    if (pin.length < 4) {
+      setState(() => error = 'Enter your 4–6 digit PIN');
+      return;
+    }
+    try {
+      await Staff.signIn(pin);
+    } on AccountingError {
+      if (!mounted) return;
+      HapticFeedback.heavyImpact();
+      setState(() {
+        error = 'Wrong PIN';
+        pin = '';
+      });
     }
   }
 
@@ -344,22 +355,20 @@ class _WhoIsWorkingState extends State<_WhoIsWorking> {
               ['1', '2', '3'],
               ['4', '5', '6'],
               ['7', '8', '9'],
-              ['', '0', '⌫'],
+              ['⌫', '0', '✓'],
             ])
               Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                 for (final d in row)
                   Padding(
                     padding: const EdgeInsets.all(8),
-                    child: d.isEmpty
-                        ? const SizedBox(width: 72, height: 72)
-                        : InkWell(
+                    child: InkWell(
                             borderRadius: BorderRadius.circular(36),
                             onTap: () => _tap(d),
                             child: Container(
                               width: 72,
                               height: 72,
                               alignment: Alignment.center,
-                              decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0x26FFFFFF)),
+                              decoration: BoxDecoration(shape: BoxShape.circle, color: d == '✓' ? const Color(0xFF0BA360) : const Color(0x26FFFFFF)),
                               child: Text(d, style: _j(26, FontWeight.w700, Colors.white)),
                             ),
                           ),

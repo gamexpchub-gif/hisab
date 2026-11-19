@@ -81,6 +81,16 @@ class SmartImei {
         'WHERE i.serial = ? AND NOT EXISTS (SELECT 1 FROM sale_return_items r WHERE r.sale_item_id = i.id) '
         'ORDER BY s.date DESC, s.id DESC LIMIT 1',
         [code]);
+    // bought back after it was sold (exchange): in stock again, not "sold"
+    var soldRows = sold;
+    if (sold.isNotEmpty && bought.isNotEmpty) {
+      final nb = asInt((await Books.query('SELECT COUNT(*) AS c FROM purchase_items WHERE serial = ?', [code])).first['c']);
+      final ns = asInt((await Books.query(
+              'SELECT COUNT(*) AS c FROM sale_items i WHERE i.serial = ? AND NOT EXISTS (SELECT 1 FROM sale_return_items r WHERE r.sale_item_id = i.id)',
+              [code]))
+          .first['c']);
+      if (nb > ns) soldRows = const [];
+    }
     Rec? product;
     var how = 'none';
     var seen = 0;
@@ -161,7 +171,7 @@ class SmartImei {
         product: product,
         how: how,
         tacSeen: seen,
-        soldOn: sold.isEmpty ? null : sold.first,
+        soldOn: soldRows.isEmpty ? null : soldRows.first,
         boughtOn: bought.isEmpty ? null : bought.first,
         suggestName: sName,
         suggestBrand: sBrand,
@@ -234,22 +244,33 @@ class SmartImei {
         n++;
       }
     }
-    await Books.setSetting('tac_shared', '1');
+    // only when the list really reached the cloud (otherwise try again next time)
+    if (n > 0 || best.isEmpty) await Books.setSetting('tac_shared', '1');
     return n;
   }
 
   /// IMEIs / serials of [productId] bought and still in stock (not sold, or
   /// sold and returned), oldest purchase first.
   static Future<List<String>> inStock(int productId) async {
+    // a serial is in stock when it was bought more often than it was sold
+    // (and not returned) — a phone sold and later bought back (exchange)
+    // counts again — and its latest purchase is this product
     final r = await Books.query(
-        'SELECT TRIM(i.serial) AS serial FROM purchase_items i JOIN purchases b ON b.id = i.purchase_id '
-        "WHERE i.product_id = ? AND TRIM(COALESCE(i.serial, '')) <> '' "
-        'AND NOT EXISTS (SELECT 1 FROM sale_items s WHERE TRIM(s.serial) = TRIM(i.serial) '
-        'AND NOT EXISTS (SELECT 1 FROM sale_return_items r WHERE r.sale_item_id = s.id)) '
-        'ORDER BY b.date, i.id',
+        'SELECT TRIM(i.serial) AS serial, MIN(b.date) AS d, MIN(i.id) AS first FROM purchase_items i JOIN purchases b ON b.id = i.purchase_id '
+        "WHERE i.product_id = ? AND TRIM(COALESCE(i.serial, '')) <> '' GROUP BY TRIM(i.serial) ORDER BY d, first",
         [productId]);
-    final seen = <String>{};
-    return [for (final x in r) if (seen.add('${x['serial']}')) '${x['serial']}'];
+    final out = <String>[];
+    for (final x in r) {
+      final sn = '${x['serial']}';
+      final c = (await Books.query(
+              'SELECT (SELECT COUNT(*) FROM purchase_items WHERE TRIM(serial) = ?) AS bought, '
+              '(SELECT COUNT(*) FROM sale_items s WHERE TRIM(s.serial) = ? AND NOT EXISTS (SELECT 1 FROM sale_return_items r WHERE r.sale_item_id = s.id)) AS sold, '
+              '(SELECT i.product_id FROM purchase_items i JOIN purchases b ON b.id = i.purchase_id WHERE TRIM(i.serial) = ? ORDER BY b.date DESC, i.id DESC LIMIT 1) AS latest',
+              [sn, sn, sn]))
+          .first;
+      if (asInt(c['bought']) > asInt(c['sold']) && asInt(c['latest']) == productId) out.add(sn);
+    }
+    return out;
   }
 
   static Future<Rec?> _product(int id) async {

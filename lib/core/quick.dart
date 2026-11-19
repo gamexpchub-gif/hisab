@@ -316,15 +316,32 @@ class BillScan {
   /// Valid 15-digit IMEIs in the text (spaces / dashes inside are allowed).
   static List<String> imeis(String text) {
     final out = <String>[];
-    for (final m in _imei.allMatches(text)) {
-      final d = m.group(1)!.replaceAll(RegExp(r'\D'), '');
+    for (final line in text.split('\n')) {
+      // numbers split by spaces count only on an IMEI / serial line (a phone
+      // number like "98300 11111 98300 22222" is not an IMEI)
+      final labelled = RegExp(r'imei|serial|s\.?\s?no|sl\.?\s?no|\bsn\b', caseSensitive: false).hasMatch(line);
+      _imeisIn(line, labelled, out);
+    }
+    return out;
+  }
+
+  static void _imeisIn(String line, bool labelled, List<String> out) {
+    for (final m in _imei.allMatches(line)) {
+      final raw = m.group(1)!;
+      if (!labelled && RegExp(r'[\s\-]').hasMatch(raw)) {
+        for (final w in RegExp(r'(?<!\d)\d{15}(?!\d)').allMatches(raw)) {
+          final c = w.group(0)!;
+          if (SmartImei.luhn(c) && !out.contains(c)) out.add(c);
+        }
+        continue;
+      }
+      final d = raw.replaceAll(RegExp(r'\D'), '');
       // a run of digits may hold two IMEIs printed side by side
       for (var i = 0; i + 15 <= d.length; i += 15) {
         final c = d.substring(i, i + 15);
         if (SmartImei.luhn(c) && !out.contains(c)) out.add(c);
       }
     }
-    return out;
   }
 
   static String? billNo(String text) {

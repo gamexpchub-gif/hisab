@@ -213,7 +213,12 @@ class Autopilot {
   static Future<String?> oldestUnpaid(int customerId, int balance) async {
     var left = balance;
     String? date;
-    for (final r in await Books.query('SELECT date, total FROM sales WHERE customer_id = ? ORDER BY date DESC, id DESC', [customerId])) {
+    // bills and delivered repair charges, newest first (they are paid last)
+    for (final r in await Books.query(
+        'SELECT date, total, id FROM sales WHERE customer_id = ? '
+        "UNION ALL SELECT delivered_at AS date, charge AS total, id FROM repairs WHERE customer_id = ? AND status = 'delivered' AND charge > 0 "
+        'ORDER BY date DESC, id DESC',
+        [customerId, customerId])) {
       date = '${r['date']}';
       left -= asInt(r['total']);
       if (left <= 0) break;
