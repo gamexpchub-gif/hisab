@@ -6,6 +6,7 @@ import '../core/backup.dart';
 import '../core/books.dart';
 import '../core/money.dart';
 import '../core/stores.dart';
+import '../ui/live_backup.dart';
 import '../ui/widgets.dart';
 import 'login.dart';
 import 'plans.dart';
@@ -213,6 +214,8 @@ class _AccountScreenState extends State<AccountScreen> {
                   }),
                 ),
               ]),
+              const SizedBox(height: 10),
+              const LiveBackupCard(),
               const SizedBox(height: 10),
               _autoStatus(),
               const SizedBox(height: 14),
@@ -478,7 +481,7 @@ class _AccountScreenState extends State<AccountScreen> {
                       ),
                     ),
                   ]),
-                  Text('${b.sales} sales · ${b.products} products · ${Backup.size(b.bytes)}${b.auto ? ' · auto' : ''}${b.device.isEmpty ? '' : ' · ${b.device}'}',
+                  Text('${b.sales} sales · ${b.products} products · ${Backup.size(b.bytes)}${b.live ? ' · live' : b.auto ? ' · auto' : ''}${b.device.isEmpty ? '' : ' · ${b.device}'}',
                       maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(11, FontWeight.w500, _muted)),
                 ]),
               ),

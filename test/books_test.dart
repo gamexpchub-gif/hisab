@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -634,6 +635,20 @@ void main() {
     final t = (await Autopilot.today()).where((x) => x.kind == 'due' && x.customerId == r).single;
     expect(t.level, 2);
     await expectBalanced();
+  });
+
+  test('Live backup snapshot: VACUUM INTO copies the open books', () async {
+    final p = await Books.saveProduct({'name': 'Snapshot Phone', 'gst_bp': 0, 'price': 100000}, openingQty: 2, openingCost: 80000);
+    final dir = await Directory.systemTemp.createTemp('snap');
+    final path = '${dir.path}/copy.db';
+    final db = await AppDb.instance;
+    await db.execute('VACUUM INTO ?', [path]);
+    final copy = await databaseFactoryFfi.openDatabase(path, options: OpenDatabaseOptions(readOnly: true));
+    final r = await copy.rawQuery('SELECT name, stock FROM products WHERE id = ?', [p]);
+    expect(r.single['name'], 'Snapshot Phone');
+    expect(r.single['stock'], 2);
+    await copy.close();
+    await dir.delete(recursive: true);
   });
 
   test('Product purchase cost is kept with no opening stock', () async {

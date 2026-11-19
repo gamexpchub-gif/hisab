@@ -7,6 +7,7 @@ import '../core/backup.dart';
 import '../core/books.dart';
 import '../core/native_files.dart';
 import '../core/money.dart';
+import '../ui/live_backup.dart';
 import '../ui/widgets.dart';
 
 // =============================================================================
@@ -189,6 +190,8 @@ class _BackupScreenState extends State<BackupScreen> {
                       const [Color(0xFFFF6B8B), Color(0xFFE0245E)], _pickAndRestore),
                 ),
               ]),
+              const SizedBox(height: 10),
+              const LiveBackupCard(),
               const SizedBox(height: 10),
               _autoCard(d),
               const SizedBox(height: 14),

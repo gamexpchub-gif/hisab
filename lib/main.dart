@@ -49,6 +49,8 @@ Future<void> main() async {
   runApp(const HisabApp());
   // automatic backups: phone daily, cloud for every store (on start, on resume, every 30 min)
   Backup.startAuto();
+  // live backup: every change goes to the phone and the cloud within seconds
+  Backup.startLive();
   // tonight's AI report notification, kept fresh as the books change
   Future<void>.delayed(const Duration(seconds: 9), DailyReport.start);
   // plan, admin rights and usage from the cloud account

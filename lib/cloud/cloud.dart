@@ -47,6 +47,9 @@ class CloudBackup {
   final bool auto;
   CloudBackup(this.id, this.created, this.bytes, this.chunks, this.sales, this.products, this.customers, this.device,
       {this.store = 'main', this.storeName = '', this.auto = false});
+
+  /// A live copy (kept up to date after every change; two slots per store).
+  bool get live => id.startsWith('live_');
 }
 
 class Cloud {
@@ -275,12 +278,78 @@ class Cloud {
     progress?.call(1);
     if (store == Stores.current) await Books.setSetting('last_cloud_backup_at', DateTime.now().toIso8601String());
     final all = await listBackups();
-    for (final old in all.where((b) => b.store == store).skip(keep)) {
+    for (final old in all.where((b) => b.store == store && !b.live).skip(keep)) {
       try {
         await deleteBackup(old);
       } catch (_) {}
     }
     return all.firstWhere((b) => b.id == id, orElse: () => all.first);
+  }
+
+  /// Live backup: the newest copy of a store's books, written into one of
+  /// two slots in turn (live_<store>_a / _b), so a cut connection never
+  /// spoils the last good copy. Nothing in the app's settings is touched
+  /// (no change event, no loop).
+  static Future<void> uploadLive(List<int> zipBytes, {required String storeId, required String storeName, required Map<String, int> counts}) async {
+    final token = await _token();
+    final key = storeId.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
+    Future<(DateTime, int, bool)> slot(String s) async {
+      try {
+        final r = await _call('GET', _doc('users/$_uid/backups/live_${key}_$s'), token: token);
+        final f = (r['fields'] ?? {}) as Map<String, dynamic>;
+        return (
+          DateTime.tryParse('${f['created']?['timestampValue']}') ?? DateTime(2000),
+          int.tryParse('${f['chunks']?['integerValue'] ?? 0}') ?? 0,
+          f['complete']?['booleanValue'] == true,
+        );
+      } on CloudError {
+        return (DateTime(2000), 0, false);
+      }
+    }
+
+    final a = await slot('a'), b = await slot('b');
+    // write over the older (or the broken) slot; the other stays as it is
+    final useA = !a.$3 || (b.$3 && a.$1.isBefore(b.$1));
+    final name = 'live_${key}_${useA ? 'a' : 'b'}';
+    final oldChunks = useA ? a.$2 : b.$2;
+    final root = 'users/$_uid/backups/$name';
+    await _call('PATCH', _doc(root, '?updateMask.fieldPaths=complete'), token: token, body: {
+      'fields': {'complete': {'booleanValue': false}}
+    });
+    final chunks = (zipBytes.length / chunkSize).ceil().clamp(1, 1 << 20).toInt();
+    for (var i = 0; i < chunks; i++) {
+      final part = zipBytes.sublist(i * chunkSize, ((i + 1) * chunkSize).clamp(0, zipBytes.length).toInt());
+      await _call('PATCH', _doc('$root/chunks/${i.toString().padLeft(4, '0')}'),
+          token: token, body: {'fields': {'data': {'bytesValue': base64Encode(part)}, 'n': {'integerValue': '$i'}}});
+    }
+    for (var i = chunks; i < oldChunks; i++) {
+      try {
+        await _call('DELETE', _doc('$root/chunks/${i.toString().padLeft(4, '0')}'), token: token);
+      } catch (_) {}
+    }
+    await _call('PATCH', _doc(root), token: token, body: {
+      'fields': {
+        'created': {'timestampValue': DateTime.now().toUtc().toIso8601String()},
+        'bytes': {'integerValue': '${zipBytes.length}'},
+        'chunks': {'integerValue': '$chunks'},
+        'sales': {'integerValue': '${counts['sales'] ?? 0}'},
+        'products': {'integerValue': '${counts['products'] ?? 0}'},
+        'customers': {'integerValue': '${counts['customers'] ?? 0}'},
+        'device': {'stringValue': Platform.localHostname},
+        'store': {'stringValue': storeId},
+        'storeName': {'stringValue': storeName},
+        'auto': {'booleanValue': true},
+        'live': {'booleanValue': true},
+        'complete': {'booleanValue': true},
+      }
+    });
+    await _call('PATCH', _doc('users/$_uid', '?updateMask.fieldPaths=email&updateMask.fieldPaths=name&updateMask.fieldPaths=lastBackup'), token: token, body: {
+      'fields': {
+        'email': {'stringValue': _email ?? ''},
+        'name': {'stringValue': _name ?? ''},
+        'lastBackup': {'timestampValue': DateTime.now().toUtc().toIso8601String()},
+      }
+    });
   }
 
   static Future<List<CloudBackup>> listBackups() async {
