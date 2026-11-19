@@ -81,6 +81,21 @@ if ! grep -q 'HisabWidgetProvider' "$MANIFEST"; then
   sed -i 's|</application>|    <receiver android:name=".HisabWidgetProvider" android:exported="true" android:label="Hisab AI · Today">\n            <intent-filter>\n                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />\n            </intent-filter>\n            <meta-data android:name="android.appwidget.provider" android:resource="@xml/hisab_widget_info" />\n        </receiver>\n    </application>|' "$MANIFEST"
 fi
 
+# Bill photo (ML Kit text recognition): only the Latin model is bundled;
+# the plugin also references the optional Chinese / Japanese / Korean /
+# Devanagari models, which R8 must not look for.
+PRO=android/app/proguard-rules.pro
+touch "$PRO"
+if ! grep -q 'com.google.mlkit.vision.text.chinese' "$PRO"; then
+  cat >> "$PRO" <<'RULES'
+# Hisab AI — ML Kit text recognition (Latin only)
+-dontwarn com.google.mlkit.vision.text.chinese.**
+-dontwarn com.google.mlkit.vision.text.devanagari.**
+-dontwarn com.google.mlkit.vision.text.japanese.**
+-dontwarn com.google.mlkit.vision.text.korean.**
+RULES
+fi
+
 # Gradle defaults to an 8 GB heap, which gets the build killed on machines
 # with less RAM ("Gradle build daemon disappeared unexpectedly").
 PROPS=android/gradle.properties
