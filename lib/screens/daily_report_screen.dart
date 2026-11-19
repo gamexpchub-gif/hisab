@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:printing/printing.dart';
+import '../print/report_pdf.dart';
 
 import '../core/books.dart';
 import '../core/daily_report.dart';
@@ -177,6 +179,30 @@ class _DailyReportScreenState extends State<DailyReportScreen> {
                   const Icon(Icons.chat_rounded, color: Colors.white),
                   const SizedBox(width: 10),
                   Text('Share report on WhatsApp', style: _j(14.5, FontWeight.w800, Colors.white)),
+                ]),
+              ),
+            ),
+            const SizedBox(height: 10),
+            GestureDetector(
+              onTap: () async {
+                HapticFeedback.selectionClick();
+                try {
+                  final bytes = await dailyReportPdf(r, shop);
+                  await Printing.sharePdf(bytes: bytes, filename: 'Daily-Report-${r.day}.pdf');
+                } catch (e) {
+                  if (context.mounted) toast(context, 'Could not make the PDF: $e', error: true);
+                }
+              },
+              child: Container(
+                height: 54,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(27),
+                  gradient: const LinearGradient(colors: [Color(0xFFFF6B8B), Color(0xFFE0245E)]),
+                ),
+                child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  const Icon(Icons.picture_as_pdf_rounded, color: Colors.white),
+                  const SizedBox(width: 10),
+                  Text('Share as PDF', style: _j(14.5, FontWeight.w800, Colors.white)),
                 ]),
               ),
             ),

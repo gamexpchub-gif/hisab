@@ -10,6 +10,7 @@ import 'package:hisab/core/imei_smart.dart';
 import 'package:hisab/core/insights.dart';
 import 'package:hisab/core/daily_report.dart';
 import 'package:hisab/core/analytics.dart';
+import 'package:hisab/core/autopilot.dart';
 import 'package:hisab/core/plan.dart';
 import 'package:hisab/core/stores.dart';
 import 'package:hisab/core/gst_report.dart';
@@ -424,6 +425,46 @@ void main() {
     await Books.deleteParty('customer', c);
     await Books.deleteParty('supplier', sup);
     expect(await Books.query('SELECT * FROM customers WHERE id = ?', [c]), isEmpty);
+    await expectBalanced();
+  });
+
+  test('Autopilot: due reminders get firmer, follow-ups, reorder, cash close', () async {
+    final now = DateTime.now();
+    String ago(int d) => ymd(now.subtract(Duration(days: d)));
+    final sup = await Books.saveParty('supplier', {'name': 'Auto Supplier', 'phone': '9800000001'});
+    final c = await Books.saveParty('customer', {'name': 'Late Payer', 'phone': '9800000002'});
+    final cat = await Books.addCategory('Mobile');
+    final p = await Books.saveProduct({'name': 'Auto Phone', 'gst_bp': 0, 'price': 1000000, 'category_id': cat, 'low_stock': 0});
+    await Books.createPurchase(items: [ItemIn(p, 4, 800000)], supplierId: sup, date: ago(20));
+    final cash = asInt((await Books.moneyAccounts()).first['id']);
+    // 8 days ago, on credit
+    await Books.createSale(items: [ItemIn(p, 1, 1000000, 'AP-1')], customerId: c, paid: 0, accountId: cash, date: ago(8));
+    var tasks = await Autopilot.today();
+    final due = tasks.where((t) => t.kind == 'due').single;
+    expect(due.level, 2);
+    expect(due.amount, 1000000);
+    expect(due.message, contains('8 days'));
+    // the same reminder is not offered twice
+    await Autopilot.markSent(due.key);
+    expect((await Autopilot.today()).where((t) => t.kind == 'due'), isEmpty);
+    // a week-old phone sale → follow-up
+    expect(tasks.where((t) => t.kind == 'follow7').length, 1);
+
+    // fast seller with little stock → reorder from its supplier
+    for (var i = 0; i < 2; i++) {
+      await Books.createSale(items: [ItemIn(p, 1, 1000000)], paid: 1000000, accountId: cash, date: ago(2 + i));
+    }
+    final r = await Autopilot.reorder();
+    expect(r.single.product['id'], p);
+    expect(r.single.supplier, 'Auto Supplier');
+    expect(r.single.suggest, greaterThan(0));
+    expect(Autopilot.orderText({'business_name': 'GameX'}, 'Auto Supplier', r), contains('Auto Phone'));
+
+    // cash close
+    final expected = await Autopilot.expectedCash();
+    final close = await Autopilot.close(expected - 5000, note: 'short');
+    expect(close.diff, -5000);
+    expect((await Autopilot.closedToday())!.counted, expected - 5000);
     await expectBalanced();
   });
 

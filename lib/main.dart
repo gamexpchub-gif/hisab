@@ -9,6 +9,7 @@ import 'core/stores.dart';
 import 'cloud/cloud.dart';
 import 'core/tac_db.dart';
 import 'core/widget_sync.dart';
+import 'core/autopilot.dart';
 import 'screens/plans.dart';
 import 'screens/dashboard.dart';
 import 'screens/home.dart';
@@ -48,6 +49,8 @@ Future<void> main() async {
   Future<void>.delayed(const Duration(seconds: 9), DailyReport.start);
   // plan, admin rights and usage from the cloud account
   Future<void>.delayed(const Duration(seconds: 3), Accounts.sync);
+  // AI Autopilot: tomorrow morning's "messages ready" notification
+  Future<void>.delayed(const Duration(seconds: 20), Autopilot.scheduleMorning);
   // home-screen widget: today's sale, cash and dues
   Future<void>.delayed(const Duration(seconds: 6), WidgetSync.start);
   // phone model database for Smart IMEI (downloaded once, in the background)

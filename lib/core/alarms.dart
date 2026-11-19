@@ -142,4 +142,33 @@ class Alarms {
       await _plugin.cancel(_dailyBase + 1);
     } catch (_) {}
   }
+
+  // ---------------------------------------------------------------- AI Autopilot (morning)
+  static const _autoBase = 910000;
+
+  /// "N messages ready" at [when] (reminders, follow-ups, re-orders).
+  static Future<void> scheduleAutopilot(DateTime when, String title, String body) async {
+    try {
+      await init();
+      await _plugin.cancel(_autoBase);
+      final at = tz.TZDateTime(tz.local, when.year, when.month, when.day, when.hour, when.minute);
+      if (at.isBefore(tz.TZDateTime.now(tz.local))) return;
+      await _schedule(
+        _autoBase,
+        title,
+        body,
+        at,
+        NotificationDetails(
+          android: AndroidNotificationDetails(
+            'ai_autopilot',
+            'AI Autopilot',
+            channelDescription: 'Every morning: payment reminders, follow-ups and products to re-order',
+            importance: Importance.high,
+            priority: Priority.high,
+            styleInformation: BigTextStyleInformation(body, contentTitle: title),
+          ),
+        ),
+      );
+    } catch (_) {}
+  }
 }

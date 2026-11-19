@@ -21,6 +21,16 @@ class Money {
     return neg ? -v : v;
   }
 
+  /// Like [parse], but null for an empty or invalid amount.
+  static int? tryParse(String? input) {
+    if ((input ?? '').trim().isEmpty) return null;
+    try {
+      return parse(input);
+    } on FormatException {
+      return null;
+    }
+  }
+
   /// Indian digit grouping: 12,34,567 — decimals shown only when non-zero.
   static String inr(int paise, {bool decimals = false}) {
     final neg = paise < 0;

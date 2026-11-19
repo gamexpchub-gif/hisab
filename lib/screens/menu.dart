@@ -26,6 +26,7 @@ import 'sales.dart';
 import 'search.dart';
 import 'settings.dart';
 import 'smart_ai.dart';
+import 'autopilot.dart';
 import '../sheets/home.dart';
 import 'plans.dart';
 import 'stores.dart';
@@ -127,6 +128,8 @@ class _MenuScreenState extends State<MenuScreen> {
       ('Smart AI', [
         _Item('Smart Business AI', 'What to do today: dues, EMIs, stock, profit', Icons.auto_awesome_rounded,
             const [Color(0xFF7B3FF2), Color(0xFF1B1F6B)], () => go(const SmartAiScreen())),
+        _Item('AI Autopilot', 'Reminders 3·7·15 days, follow-ups, re-order, cash close', Icons.smart_toy_rounded,
+            const [Color(0xFF34D399), Color(0xFF0E7490)], () => go(const AutopilotScreen())),
         _Item('Pro Analytics', 'Charts: sales, profit, dues, cash, bank, loans', Icons.query_stats_rounded,
             const [Color(0xFFF472B6), Color(0xFF7B3FF2)], () => go(const AnalyticsScreen())),
         _Item('Daily AI Report', 'Evening report: sales, profit, who pays tomorrow, reorders', Icons.summarize_rounded,
