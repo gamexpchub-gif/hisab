@@ -238,6 +238,20 @@ class SmartImei {
     return n;
   }
 
+  /// IMEIs / serials of [productId] bought and still in stock (not sold, or
+  /// sold and returned), oldest purchase first.
+  static Future<List<String>> inStock(int productId) async {
+    final r = await Books.query(
+        'SELECT TRIM(i.serial) AS serial FROM purchase_items i JOIN purchases b ON b.id = i.purchase_id '
+        "WHERE i.product_id = ? AND TRIM(COALESCE(i.serial, '')) <> '' "
+        'AND NOT EXISTS (SELECT 1 FROM sale_items s WHERE TRIM(s.serial) = TRIM(i.serial) '
+        'AND NOT EXISTS (SELECT 1 FROM sale_return_items r WHERE r.sale_item_id = s.id)) '
+        'ORDER BY b.date, i.id',
+        [productId]);
+    final seen = <String>{};
+    return [for (final x in r) if (seen.add('${x['serial']}')) '${x['serial']}'];
+  }
+
   static Future<Rec?> _product(int id) async {
     final r = await Books.query(
         'SELECT p.*, c.name AS category FROM products p LEFT JOIN categories c ON c.id = p.category_id WHERE p.id = ?', [id]);

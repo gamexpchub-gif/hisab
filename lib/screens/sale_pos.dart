@@ -372,7 +372,7 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
   // ---------------------------------------------------------------- cart
   void _add(Rec p, {String? serial}) {
     HapticFeedback.selectionClick();
-    final existing = cart.where((l) => l.id == asInt(p['id']) && serial == null).toList();
+    final existing = cart.where((l) => l.id == asInt(p['id']) && serial == null && l.serial.text.trim().isEmpty).toList();
     setState(() {
       if (existing.isNotEmpty) {
         existing.first.qty++;
@@ -385,6 +385,86 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
     });
     final inCart = cart.where((l) => l.id == asInt(p['id'])).fold<int>(0, (a, l) => a + l.qty);
     if (inCart > asInt(p['stock'])) toast(context, 'Only ${p['stock']} × ${p['name']} in stock', error: true);
+    if (serial == null) _autoSerial(p);
+  }
+
+  /// IMEIs saved at purchase fill in by themselves: a phone added to the bill
+  /// gets the oldest IMEI still in stock (one line per phone).
+  Future<void> _autoSerial(Rec p) async {
+    final pid = asInt(p['id']);
+    final free = await _freeSerials(pid);
+    if (!mounted || free.isEmpty) return;
+    final blank = cart.where((l) => l.id == pid && l.serial.text.trim().isEmpty).firstOrNull;
+    if (blank == null) return;
+    setState(() {
+      // split "qty 2, no IMEI" into one line per phone, each with its own IMEI
+      var i = 0;
+      final at = cart.indexOf(blank);
+      blank.serial.text = free[i++];
+      blank.imeiInfo = 'IMEI from purchase ✓ · ${free.length - 1} more in stock';
+      while (blank.qty > 1 && i < free.length) {
+        blank.qty--;
+        final n = _Line(blank.p)
+          ..rate = blank.rate
+          ..serial.text = free[i++]
+          ..imeiInfo = 'IMEI from purchase ✓';
+        cart.insert(at + i - 1, n);
+      }
+    });
+  }
+
+  /// In-stock IMEIs of a product not already on this bill.
+  Future<List<String>> _freeSerials(int pid) async {
+    final used = {for (final l in cart) SmartImei.clean(l.serial.text)};
+    return [for (final x in await SmartImei.inStock(pid)) if (!used.contains(SmartImei.clean(x))) x];
+  }
+
+  /// Lets the user pick which in-stock IMEI is being sold.
+  Future<void> _pickSerial(_Line l) async {
+    final mine = SmartImei.clean(l.serial.text);
+    final free = [
+      if (mine.isNotEmpty) l.serial.text.trim(),
+      for (final x in await _freeSerials(l.id)) x,
+    ];
+    if (!mounted) return;
+    if (free.isEmpty) {
+      toast(context, 'No IMEI saved for ${l.p['name']} — scan or type it', error: true);
+      return;
+    }
+    final pick = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(26))),
+      builder: (c) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(c).size.height * .6),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Text('${l.p['name']} · ${free.length} IMEI${free.length == 1 ? '' : 's'} in stock',
+                  style: _j(15, FontWeight.w800, _ink)),
+            ),
+            Flexible(
+              child: ListView(shrinkWrap: true, children: [
+                for (final x in free)
+                  ListTile(
+                    leading: const Icon(Icons.qr_code_2_rounded, color: _purple),
+                    title: Text(x, style: _j(14, FontWeight.w700, _ink)),
+                    trailing: SmartImei.clean(x) == mine ? const Icon(Icons.check_circle_rounded, color: _green) : null,
+                    onTap: () => Navigator.pop(c, x),
+                  ),
+              ]),
+            ),
+          ]),
+        ),
+      ),
+    );
+    if (pick == null || !mounted) return;
+    setState(() {
+      l.serial.text = pick;
+      l.imeiWarn = null;
+      l.imeiInfo = 'IMEI from purchase ✓';
+    });
   }
 
   /// Continuous scanning: every barcode / IMEI goes straight into the cart.
@@ -1089,7 +1169,14 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
                     });
                   }),
                   SizedBox(width: 30, child: Text('${l.qty}', textAlign: TextAlign.center, style: _j(14, FontWeight.w800, _ink))),
-                  _qtyBtn(Icons.add_rounded, () => setState(() => l.qty++)),
+                  _qtyBtn(Icons.add_rounded, () {
+                    if (l.serial.text.trim().isNotEmpty) {
+                      _add(l.p); // the next phone, with its own IMEI
+                    } else {
+                      setState(() => l.qty++);
+                      _autoSerial(l.p);
+                    }
+                  }),
                 ]),
               ),
             ]),
@@ -1129,6 +1216,12 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
                         hintStyle: _j(12, FontWeight.w400, const Color(0xFFA3A7C2)),
                       ),
                     ),
+                  ),
+                  IconButton(
+                    tooltip: 'Pick from stock',
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.format_list_bulleted_rounded, color: _purple, size: 20),
+                    onPressed: () => _pickSerial(l),
                   ),
                   IconButton(
                     icon: const Icon(Icons.qr_code_scanner_rounded, color: _purple, size: 20),

@@ -439,6 +439,23 @@ void main() {
     await expectBalanced();
   });
 
+  test('IMEIs saved at purchase are offered when selling', () async {
+    final sup = await Books.saveParty('supplier', {'name': 'IMEI Stock Supplier'});
+    final c = await Books.saveParty('customer', {'name': 'IMEI Stock Buyer'});
+    final p = await Books.saveProduct({'name': 'Stock Phone', 'gst_bp': 0, 'price': 1000000});
+    final cash = asInt((await Books.moneyAccounts()).first['id']);
+    await Books.createPurchase(
+        items: [ItemIn(p, 1, 800000, 'SN-A1'), ItemIn(p, 1, 800000, 'SN-B2'), ItemIn(p, 1, 800000, 'SN-C3')], supplierId: sup);
+    expect(await SmartImei.inStock(p), ['SN-A1', 'SN-B2', 'SN-C3']);
+    final sale = await Books.createSale(items: [ItemIn(p, 1, 1000000, 'SN-A1')], customerId: c, paid: 1000000, accountId: cash);
+    expect(await SmartImei.inStock(p), ['SN-B2', 'SN-C3']);
+    // returned phone is back in stock
+    final lines = await Books.returnable(sale);
+    await Books.createSaleReturn(saleId: sale, qty: {asInt(lines.single.item['id']): 1}, refund: 1000000, accountId: cash);
+    expect(await SmartImei.inStock(p), ['SN-A1', 'SN-B2', 'SN-C3']);
+    await expectBalanced();
+  });
+
   test('Smart IMEI: model name shared with the community', () {
     expect(SmartImei.modelName('Vivo Y28 8/128 Blue'), 'Vivo Y28');
     expect(SmartImei.modelName('iPhone 15 Pro Max 256GB Natural Titanium'), 'iPhone 15 Pro Max');
