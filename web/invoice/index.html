@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>Invoice</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#0A0E26;--muted:#6B7094;--brand:#4318D2;--brand2:#7B3FF2;--green:#0BA360;--red:#E0245E;--bg:#F2F3FA;--card:#fff;--line:#ECEEF6}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:'Plus Jakarta Sans',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px}
+.wrap{max-width:760px;margin:0 auto;padding:16px}
+.hero{border-radius:24px;padding:22px;color:#fff;background:linear-gradient(135deg,#1B1F6B,var(--brand) 60%,var(--brand2));box-shadow:0 18px 40px -18px #4318D2}
+.hero h1{margin:0;font-size:22px;font-weight:800}
+.hero .sub{opacity:.85;font-size:12.5px;margin-top:4px;line-height:1.5}
+.row{display:flex;gap:12px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap}
+.amt{font-size:30px;font-weight:800;letter-spacing:-.5px}
+.pill{display:inline-block;padding:5px 10px;border-radius:999px;font-weight:800;font-size:11.5px}
+.pill.paid{background:#DDF7EA;color:#067A46}.pill.due{background:#FFE3EA;color:#B0103C}
+.card{background:var(--card);border-radius:20px;padding:16px;margin-top:12px;box-shadow:0 10px 30px -22px #1B2163}
+.label{color:var(--muted);font-size:11.5px;font-weight:600}
+.val{font-weight:700;margin-top:2px}
+table{width:100%;border-collapse:collapse}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);text-align:left;padding:8px 6px;border-bottom:1px solid var(--line)}
+td{padding:10px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+td.n,th.n{text-align:right;white-space:nowrap}
+.item{font-weight:700}.serial{color:var(--muted);font-size:11.5px;margin-top:2px}
+.tot td{border:none;padding:5px 6px}.tot .big td{font-size:17px;font-weight:800;padding-top:10px}
+.btns{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;height:52px;border-radius:16px;font-weight:800;font-size:15px;text-decoration:none;border:none;cursor:pointer;font-family:inherit}
+.btn.pay{background:linear-gradient(135deg,#0BA360,#0E7490);color:#fff}
+.btn.print{background:#fff;color:var(--brand);border:2px solid #E4DCFF}
+.qr{display:flex;gap:14px;align-items:center}
+.qrbox{width:148px;height:148px;padding:8px;border-radius:12px;background:#fff;border:1px solid var(--line);flex:none}
+.foot{text-align:center;color:var(--muted);font-size:11.5px;margin:22px 0 30px}
+.center{display:flex;align-items:center;justify-content:center;min-height:60vh;flex-direction:column;gap:10px;color:var(--muted)}
+.spin{width:34px;height:34px;border-radius:50%;border:4px solid #E4DCFF;border-top-color:var(--brand);animation:s 0.9s linear infinite}@keyframes s{to{transform:rotate(360deg)}}
+@media (max-width:520px){.hide-sm{display:none}.btns{grid-template-columns:1fr}}
+@media print{body{background:#fff}.btns,.qrcard,.foot{display:none}.hero{box-shadow:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.card{box-shadow:none;border:1px solid var(--line)}}
+</style>
+</head>
+<body>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<div class="wrap" id="app"><div class="center"><div class="spin"></div>Loading your invoice…</div></div>
+<script>
+const CONFIG = { apiKey: 'AIzaSyAk1N6Aw3BJk50Tsw2Z_KPDfQzJlC-5GIU', projectId: 'hisab-a7fcd' };
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const inr = p => { const v = (p || 0) / 100; return '₹' + v.toLocaleString('en-IN', { minimumFractionDigits: v % 1 ? 2 : 0, maximumFractionDigits: 2 }); };
+const date = d => { try { return new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }); } catch (_) { return d; } };
+const app = document.getElementById('app');
+
+function fail(msg) {
+  app.innerHTML = `<div class="center"><div style="font-size:40px">🧾</div><div style="font-weight:800;color:var(--ink);font-size:16px">${esc(msg)}</div><div>Please ask the shop to send the link again.</div></div>`;
+}
+
+async function load() {
+  const id = new URLSearchParams(location.search).get('i') || location.hash.replace('#', '');
+  if (!id || !/^[A-Za-z0-9]{16,40}$/.test(id)) return fail('This invoice link is not complete');
+  try {
+    const r = await fetch(`https://firestore.googleapis.com/v1/projects/${CONFIG.projectId}/databases/(default)/documents/invoices/${id}?key=${CONFIG.apiKey}`);
+    if (r.status === 404 || r.status === 403) return fail('Invoice not found');
+    if (!r.ok) return fail('Could not open the invoice right now');
+    const doc = await r.json();
+    render(JSON.parse(doc.fields.json.stringValue));
+  } catch (e) { fail('Could not open the invoice — check your internet'); }
+}
+
+function render(d) {
+  const s = d.shop || {}, c = d.customer || {};
+  const due = Math.max(0, (d.total || 0) - (d.paid || 0));
+  document.title = `${d.number} · ${s.name || 'Invoice'}`;
+  const upi = (s.upi || '').trim();
+  const payUrl = upi ? `upi://pay?pa=${encodeURIComponent(upi)}&pn=${encodeURIComponent(s.name || '')}&am=${(due / 100).toFixed(2)}&cu=INR&tn=${encodeURIComponent('Invoice ' + d.number)}` : '';
+  app.innerHTML = `
+  <div class="hero">
+    <div class="row">
+      <div>
+        <h1>${esc(s.name || 'Invoice')}</h1>
+        <div class="sub">${[s.address, s.phone, s.gstin ? 'GSTIN ' + s.gstin : ''].filter(Boolean).map(esc).join(' · ')}</div>
+      </div>
+      <div style="text-align:right">
+        <div class="sub" style="margin:0">Invoice ${esc(d.number)} · ${esc(date(d.date))}</div>
+        <div class="amt">${inr(d.total)}</div>
+        <span class="pill ${due > 0 ? 'due' : 'paid'}">${due > 0 ? 'Due ' + inr(due) : 'Paid ✓'}</span>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="row">
+      <div><div class="label">Billed to</div><div class="val">${esc(c.name)}</div>${c.phone ? `<div class="label">${esc(c.phone)}</div>` : ''}${c.gstin ? `<div class="label">GSTIN ${esc(c.gstin)}</div>` : ''}</div>
+      <div style="text-align:right"><div class="label">Date</div><div class="val">${esc(date(d.date))}</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <table>
+      <thead><tr><th>Item</th><th class="n">Qty</th><th class="n hide-sm">Rate</th><th class="n">Amount</th></tr></thead>
+      <tbody>${(d.items || []).map(i => `<tr><td><div class="item">${esc(i.name)}</div>${i.serial ? `<div class="serial">IMEI / SN ${esc(i.serial)}</div>` : ''}${i.gst ? `<div class="serial">GST ${i.gst / 100}%</div>` : ''}</td><td class="n">${i.qty}</td><td class="n hide-sm">${inr(i.rate)}</td><td class="n">${inr(i.amount)}</td></tr>`).join('')}</tbody>
+    </table>
+    <table class="tot" style="margin-top:8px">
+      <tr><td class="label">Subtotal</td><td class="n">${inr(d.subtotal)}</td></tr>
+      ${d.discount ? `<tr><td class="label">Discount</td><td class="n">− ${inr(d.discount)}</td></tr>` : ''}
+      ${d.tax ? `<tr><td class="label">GST</td><td class="n">${inr(d.tax)}</td></tr>` : ''}
+      <tr class="big"><td>Total</td><td class="n">${inr(d.total)}</td></tr>
+      <tr><td class="label">Paid</td><td class="n" style="color:var(--green);font-weight:800">${inr(d.paid)}</td></tr>
+      ${due > 0 ? `<tr><td class="label">Balance due</td><td class="n" style="color:var(--red);font-weight:800">${inr(due)}</td></tr>` : ''}
+    </table>
+  </div>
+  ${due > 0 && upi ? `<div class="card qrcard"><div class="qr"><div id="qr" class="qrbox"></div><div><div class="val" style="font-size:16px">Pay ${inr(due)} by UPI</div><div class="label" style="margin-top:4px">Scan with any UPI app, or tap Pay now on your phone.<br>UPI ID: <b>${esc(upi)}</b></div></div></div></div>` : ''}
+  <div class="btns">
+    ${due > 0 && upi ? `<a class="btn pay" href="${payUrl}">Pay ${inr(due)} now</a>` : ''}
+    <button class="btn print" onclick="window.print()">Print / Save PDF</button>
+  </div>
+  ${d.terms ? `<div class="card"><div class="label">Terms</div><div style="margin-top:4px;white-space:pre-line">${esc(d.terms)}</div></div>` : ''}
+  <div class="foot">Thank you for shopping with ${esc(s.name || 'us')} · made with Hisab AI</div>`;
+  // the QR is drawn here, on the customer's phone (nothing is sent anywhere)
+  const box = document.getElementById('qr');
+  if (box && window.QRCode) new QRCode(box, { text: payUrl, width: 132, height: 132, correctLevel: QRCode.CorrectLevel.M });
+}
+load();
+</script>
+</body>
+</html>

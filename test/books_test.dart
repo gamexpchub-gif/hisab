@@ -12,6 +12,7 @@ import 'package:hisab/core/daily_report.dart';
 import 'package:hisab/core/analytics.dart';
 import 'package:hisab/core/autopilot.dart';
 import 'package:hisab/core/brain.dart';
+import 'package:hisab/core/staff.dart';
 import 'package:hisab/core/plan.dart';
 import 'package:hisab/core/stores.dart';
 import 'package:hisab/core/gst_report.dart';
@@ -567,6 +568,44 @@ void main() {
     expect(h2.map((x) => x.kind), containsAll(['sold', 'emi']));
     final h3 = await Shop.imeiHistory('351234560007775');
     expect(h3.map((x) => x.kind), containsAll(['bought', 'exchange']));
+  });
+
+  test('Staff: PIN sign-in, permissions enforced by the books, actions logged by name', () async {
+    await Staff.load();
+    await expectLater(Staff.setMode(true), throwsA(isA<AccountingError>())); // owner PIN first
+    await Staff.setOwnerPin('9999');
+    await Staff.setMode(true);
+    final sales = await Staff.add('Rafiq', '1234', 'sales', {});
+    await Staff.add('Mina', '5678', 'manager', Staff.roles['manager']!.$2);
+    await expectLater(Staff.add('Copy', '1234', 'sales', {}), throwsA(isA<AccountingError>())); // PIN taken
+    await expectLater(Staff.signIn('0000'), throwsA(isA<AccountingError>()));
+
+    // salesman: can sell, cannot discount, delete or buy
+    expect((await Staff.signIn('1234'))!.id, sales.id);
+    final p = await Books.saveProduct({'name': 'Staff Phone', 'gst_bp': 0, 'price': 100000}, openingQty: 5, openingCost: 80000);
+    final cash = asInt((await Books.moneyAccounts()).first['id']);
+    final sale = await Books.createSale(items: [ItemIn(p, 1, 100000)], paid: 100000, accountId: cash);
+    await expectLater(Books.createSale(items: [ItemIn(p, 1, 100000)], paid: 90000, accountId: cash, discount: 10000), throwsA(isA<AccountingError>()));
+    expect(() => Books.deleteSale(sale), throwsA(isA<AccountingError>()));
+    final sup = await Books.saveParty('supplier', {'name': 'Staff Supplier'});
+    expect(() => Books.createPurchase(items: [ItemIn(p, 1, 80000)], supplierId: sup), throwsA(isA<AccountingError>()));
+    final log = await Books.activity(5);
+    expect(log.any((a) => a['staff'] == 'Rafiq'), isTrue);
+
+    // manager: discounts and purchases, but no delete
+    await Staff.signIn('5678');
+    await Books.createSale(items: [ItemIn(p, 1, 100000)], paid: 90000, accountId: cash, discount: 10000);
+    await Books.createPurchase(items: [ItemIn(p, 1, 80000)], supplierId: sup);
+    expect(() => Books.deleteSale(sale), throwsA(isA<AccountingError>()));
+
+    // owner: everything
+    expect(await Staff.signIn('9999'), isNull);
+    await Books.deleteSale(sale);
+    Staff.signOut();
+    expect(Staff.picking.value, isTrue);
+    await Staff.setMode(false);
+    expect(Staff.picking.value, isFalse);
+    await expectBalanced();
   });
 
   test('Product purchase cost is kept with no opening stock', () async {

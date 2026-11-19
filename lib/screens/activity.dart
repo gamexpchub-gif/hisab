@@ -27,7 +27,7 @@ class ActivityScreen extends StatelessWidget {
                         return ListRow(
                           leading: Orb(icon: st.$1, colors: st.$2.icon, bg: st.$2.bg, size: 42),
                           title: a['message'] as String,
-                          subtitle: '${a['ref'] ?? ''}  ${timeAgo(a['created_at'] as String)}',
+                          subtitle: '${a['ref'] ?? ''}  ${timeAgo(a['created_at'] as String)}${(a['staff'] ?? '').toString().isEmpty ? '' : ' · by ${a['staff']}'}',
                           trailing: a['amount'] == null ? null : Money.rs(asInt(a['amount'])),
                         );
                       }),

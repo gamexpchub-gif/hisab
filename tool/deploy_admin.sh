@@ -26,8 +26,9 @@ fi
 cd "$(dirname "$0")/.."
 [ -f web/admin/index.html ] || { echo "web/admin/index.html not found — run git pull first"; exit 1; }
 
-echo "→ Uploading the dashboard to $HOST …"
+echo "→ Uploading the dashboard and the invoice page to $HOST …"
 tar -C web/admin -czf - . | ssh "$HOST" 'rm -rf /tmp/hisab-admin && mkdir -p /tmp/hisab-admin && tar -xzf - -C /tmp/hisab-admin'
+tar -C web/invoice -czf - . | ssh "$HOST" 'rm -rf /tmp/hisab-invoice && mkdir -p /tmp/hisab-invoice && tar -xzf - -C /tmp/hisab-invoice'
 
 echo "→ Setting up nginx for https://$DOMAIN/hisab/dashboard/ …"
 ssh "$HOST" "DOMAIN='$DOMAIN' EMAIL='$EMAIL' bash -s" <<'REMOTE'
@@ -54,6 +55,10 @@ $SUDO rm -rf "$WEB/hisab/dashboard.old"
 $SUDO mv "$WEB/hisab/dashboard" "$WEB/hisab/dashboard.old"
 $SUDO mv "$WEB/hisab/dashboard.new" "$WEB/hisab/dashboard"
 $SUDO rm -rf "$WEB/hisab/dashboard.old" /tmp/hisab-admin "$WEB/gamex"
+# customer invoice page (links shared from the app)
+$SUDO rm -rf "$WEB/hisab/invoice"
+$SUDO cp -r /tmp/hisab-invoice "$WEB/hisab/invoice"
+$SUDO rm -rf /tmp/hisab-invoice
 $SUDO chown -R www-data:www-data "$WEB" 2>/dev/null || true
 $SUDO find "$WEB" -type d -exec chmod 755 {} \; ; $SUDO find "$WEB" -type f -exec chmod 644 {} \;
 
@@ -88,6 +93,16 @@ location = /hisab/dashboard { return 301 /hisab/dashboard/; }
 # the old address keeps working
 location = /gamex { return 301 /hisab/dashboard/; }
 location ^~ /gamex/ { return 301 /hisab/dashboard/; }
+location = /hisab/invoice { return 301 /hisab/invoice/; }
+location ^~ /hisab/invoice/ {
+    root $WEB;
+    index index.html;
+    try_files \$uri \$uri/ /hisab/invoice/index.html;
+    add_header X-Robots-Tag "noindex, nofollow" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Cache-Control "no-cache";
+}
 location ^~ /hisab/tacdb/ {
     root $WEB;
     default_type text/csv;

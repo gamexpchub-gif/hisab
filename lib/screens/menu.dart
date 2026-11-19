@@ -29,6 +29,8 @@ import 'smart_ai.dart';
 import 'autopilot.dart';
 import 'brain.dart';
 import 'shop_work.dart';
+import 'staff_screen.dart';
+import '../core/staff.dart';
 import '../sheets/home.dart';
 import 'plans.dart';
 import 'stores.dart';
@@ -120,7 +122,31 @@ class _MenuScreenState extends State<MenuScreen> {
     );
   }
 
+  /// Menu items a staff member may not open.
+  static const _needs = {
+    'reports': {
+      'AI Brain', 'Pro Analytics', 'Daily AI Report', 'Analytics dashboard', 'Ledgers', 'Profit & Loss', 'Balance Sheet', 'GST Report',
+      'Trial Balance', 'Day Book', 'Excel Export', 'Cash & Bank', 'Loans & Investment', 'Hisab Sheets', 'AI Autopilot', 'Finance payouts',
+    },
+    'settings': {
+      'Plans & Subscription', 'My Stores', 'Admin Panel', 'Account & Cloud', 'Backup & Restore', 'Security', 'Business settings',
+      'Staff & permissions', 'Activity log',
+    },
+    'purchase': {'Purchases'},
+    'expense': {'Expenses'},
+  };
+
   List<(String, List<_Item>)> _groups(_MenuData d) {
+    final all = _allGroups(d);
+    if (Staff.current.value == null) return all;
+    final hidden = {for (final e in _needs.entries) if (!Staff.can(e.key)) ...e.value};
+    return [
+      for (final g in all)
+        if (g.$2.any((i) => !hidden.contains(i.title))) (g.$1, [for (final i in g.$2) if (!hidden.contains(i.title)) i]),
+    ];
+  }
+
+  List<(String, List<_Item>)> _allGroups(_MenuData d) {
     void go(Widget w) => open(context, w);
     return [
       ('Hisab Sheets', [
@@ -213,6 +239,11 @@ class _MenuScreenState extends State<MenuScreen> {
             const [Color(0xFF8B5CF6), Color(0xFF1B2163)], () => go(const AccountScreen())),
         _Item('Backup & Restore', 'Save everything to Drive, restore anytime', Icons.cloud_upload_rounded,
             const [Color(0xFF34D399), Color(0xFF0F8C58)], () => go(const BackupScreen())),
+        _Item('Staff & permissions', Staff.modeOn ? '${Staff.list.length} staff · using: ${Staff.who}' : 'Salesman PIN login, rights, who did what',
+            Icons.badge_rounded, const [Color(0xFF38BDF8), Color(0xFF1B2163)], () => go(const StaffScreen())),
+        if (Staff.modeOn)
+          _Item('Switch user', 'Now: ${Staff.who} · hand the phone to the next person', Icons.switch_account_rounded,
+              const [Color(0xFFFFB84D), Color(0xFF4318D2)], Staff.signOut),
         _Item('Security', 'App lock with PIN & fingerprint', Icons.lock_rounded,
             const [Color(0xFF6B35EE), Color(0xFF1B2163)], () => go(const SecurityScreen())),
         _Item('Business settings', 'Shop profile, photo, GSTIN, demo data', Icons.settings_rounded,

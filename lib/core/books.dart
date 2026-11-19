@@ -130,8 +130,22 @@ class Books {
   }
 
   static Future<void> _log(DatabaseExecutor x, String kind, String message, [String? ref, int? amount]) async {
-    await x.insert('audit_log', {'kind': kind, 'message': message, 'ref': ref, 'amount': amount, 'created_at': _now()});
+    await x.insert('audit_log', {'kind': kind, 'message': message, 'ref': ref, 'amount': amount, 'created_at': _now(), 'staff': actor?.call()});
   }
+
+  /// Staff permissions (set by Staff): is [perm] allowed for whoever is using the app?
+  static bool Function(String perm)? allow;
+
+  /// Name of the staff member using the app (null = owner), for the activity log.
+  static String? Function()? actor;
+
+  static void need(String perm, String what) {
+    final a = allow;
+    if (a != null && !a(perm)) throw AccountingError('$what needs the owner\'s permission');
+  }
+
+  /// Adds a line to the activity log.
+  static Future<void> log(String kind, String message, [String? ref, int? amount]) => _write((x) => _log(x, kind, message, ref, amount));
 
   static Future<T> _write<T>(Future<T> Function(Transaction t) body) async {
     final db = await _db;
@@ -165,6 +179,8 @@ class Books {
     List<MapEntry<int, int>>? splits, // account id → amount, for split payments
     int? editId, // re-saves an existing sale in place (same number)
   }) async {
+    if (editId != null) need('edit_bill', 'Editing a bill');
+    if (discount > 0) need('discount', 'Giving a discount');
     if (editId == null) await guard?.call('sale');
     return _write((x) async {
       final when = date ?? ymd(DateTime.now());
@@ -313,6 +329,7 @@ class Books {
   /// Deletes a sale: stock comes back, its payments and journal entry are
   /// removed. Not allowed while the sale has returns (delete those first).
   static Future<void> deleteSale(int saleId) {
+    need('delete', 'Deleting a bill');
     return _write((x) async {
       final number = await _unpostSale(x, saleId);
       await x.update('emi_plans', {'sale_id': null}, where: 'sale_id = ?', whereArgs: [saleId]);
@@ -324,6 +341,7 @@ class Books {
   /// Deletes a purchase bill and takes its units out of stock. Refused when
   /// some of those units were already sold.
   static Future<void> deletePurchase(int purchaseId) {
+    need('delete', 'Deleting a purchase');
     return _write((x) async {
       final number = await _unpostPurchase(x, purchaseId);
       await x.delete('purchases', where: 'id = ?', whereArgs: [purchaseId]);
@@ -334,6 +352,7 @@ class Books {
   /// Deletes a sale return: the refund and return charge are reversed and
   /// restocked units leave stock again.
   static Future<void> deleteSaleReturn(int returnId) {
+    need('delete', 'Deleting a return');
     return _write((x) async {
       final r = await x.query('sale_returns', where: 'id = ?', whereArgs: [returnId]);
       if (r.isEmpty) throw AccountingError('Return not found');
@@ -376,6 +395,7 @@ class Books {
   /// Deletes a customer / supplier that has no bills, payments, cash entries
   /// or EMI plans (its opening balance and due dates go with it).
   static Future<void> deleteParty(String type, int id) async {
+    need('delete', 'Deleting a party');
     final links = await partyLinks(type, id);
     if (links.isNotEmpty) {
       throw AccountingError('This ${type == 'customer' ? 'customer' : 'supplier'} has ${links.join(', ')} — delete those first');
@@ -426,6 +446,8 @@ class Books {
     String? billImage,
     int? editId, // re-saves an existing purchase in place (same number)
   }) {
+    need('purchase', 'Entering purchases');
+    if (editId != null) need('edit_bill', 'Editing a bill');
     return _write((x) async {
       final when = date ?? ymd(DateTime.now());
       String? oldNumber;
@@ -673,6 +695,7 @@ class Books {
 
   /// Deletes a plan that has no collected instalments.
   static Future<void> deleteEmiPlan(int planId) {
+    need('delete', 'Deleting an EMI plan');
     return _write((x) async {
       final paid = await x.rawQuery('SELECT IFNULL(SUM(paid_amount), 0) AS v FROM emi_installments WHERE plan_id = ?', [planId]);
       if (asInt(paid.first['v']) > 0) throw AccountingError('Instalments were collected — close the plan instead');
@@ -741,6 +764,7 @@ class Books {
     String? note,
     String? image,
   }) {
+    need('expense', 'Entering expenses');
     return _write((x) async {
       if (amount <= 0) throw AccountingError('Amount must be greater than zero');
       final h = await x.query('accounts', where: 'id = ? AND type = ?', whereArgs: [headId, 'expense']);
@@ -1958,6 +1982,7 @@ class Books {
 
   /// Deletes a product that has never been bought or sold.
   static Future<void> deleteProduct(int id) {
+    need('delete', 'Deleting a product');
     return _write((x) async {
       final used = await x.rawQuery(
           'SELECT (SELECT COUNT(*) FROM sale_items WHERE product_id = ?) + '

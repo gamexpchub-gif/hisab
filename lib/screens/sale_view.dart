@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../cloud/cloud.dart';
 import '../core/books.dart';
 import '../core/money.dart';
 import '../print/print_screen.dart';
@@ -320,6 +321,21 @@ class SaleView extends StatelessWidget {
         ),
       );
 
+  /// The bill on WhatsApp — with the online invoice link (view, pay by UPI,
+  /// download) when the shop is signed in to the cloud.
+  Future<void> _sendWhatsApp(BuildContext context, _ViewData d) async {
+    var text = invoiceText(d.settings, d.sale, d.items);
+    if (Cloud.user != null) {
+      try {
+        final link = await Accounts.publishInvoice(id).timeout(const Duration(seconds: 15));
+        text = '$text\n\n🧾 View / pay / download your bill:\n$link';
+      } catch (_) {
+        // offline: the text alone is still useful
+      }
+    }
+    await Contact.whatsapp(d.sale['phone'] as String?, text);
+  }
+
   Widget _actions(BuildContext context, _ViewData d) {
     Widget tile(IconData icon, String label, List<Color> colors, VoidCallback onTap) => Expanded(
           child: GestureDetector(
@@ -350,8 +366,7 @@ class SaleView extends StatelessWidget {
       const SizedBox(width: 8),
       tile(Icons.picture_as_pdf_rounded, 'PDF', const [Color(0xFFFF6B8B), Color(0xFFE0245E)], () => shareInvoicePdf(context, id)),
       const SizedBox(width: 8),
-      tile(Icons.send_rounded, 'WhatsApp', const [Color(0xFF25D366), Color(0xFF128C7E)],
-          () => Contact.whatsapp(d.sale['phone'] as String?, invoiceText(d.settings, d.sale, d.items))),
+      tile(Icons.send_rounded, 'WhatsApp', const [Color(0xFF25D366), Color(0xFF128C7E)], () => _sendWhatsApp(context, d)),
       const SizedBox(width: 8),
       tile(Icons.replay_rounded, 'Repeat', const [Color(0xFFFFB84D), Color(0xFFF97316)], () => open(context, SaleForm(repeatSaleId: id))),
     ]);

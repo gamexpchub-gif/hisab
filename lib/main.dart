@@ -10,6 +10,8 @@ import 'cloud/cloud.dart';
 import 'core/tac_db.dart';
 import 'core/widget_sync.dart';
 import 'core/autopilot.dart';
+import 'core/staff.dart';
+import 'screens/staff_screen.dart';
 import 'screens/plans.dart';
 import 'screens/dashboard.dart';
 import 'screens/home.dart';
@@ -28,6 +30,8 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // the store in use (each store has its own books) and the plan
   await Stores.load();
+  // staff login & permissions (who is using the app)
+  await Staff.load();
   // the plan of the signed-in ID (each ID keeps its own plan)
   await Cloud.load();
   await Sub.load(uid: Cloud.user?.uid);
@@ -68,7 +72,7 @@ class HisabApp extends StatelessWidget {
       title: 'Hisab AI',
       debugShowCheckedModeBanner: false,
       theme: buildTheme(),
-      home: const AuthGate(child: AppLockGate(child: Shell())),
+      home: const AuthGate(child: AppLockGate(child: StaffGate(child: Shell()))),
     );
   }
 }

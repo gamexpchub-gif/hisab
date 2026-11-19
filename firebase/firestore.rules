@@ -10,6 +10,7 @@ rules_version = '2';
 //   requests/{id}            plan requests: the owner creates a pending one;
 //                            the admin approves or rejects
 //   tac/{tac}                community phone model names (IMEI first 8 digits)
+//   invoices/{id}            bills shared as a link (open by link only)
 // Everything else is denied.
 // =============================================================================
 service cloud.firestore {
@@ -72,6 +73,23 @@ service cloud.firestore {
 
       allow get: if signedIn() && (resource.data.uid == request.auth.uid || isAdmin());
       allow list, update, delete: if isAdmin();
+    }
+
+    // ---------------------------------------------------------------- online invoices
+    // invoices/{random id}: a bill the shop shared as a link. Anyone with the
+    // link can open that one bill (no listing); only the shop changes it.
+    match /invoices/{id} {
+      allow get: if true;
+      allow list: if false;
+      allow create, update: if signedIn()
+        && id.size() >= 16
+        && (resource == null || resource.data.owner == request.auth.uid)
+        && incoming().keys().hasOnly(['json', 'owner', 'number', 'created'])
+        && incoming().owner == request.auth.uid
+        && incoming().json is string && incoming().json.size() <= 60000
+        && incoming().number is string && incoming().number.size() <= 40
+        && incoming().created is timestamp;
+      allow delete: if signedIn() && resource.data.owner == request.auth.uid;
     }
 
     // ---------------------------------------------------------------- community IMEI models

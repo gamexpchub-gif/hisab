@@ -168,6 +168,73 @@ class Accounts {
     }
   }
 
+  // ---------------------------------------------------------------- online invoices
+  /// Web address customers open to see (and pay) a bill.
+  static const invoiceBase = 'https://admin.deencircle.online/hisab/invoice/';
+
+  /// Publishes a sale as an online invoice and returns its link. The link
+  /// carries a long random id; the same sale keeps the same link.
+  static Future<String> publishInvoice(int saleId) async {
+    if (Cloud.user == null) throw CloudError('Sign in (Menu → Account & Cloud) to share invoice links');
+    final st = await Books.settings();
+    final key = 'inv_link_${Stores.current}_$saleId';
+    var id = st[key];
+    if (id == null || id.isEmpty) {
+      final r = Random.secure();
+      const abc = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      id = List.generate(22, (_) => abc[r.nextInt(abc.length)]).join();
+    }
+    final sale = (await Books.query('SELECT s.*, c.name AS customer, c.phone AS customer_phone, c.gstin AS customer_gstin FROM sales s '
+            'LEFT JOIN customers c ON c.id = s.customer_id WHERE s.id = ?',
+            [saleId]))
+        .first;
+    final items = await Books.query('SELECT name, qty, rate, gst_bp, amount, tax, serial FROM sale_items WHERE sale_id = ? ORDER BY id', [saleId]);
+    final paid = asInt(sale['paid']) +
+        asInt((await Books.query("SELECT IFNULL(SUM(amount), 0) AS v FROM payments WHERE kind = 'receipt' AND reference = ?", [sale['number']]))
+            .first['v']);
+    String t(String k) => (st[k] ?? '').trim();
+    final data = {
+      'v': 1,
+      'shop': {
+        'name': t('business_name').isEmpty ? Stores.active.name : t('business_name'),
+        'phone': t('phone'),
+        'address': t('address'),
+        'gstin': t('gstin'),
+        'upi': t('upi_id'),
+        'email': t('email'),
+      },
+      'number': '${sale['number']}',
+      'date': '${sale['date']}',
+      'customer': {'name': '${sale['customer'] ?? 'Walk-in customer'}', 'phone': '${sale['customer_phone'] ?? ''}', 'gstin': '${sale['customer_gstin'] ?? ''}'},
+      'items': [
+        for (final i in items)
+          {
+            'name': '${i['name']}',
+            'qty': asInt(i['qty']),
+            'rate': asInt(i['rate']),
+            'gst': asInt(i['gst_bp']),
+            'amount': asInt(i['amount']),
+            'tax': asInt(i['tax']),
+            if ((i['serial'] ?? '').toString().trim().isNotEmpty) 'serial': '${i['serial']}'.trim(),
+          }
+      ],
+      'subtotal': asInt(sale['subtotal']),
+      'discount': asInt(sale['discount']),
+      'tax': asInt(sale['tax']),
+      'total': asInt(sale['total']),
+      'paid': paid > asInt(sale['total']) ? asInt(sale['total']) : paid,
+      'terms': t('invoice_terms'),
+    };
+    final json = jsonEncode(data);
+    if (json.length > 60000) throw CloudError('This bill is too large to share as a link');
+    final token = await Cloud._token();
+    await Cloud._call('PATCH', Cloud._doc('invoices/$id'), token: token, body: {
+      'fields': {'json': _v(json), 'owner': _v(Cloud._uid), 'number': _v('${sale['number']}'), 'created': _v(DateTime.now())}
+    });
+    await Books.setSetting(key, id);
+    return '$invoiceBase?i=$id';
+  }
+
   // ---------------------------------------------------------------- community IMEI models
   /// Model name for a TAC (first 8 IMEI digits) from the Hisab AI community
   /// list — every shop that names a phone model teaches it to all shops.
@@ -334,6 +401,7 @@ const firestoreRules = r'''rules_version = '2';
 //   requests/{id}            plan requests: the owner creates a pending one;
 //                            the admin approves or rejects
 //   tac/{tac}                community phone model names (IMEI first 8 digits)
+//   invoices/{id}            bills shared as a link (open by link only)
 // Everything else is denied.
 // =============================================================================
 service cloud.firestore {
@@ -396,6 +464,23 @@ service cloud.firestore {
 
       allow get: if signedIn() && (resource.data.uid == request.auth.uid || isAdmin());
       allow list, update, delete: if isAdmin();
+    }
+
+    // ---------------------------------------------------------------- online invoices
+    // invoices/{random id}: a bill the shop shared as a link. Anyone with the
+    // link can open that one bill (no listing); only the shop changes it.
+    match /invoices/{id} {
+      allow get: if true;
+      allow list: if false;
+      allow create, update: if signedIn()
+        && id.size() >= 16
+        && (resource == null || resource.data.owner == request.auth.uid)
+        && incoming().keys().hasOnly(['json', 'owner', 'number', 'created'])
+        && incoming().owner == request.auth.uid
+        && incoming().json is string && incoming().json.size() <= 60000
+        && incoming().number is string && incoming().number.size() <= 40
+        && incoming().created is timestamp;
+      allow delete: if signedIn() && resource.data.owner == request.auth.uid;
     }
 
     // ---------------------------------------------------------------- community IMEI models
