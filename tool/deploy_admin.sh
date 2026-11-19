@@ -29,6 +29,7 @@ cd "$(dirname "$0")/.."
 echo "→ Uploading the dashboard and the invoice page to $HOST …"
 tar -C web/admin -czf - . | ssh "$HOST" 'rm -rf /tmp/hisab-admin && mkdir -p /tmp/hisab-admin && tar -xzf - -C /tmp/hisab-admin'
 tar -C web/invoice -czf - . | ssh "$HOST" 'rm -rf /tmp/hisab-invoice && mkdir -p /tmp/hisab-invoice && tar -xzf - -C /tmp/hisab-invoice'
+ssh "$HOST" 'cat > /tmp/hisab_sync.py' < tool/vps/hisab_sync.py
 
 echo "→ Setting up nginx for https://$DOMAIN/hisab/dashboard/ …"
 ssh "$HOST" "DOMAIN='$DOMAIN' EMAIL='$EMAIL' bash -s" <<'REMOTE'
@@ -83,6 +84,50 @@ $SUDO ln -sf /usr/local/bin/hisab-tacdb-refresh /etc/cron.weekly/hisab-tacdb-ref
 echo "  downloading the phone model database…"
 $SUDO /usr/local/bin/hisab-tacdb-refresh || echo "  ⚠ phone model database download failed — the app falls back to Osmocom directly"
 
+# live sync server: the app sends every change of the books here within
+# seconds (photos stay in Firebase). Python standard library only.
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "  installing python3…"
+  $SUDO apt-get update -qq && $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 >/dev/null
+fi
+id hisab-sync >/dev/null 2>&1 || $SUDO useradd --system --no-create-home --shell /usr/sbin/nologin hisab-sync
+$SUDO mkdir -p /opt/hisab-sync /var/lib/hisab-sync
+$SUDO install -m 755 /tmp/hisab_sync.py /opt/hisab-sync/hisab_sync.py && rm -f /tmp/hisab_sync.py
+$SUDO chown -R hisab-sync:hisab-sync /var/lib/hisab-sync
+$SUDO chmod 700 /var/lib/hisab-sync
+$SUDO tee /etc/systemd/system/hisab-sync.service >/dev/null <<'UNIT'
+[Unit]
+Description=Hisab AI live sync server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=hisab-sync
+Group=hisab-sync
+Environment=HISAB_DATA=/var/lib/hisab-sync
+Environment=HISAB_PORT=8787
+ExecStart=/usr/bin/env python3 /opt/hisab-sync/hisab_sync.py
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/hisab-sync
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+$SUDO systemctl daemon-reload
+$SUDO systemctl enable hisab-sync >/dev/null 2>&1 || true
+$SUDO systemctl restart hisab-sync
+sleep 1
+if curl -fsS -m 5 http://127.0.0.1:8787/health >/dev/null 2>&1; then
+  echo "  live sync server running (127.0.0.1:8787)"
+else
+  echo "  ⚠ live sync server did not start — see: journalctl -u hisab-sync -n 50"
+fi
+
 # the location block, shared by both cases
 $SUDO mkdir -p /etc/nginx/snippets
 $SUDO tee "$SNIP" >/dev/null <<NGINX
@@ -104,6 +149,17 @@ location ^~ /hisab/invoice/ {
     add_header X-Frame-Options "DENY" always;
     add_header Content-Security-Policy "default-src 'none'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; connect-src https://firestore.googleapis.com; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" always;
     add_header Cache-Control "no-cache";
+}
+location ^~ /hisab/api/ {
+    proxy_pass http://127.0.0.1:8787;
+    proxy_http_version 1.1;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_read_timeout 60s;
+    proxy_request_buffering on;
+    client_max_body_size 10m;
+    add_header Cache-Control "no-store" always;
+    add_header X-Content-Type-Options "nosniff" always;
 }
 location ^~ /hisab/tacdb/ {
     root $WEB;
@@ -192,4 +248,9 @@ fi
 
 echo
 echo "✓ Hisab AI admin is live:  https://$DOMAIN/hisab/dashboard/"
+if curl -fsS -m 8 "https://$DOMAIN/hisab/api/health" >/dev/null 2>&1 || curl -fsS -m 8 "http://$DOMAIN/hisab/api/health" >/dev/null 2>&1; then
+  echo "✓ Live sync server is live:  https://$DOMAIN/hisab/api/health"
+else
+  echo "  ⚠ https://$DOMAIN/hisab/api/health did not answer yet — check DNS / HTTPS"
+fi
 REMOTE

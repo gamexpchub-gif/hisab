@@ -368,7 +368,7 @@ class Backup {
   /// newest copy — usually the live copy, seconds old — goes into that
   /// store. Ends in the store used most recently. Returns how many stores.
   static Future<int> restoreAccount({void Function(String step, double progress)? status}) async {
-    final list = await Cloud.listBackups(); // newest first
+    final list = await Cloud.listAll(); // newest first (Firebase + your server)
     final newest = <String, CloudBackup>{};
     for (final b in list) {
       newest.putIfAbsent(b.store, () => b);

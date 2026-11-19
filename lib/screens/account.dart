@@ -72,7 +72,7 @@ class _AccountScreenState extends State<AccountScreen> {
       if (remote != null) await Stores.mergeCloud(remote);
     } catch (_) {}
     try {
-      final b = await Cloud.listBackups();
+      final b = await Cloud.listAll();
       if (!mounted) return;
       setState(() {
         backups = b;

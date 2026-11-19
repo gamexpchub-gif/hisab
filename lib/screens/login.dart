@@ -130,7 +130,7 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _offerRestore() async {
     try {
       if (!await Backup.phoneIsEmpty()) return;
-      final list = await Cloud.listBackups();
+      final list = await Cloud.listAll();
       if (list.isEmpty || !mounted) return;
       final stores = <String, CloudBackup>{};
       for (final b in list) {

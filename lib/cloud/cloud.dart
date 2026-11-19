@@ -13,6 +13,7 @@ import '../core/plan.dart';
 import '../core/stores.dart';
 
 part 'accounts.dart';
+part 'vps.dart';
 
 // =============================================================================
 // Hisab AI Cloud — account login and cloud backup on the shop's own Firebase
@@ -51,7 +52,10 @@ class CloudBackup {
       {this.store = 'main', this.storeName = '', this.auto = false, this.manifest});
 
   /// A live copy (kept up to date after every change; two slots per store).
-  bool get live => id.startsWith('live_');
+  bool get live => id.startsWith('live_') || id.startsWith('vps_');
+
+  /// A live copy kept on your own server (VPS).
+  bool get onVps => id.startsWith('vps_');
 }
 
 class Cloud {
@@ -414,20 +418,21 @@ class Cloud {
   static Future<File> _downloadLive(CloudBackup b, {void Function(double)? progress}) async {
     final m = jsonDecode(b.manifest!) as Map<String, dynamic>;
     final dbKeys = [for (final k in (m['db'] as Map)['keys'] as List) '$k'];
+    final dbOnVps = m['dbAt'] == 'vps';
     final files = ((m['files'] as Map?) ?? const {}).map((k, v) => MapEntry('$k', [for (final x in v as List) '$x']));
     final total = dbKeys.length + files.values.fold<int>(0, (a, v) => a + v.length);
     var done = 0;
-    Future<List<int>> join(List<String> keys) async {
+    Future<List<int>> join(List<String> keys, {bool vps = false}) async {
       final out = BytesBuilder(copy: false);
       for (final k in keys) {
-        out.add(await getBlob(k));
+        out.add(vps ? await Vps.getBlob(k) : await getBlob(k));
         progress?.call(++done / (total == 0 ? 1 : total));
       }
       return out.takeBytes();
     }
 
     final archive = Archive();
-    final db = await join(dbKeys);
+    final db = await join(dbKeys, vps: dbOnVps);
     archive.addFile(ArchiveFile('hisab.db', db.length, db));
     for (final e in files.entries) {
       if (e.key.contains('..')) continue;
@@ -441,6 +446,38 @@ class Cloud {
     final f = File(p.join(tmp.path, 'cloud-${b.id}.zip'));
     await f.writeAsBytes(zip, flush: true);
     return f;
+  }
+
+  /// Every copy of the account: Firebase backups plus the live copies on
+  /// your own server (VPS), newest first.
+  static Future<List<CloudBackup>> listAll() async {
+    final out = <CloudBackup>[];
+    Object? fbError;
+    try {
+      out.addAll(await listBackups());
+    } catch (e) {
+      fbError = e;
+    }
+    try {
+      if (await Vps.available()) {
+        for (final m in await Vps.manifests()) {
+          final created = DateTime.tryParse('${m['created'] ?? ''}')?.toLocal();
+          final store = '${m['store'] ?? 'main'}', slot = '${m['slot'] ?? 'a'}';
+          if (created == null) continue;
+          // the same copy is usually in Firebase too; keep only newer ones
+          final fb = out.where((b) => b.store == store && b.live && !b.onVps).map((b) => b.created).fold<DateTime?>(
+              null, (a, d) => a == null || d.isAfter(a) ? d : a);
+          if (fb != null && !created.isAfter(fb)) continue;
+          final full = await Vps.manifest(store, slot);
+          int n(String k) => int.tryParse('${m[k] ?? 0}') ?? 0;
+          out.add(CloudBackup('vps_${store}_$slot', created, n('bytes'), 0, n('sales'), n('products'), n('customers'), '${m['device'] ?? ''}',
+              store: store, storeName: '${m['storeName'] ?? ''}', auto: true, manifest: jsonEncode(full)));
+        }
+      }
+    } catch (_) {}
+    if (out.isEmpty && fbError != null) throw fbError;
+    out.sort((a, b) => b.created.compareTo(a.created));
+    return out;
   }
 
   static Future<List<CloudBackup>> listBackups() async {
@@ -514,6 +551,7 @@ class Cloud {
   }
 
   static Future<void> deleteBackup(CloudBackup b) async {
+    if (b.onVps) return; // the server keeps only the two live slots
     final token = await _token();
     for (var i = 0; i < b.chunks; i++) {
       await _call('DELETE', _doc('users/$_uid/backups/${b.id}/chunks/${i.toString().padLeft(4, '0')}'), token: token);

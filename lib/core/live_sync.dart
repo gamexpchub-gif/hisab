@@ -161,67 +161,111 @@ class LiveSync {
         _pending = max(0, _pending - taken);
         _status('phone',
             Cloud.user == null ? 'Saved on phone · sign in for the cloud copy' : 'Saved on phone · cloud copy needs the ${Sub.need('cloud')} plan (Menu → Plans)');
+        _log(Cloud.user == null ? 'Not signed in — saved on phone only' : 'Plan has no cloud backup — saved on phone only', ok: false);
         return;
       }
       // a different account on this phone: start a fresh upload list
       if (st['uid'] != Cloud.user!.uid) {
         st['uid'] = Cloud.user!.uid;
         st['uploaded'] = <String>[];
+        st['uploadedVps'] = <String>[];
         st['files'] = <String, dynamic>{};
         st['refs'] = <String, dynamic>{};
       }
-      _status('sending', 'Saving to cloud…');
+      // the books go to your own server when it is up; photos to Firebase
+      var vps = await Vps.available();
+      _status('sending', vps ? 'Saving to your server…' : 'Saving to cloud…');
       final uploaded = <String>{...(st['uploaded'] as List).cast<String>()};
+      final uploadedVps = <String>{...((st['uploadedVps'] as List?) ?? const []).cast<String>()};
       final install = '${st['install']}';
       var sent = 0;
 
-      Future<List<String>> pieces(List<int> bytes) async {
+      Future<List<String>> pieces(List<int> bytes, {bool toVps = false}) async {
+        final done = toVps ? uploadedVps : uploaded;
         final keys = <String>[];
         final todo = <(String, List<int>)>[];
         for (var i = 0; i < bytes.length || (i == 0 && bytes.isEmpty); i += piece) {
           final part = bytes.sublist(i, min(i + piece, bytes.length));
           final key = '${install}_${sha1.convert(part)}';
-          if (!uploaded.contains(key) && !todo.any((t) => t.$1 == key)) todo.add((key, part));
+          if (!done.contains(key) && !todo.any((t) => t.$1 == key)) todo.add((key, part));
           keys.add(key);
           if (bytes.isEmpty) break;
         }
-        // 4 pieces at a time: a change reaches the cloud in a second or two
+        // 4 pieces at a time: a change reaches the server in a second or two
         for (var i = 0; i < todo.length; i += 4) {
           await Future.wait([
             for (final (key, part) in todo.skip(i).take(4))
-              Cloud.putBlob(key, GZipEncoder().encode(part)!).then((_) {
-                uploaded.add(key);
+              (toVps ? Vps.putBlob(key, GZipEncoder().encode(part)!) : Cloud.putBlob(key, GZipEncoder().encode(part)!)).then((_) {
+                done.add(key);
                 sent += part.length;
               }),
           ]);
           st['uploaded'] = uploaded.toList();
+          st['uploadedVps'] = uploadedVps.toList();
         }
         return keys;
       }
 
       // 2 · books: only the changed pieces — and the manifest right away, so
       //     the books are safe in the cloud within seconds, before any photo
-      final dbKeys = await pieces(db);
+      List<String> dbKeys;
+      try {
+        dbKeys = await pieces(db, toVps: vps);
+      } catch (e) {
+        if (!vps) rethrow;
+        // the server did not answer: the books go to Firebase this time
+        _log('Server not reachable ($e) — sending to Firebase');
+        Vps.markDown();
+        vps = false;
+        dbKeys = await pieces(db);
+      }
       final files = (st['files'] as Map).cast<String, dynamic>();
       final slots = (st['slot'] as Map).cast<String, dynamic>();
       // a fresh install does not know which slot is newer: ask the cloud and
       // write over the OLDER one, so the newest copy is never lost
       if (slots[store.id] == null) {
-        final ta = await Cloud.liveSlotTime('live_${store.id.replaceAll(RegExp(r'[^A-Za-z0-9]'), '')}_a');
-        final tb = await Cloud.liveSlotTime('live_${store.id.replaceAll(RegExp(r'[^A-Za-z0-9]'), '')}_b');
+        final ta = await Cloud.liveSlotTime('live_${store.id.replaceAll(RegExp(r'[^A-Za-z0-9]'), '')}_a').catchError((_) => null);
+        final tb = await Cloud.liveSlotTime('live_${store.id.replaceAll(RegExp(r'[^A-Za-z0-9]'), '')}_b').catchError((_) => null);
         // slots[] holds the slot written LAST; the next write goes to the other
         slots[store.id] = (ta != null && (tb == null || ta.isAfter(tb))) ? 'a' : 'b';
       }
       final slot = slots[store.id] == 'a' ? 'b' : 'a';
       final key = store.id.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
-      Future<void> writeManifest(Map<String, List<String>> withFiles) async {
-        final manifest = jsonEncode({
-          'v': 2,
+      Future<String> writeManifest(Map<String, List<String>> withFiles) async {
+        final body = <String, Object?>{
+          'v': 3,
+          'dbAt': vps ? 'vps' : 'firebase',
           'db': {'size': db.length, 'keys': dbKeys},
           'files': withFiles,
-        });
-        await Cloud.putLiveManifest('live_${key}_$slot',
-            manifest: manifest, storeId: store.id, storeName: store.name, counts: counts, bytes: db.length);
+        };
+        final where = <String>[];
+        Object? err;
+        if (vps) {
+          try {
+            await Vps.putManifest(key, slot, {
+              ...body,
+              'created': DateTime.now().toUtc().toIso8601String(),
+              'storeName': store.name,
+              'bytes': db.length,
+              'device': Platform.localHostname,
+              ...counts,
+            });
+            where.add('your server');
+          } catch (e) {
+            err = e;
+            _log('Server manifest failed: $e', ok: false);
+          }
+        }
+        try {
+          await Cloud.putLiveManifest('live_${key}_$slot',
+              manifest: jsonEncode(body), storeId: store.id, storeName: store.name, counts: counts, bytes: db.length);
+          where.add('Firebase');
+        } catch (e) {
+          err ??= e;
+          _log('Firebase manifest failed: $e', ok: false);
+        }
+        if (where.isEmpty) throw err ?? StateError('not saved');
+        return where.join(' + ');
       }
 
       // photos already in the cloud go into the first manifest too
@@ -229,12 +273,13 @@ class LiveSync {
         for (final e in files.entries)
           if (((e.value as Map)['keys'] as List).every((k) => uploaded.contains(k))) e.key: ((e.value as Map)['keys'] as List).cast<String>(),
       };
-      await writeManifest(ready);
+      final savedTo = await writeManifest(ready);
       slots[store.id] = slot;
+      _log('Books → $savedTo · ${counts['sales']} sales${sent == 0 ? '' : ' · ${_size(sent)}'}');
       st['uploaded'] = uploaded.toList();
       st['last'] = {'at': DateTime.now().toIso8601String(), ...counts};
       _pending = max(0, _pending - taken);
-      _status('cloud', 'Books saved to cloud${sent == 0 ? '' : ' · ${_size(sent)} sent'}');
+      _status('cloud', 'Books saved to $savedTo${sent == 0 ? '' : ' · ${_size(sent)} sent'}');
       await _save();
 
       // 3 · photos & documents: only new or changed files, then the manifest again
@@ -261,25 +306,35 @@ class LiveSync {
       }
       files.removeWhere((k, _) => !manifestFiles.containsKey(k));
       final changedFiles = newFiles > 0 || manifestFiles.length != ready.length;
-      if (changedFiles) await writeManifest(manifestFiles);
+      if (changedFiles) {
+        await writeManifest(manifestFiles);
+        _log('Photos → Firebase · $newFiles new');
+      }
       // 5 · forget pieces no copy uses any more (this store's last two + other stores)
       final refs = (st['refs'] as Map).cast<String, dynamic>();
       final prev = ((refs[store.id] as Map?)?['cur'] as List?)?.cast<String>() ?? const <String>[];
       final cur = [...dbKeys, for (final v in manifestFiles.values) ...v];
       refs[store.id] = {'cur': cur, 'prev': prev};
       final used = <String>{for (final r in refs.values) ...((r as Map)['cur'] as List).cast<String>(), for (final r in refs.values) ...((r as Map)['prev'] as List).cast<String>()};
-      final unused = uploaded.where((k) => !used.contains(k)).take(40).toList();
-      for (final k in unused) {
+      for (final k in uploaded.where((k) => !used.contains(k)).take(40).toList()) {
         try {
           await Cloud.deleteBlob(k);
           uploaded.remove(k);
         } catch (_) {}
       }
+      for (final k in uploadedVps.where((k) => !used.contains(k)).take(40).toList()) {
+        try {
+          await Vps.deleteBlob(k);
+          uploadedVps.remove(k);
+        } catch (_) {}
+      }
       st['uploaded'] = uploaded.toList();
-      _status('cloud', 'Saved to cloud${sent == 0 ? ' · up to date' : ' · ${_size(sent)} sent'}${newFiles > 0 ? ' · $newFiles photo${newFiles == 1 ? '' : 's'}' : ''}');
+      st['uploadedVps'] = uploadedVps.toList();
+      _status('cloud', 'Saved to $savedTo${sent == 0 ? ' · up to date' : ' · ${_size(sent)} sent'}${newFiles > 0 ? ' · $newFiles photo${newFiles == 1 ? '' : 's'}' : ''}');
     } catch (e) {
       final offline = e is SocketException || '$e'.contains('internet') || '$e'.contains('host lookup') || '$e'.contains('Connection');
       _status('waiting', offline ? 'Saved on phone · will send when the internet is back' : 'Cloud copy waiting: $e');
+      _log(offline ? 'No internet — kept on phone' : 'Failed: $e', ok: false);
     } finally {
       await _save();
       _busy = false;
@@ -288,6 +343,20 @@ class LiveSync {
         Timer(const Duration(milliseconds: 300), run);
       }
     }
+  }
+
+  /// What the live backup did, newest first (shown under the card).
+  static Future<List<Map<String, dynamic>>> log() async => [for (final x in ((await _state())['log'] as List? ?? const [])) (x as Map).cast<String, dynamic>()];
+
+  static void _log(String msg, {bool ok = true}) {
+    final s = _st;
+    if (s == null) return;
+    final l = (s['log'] as List?) ?? <dynamic>[];
+    l.insert(0, {'at': DateTime.now().toIso8601String(), 'ok': ok, 'msg': msg});
+    while (l.length > 40) {
+      l.removeLast();
+    }
+    s['log'] = l;
   }
 
   static String _size(int b) => b < 1024 ? '$b B' : b < 1024 * 1024 ? '${(b / 1024).toStringAsFixed(0)} KB' : '${(b / 1048576).toStringAsFixed(1)} MB';

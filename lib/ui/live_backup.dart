@@ -54,67 +54,115 @@ class _LiveBackupCardState extends State<LiveBackupCard> with SingleTickerProvid
             : st.at == null
                 ? 'Live backup on · every change goes to the cloud in about 2 seconds'
                 : '${st.text} · ${_time(st.at!)}${st.pending > 0 && st.kind == 'waiting' ? ' · ${st.pending} change${st.pending == 1 ? '' : 's'} waiting' : ''}';
-        return Container(
-          padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
-          decoration: BoxDecoration(
-            color: color.withAlpha(0x14),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: color.withAlpha(0x40)),
-          ),
-          child: Row(children: [
-            AnimatedBuilder(
-              animation: _pulse,
-              builder: (_, __) => Container(
-                width: 12,
-                height: 12,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: color,
-                  boxShadow: on ? [BoxShadow(color: color.withAlpha(0x88), blurRadius: 4 + 6 * _pulse.value, spreadRadius: 2 * _pulse.value)] : null,
+        return GestureDetector(
+          onTap: () => _showLog(context),
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+            decoration: BoxDecoration(
+              color: color.withAlpha(0x14),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: color.withAlpha(0x40)),
+            ),
+            child: Row(children: [
+              AnimatedBuilder(
+                animation: _pulse,
+                builder: (_, __) => Container(
+                  width: 12,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: color,
+                    boxShadow: on ? [BoxShadow(color: color.withAlpha(0x88), blurRadius: 4 + 6 * _pulse.value, spreadRadius: 2 * _pulse.value)] : null,
+                  ),
                 ),
               ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Live backup', style: TextStyle(fontFamily: 'Jakarta', fontSize: 13.5, fontWeight: FontWeight.w800, color: color)),
+                  Text(text,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontFamily: 'Jakarta', fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF3A4155))),
+                  if (on)
+                    FutureBuilder<Map<String, dynamic>?>(
+                      key: ValueKey(st.at),
+                      future: LiveSync.lastCloud(),
+                      builder: (context, snap) {
+                        final l = snap.data;
+                        final at = DateTime.tryParse('${l?['at'] ?? ''}');
+                        if (at == null) return const SizedBox.shrink();
+                        return Text('Cloud copy: ${l!['sales'] ?? 0} sales · ${l['customers'] ?? 0} customers · ${_time(at)}',
+                            style: const TextStyle(fontFamily: 'Jakarta', fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF0E7A4A)));
+                      },
+                    ),
+                ]),
+              ),
+              if (on)
+                IconButton(
+                  tooltip: 'Back up now',
+                  onPressed: st.kind == 'sending' ? null : () => Backup.liveNow(),
+                  icon: st.kind == 'sending'
+                      ? SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: color))
+                      : Icon(Icons.cloud_upload_rounded, color: color),
+                ),
+              Switch(
+                value: on,
+                onChanged: (v) async {
+                  setState(() => on = v);
+                  await Books.setSetting('live_backup', v ? '1' : '0');
+                  if (v) await Backup.liveNow();
+                },
+              ),
+            ]),
+          ),
+        );
+      },
+    );
+  }
+
+  /// What the live backup did — every attempt, with the reason when it failed.
+  Future<void> _showLog(BuildContext context) async {
+    final log = await LiveSync.log();
+    if (!context.mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (c) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(c).size.height * .7),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Row(children: [
+                const Expanded(child: Text('Live backup log', style: TextStyle(fontFamily: 'Jakarta', fontSize: 17, fontWeight: FontWeight.w800))),
+                TextButton.icon(
+                  onPressed: () {
+                    Navigator.pop(c);
+                    Backup.liveNow();
+                  },
+                  icon: const Icon(Icons.cloud_upload_rounded),
+                  label: const Text('Back up now'),
+                ),
+              ]),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Live backup', style: TextStyle(fontFamily: 'Jakarta', fontSize: 13.5, fontWeight: FontWeight.w800, color: color)),
-                Text(text,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontFamily: 'Jakarta', fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF3A4155))),
-                if (on)
-                  FutureBuilder<Map<String, dynamic>?>(
-                    key: ValueKey(st.at),
-                    future: LiveSync.lastCloud(),
-                    builder: (context, snap) {
-                      final l = snap.data;
-                      final at = DateTime.tryParse('${l?['at'] ?? ''}');
-                      if (at == null) return const SizedBox.shrink();
-                      return Text('Cloud copy: ${l!['sales'] ?? 0} sales · ${l['customers'] ?? 0} customers · ${_time(at)}',
-                          style: const TextStyle(fontFamily: 'Jakarta', fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF0E7A4A)));
-                    },
+            if (log.isEmpty) const Padding(padding: EdgeInsets.all(24), child: Text('Nothing yet — make a change (a sale, a payment) and it appears here.')),
+            Flexible(
+              child: ListView(shrinkWrap: true, children: [
+                for (final l in log)
+                  ListTile(
+                    dense: true,
+                    leading: Icon(l['ok'] == true ? Icons.check_circle_rounded : Icons.error_rounded,
+                        color: l['ok'] == true ? const Color(0xFF0BA360) : const Color(0xFFE0245E)),
+                    title: Text('${l['msg']}', style: const TextStyle(fontFamily: 'Jakarta', fontSize: 12.5, fontWeight: FontWeight.w700)),
+                    subtitle: Text(_time(DateTime.tryParse('${l['at']}') ?? DateTime.now()), style: const TextStyle(fontFamily: 'Jakarta', fontSize: 11)),
                   ),
               ]),
             ),
-            if (on)
-              IconButton(
-                tooltip: 'Back up now',
-                onPressed: st.kind == 'sending' ? null : () => Backup.liveNow(),
-                icon: st.kind == 'sending'
-                    ? SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: color))
-                    : Icon(Icons.cloud_upload_rounded, color: color),
-              ),
-            Switch(
-              value: on,
-              onChanged: (v) async {
-                setState(() => on = v);
-                await Books.setSetting('live_backup', v ? '1' : '0');
-                if (v) await Backup.liveNow();
-              },
-            ),
           ]),
-        );
-      },
+        ),
+      ),
     );
   }
 }
