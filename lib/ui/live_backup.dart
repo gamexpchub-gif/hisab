@@ -52,8 +52,8 @@ class _LiveBackupCardState extends State<LiveBackupCard> with SingleTickerProvid
         final text = !on
             ? 'Live backup is off'
             : st.at == null
-                ? 'Live backup on · every change is saved within seconds'
-                : '${st.text} · ${_time(st.at!)}';
+                ? 'Live backup on · every change goes to the cloud in about 2 seconds'
+                : '${st.text} · ${_time(st.at!)}${st.pending > 0 && st.kind == 'waiting' ? ' · ${st.pending} change${st.pending == 1 ? '' : 's'} waiting' : ''}';
         return Container(
           padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
           decoration: BoxDecoration(
@@ -84,6 +84,14 @@ class _LiveBackupCardState extends State<LiveBackupCard> with SingleTickerProvid
                     style: const TextStyle(fontFamily: 'Jakarta', fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF3A4155))),
               ]),
             ),
+            if (on)
+              IconButton(
+                tooltip: 'Back up now',
+                onPressed: st.kind == 'sending' ? null : () => Backup.liveNow(),
+                icon: st.kind == 'sending'
+                    ? SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: color))
+                    : Icon(Icons.cloud_upload_rounded, color: color),
+              ),
             Switch(
               value: on,
               onChanged: (v) async {

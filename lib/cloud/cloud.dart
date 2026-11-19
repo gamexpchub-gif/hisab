@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:archive/archive.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -45,8 +46,9 @@ class CloudBackup {
   final String device;
   final String store, storeName; // which store's books ('main' for the first)
   final bool auto;
+  final String? manifest; // live copy: the list of blobs (books + photos)
   CloudBackup(this.id, this.created, this.bytes, this.chunks, this.sales, this.products, this.customers, this.device,
-      {this.store = 'main', this.storeName = '', this.auto = false});
+      {this.store = 'main', this.storeName = '', this.auto = false, this.manifest});
 
   /// A live copy (kept up to date after every change; two slots per store).
   bool get live => id.startsWith('live_');
@@ -352,6 +354,82 @@ class Cloud {
     });
   }
 
+  // ---------------------------------------------------------------- live sync (blobs)
+  /// One gzip'd piece of the books or of a photo, stored once by its hash.
+  static Future<void> putBlob(String key, List<int> gz) async {
+    final token = await _token();
+    await _call('PATCH', _doc('users/$_uid/blobs/$key'), token: token, body: {
+      'fields': {'data': {'bytesValue': base64Encode(gz)}}
+    });
+  }
+
+  static Future<List<int>> getBlob(String key) async {
+    final token = await _token();
+    final r = await _call('GET', _doc('users/$_uid/blobs/$key'), token: token);
+    return GZipDecoder().decodeBytes(base64Decode('${r['fields']['data']['bytesValue']}'));
+  }
+
+  static Future<void> deleteBlob(String key) async {
+    final token = await _token();
+    await _call('DELETE', _doc('users/$_uid/blobs/$key'), token: token);
+  }
+
+  /// Writes a live copy's manifest (one small document — all or nothing).
+  static Future<void> putLiveManifest(String slotId,
+      {required String manifest, required String storeId, required String storeName, required Map<String, int> counts, required int bytes}) async {
+    final token = await _token();
+    await _call('PATCH', _doc('users/$_uid/backups/$slotId'), token: token, body: {
+      'fields': {
+        'created': {'timestampValue': DateTime.now().toUtc().toIso8601String()},
+        'bytes': {'integerValue': '$bytes'},
+        'chunks': {'integerValue': '0'},
+        'sales': {'integerValue': '${counts['sales'] ?? 0}'},
+        'products': {'integerValue': '${counts['products'] ?? 0}'},
+        'customers': {'integerValue': '${counts['customers'] ?? 0}'},
+        'device': {'stringValue': Platform.localHostname},
+        'store': {'stringValue': storeId},
+        'storeName': {'stringValue': storeName},
+        'auto': {'booleanValue': true},
+        'live': {'booleanValue': true},
+        'complete': {'booleanValue': true},
+        'manifest': {'stringValue': manifest},
+      }
+    });
+  }
+
+  /// Rebuilds a live copy as a normal backup zip (books + photos).
+  static Future<File> _downloadLive(CloudBackup b, {void Function(double)? progress}) async {
+    final m = jsonDecode(b.manifest!) as Map<String, dynamic>;
+    final dbKeys = [for (final k in (m['db'] as Map)['keys'] as List) '$k'];
+    final files = ((m['files'] as Map?) ?? const {}).map((k, v) => MapEntry('$k', [for (final x in v as List) '$x']));
+    final total = dbKeys.length + files.values.fold<int>(0, (a, v) => a + v.length);
+    var done = 0;
+    Future<List<int>> join(List<String> keys) async {
+      final out = BytesBuilder(copy: false);
+      for (final k in keys) {
+        out.add(await getBlob(k));
+        progress?.call(++done / (total == 0 ? 1 : total));
+      }
+      return out.takeBytes();
+    }
+
+    final archive = Archive();
+    final db = await join(dbKeys);
+    archive.addFile(ArchiveFile('hisab.db', db.length, db));
+    for (final e in files.entries) {
+      if (e.key.contains('..')) continue;
+      final bytes = await join(e.value);
+      archive.addFile(ArchiveFile('files/${e.key}', bytes.length, bytes));
+    }
+    final meta = utf8.encode(jsonEncode({'app': 'Hisab AI', 'created': b.created.toIso8601String(), 'store': b.store, 'storeName': b.storeName, 'live': true}));
+    archive.addFile(ArchiveFile('backup.json', meta.length, meta));
+    final zip = ZipEncoder().encode(archive)!;
+    final tmp = await getTemporaryDirectory();
+    final f = File(p.join(tmp.path, 'cloud-${b.id}.zip'));
+    await f.writeAsBytes(zip, flush: true);
+    return f;
+  }
+
   static Future<List<CloudBackup>> listBackups() async {
     final token = await _token();
     final r = await _call('GET', _doc('users/$_uid/backups', '?pageSize=100'), token: token);
@@ -373,6 +451,7 @@ class Cloud {
         store: '${f['store']?['stringValue'] ?? 'main'}',
         storeName: '${f['storeName']?['stringValue'] ?? ''}',
         auto: f['auto']?['booleanValue'] == true,
+        manifest: f['manifest']?['stringValue'] as String?,
       ));
     }
     out.sort((a, b) => b.created.compareTo(a.created));
@@ -381,6 +460,7 @@ class Cloud {
 
   /// Downloads a backup into a temporary zip file.
   static Future<File> downloadBackup(CloudBackup b, {void Function(double)? progress}) async {
+    if (b.manifest != null) return _downloadLive(b, progress: progress);
     final token = await _token();
     final out = BytesBuilder(copy: false);
     for (var i = 0; i < b.chunks; i++) {

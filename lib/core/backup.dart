@@ -14,6 +14,9 @@ import 'db.dart';
 import 'money.dart';
 import 'plan.dart';
 import 'stores.dart';
+import 'live_sync.dart';
+
+export 'live_sync.dart' show LiveState, LiveSync;
 
 /// One backup file on the phone.
 class BackupFile {
@@ -205,33 +208,10 @@ class Backup {
     }
   }
 
-  // ---------------------------------------------------------------- live backup
-  /// What the live backup is doing, for the screens ("Saved to cloud 4:12 PM").
-  static final live = ValueNotifier<LiveState>(const LiveState('idle', null, 'Live backup starts after your next change'));
-  static Timer? _liveWait;
-  static Timer? _liveRetry; // every 2 min while a change waits to be sent
-  static bool _liveDirty = false, _liveBusy = false, _liveStarted = false;
-  static DateTime? _liveLast;
-
-  /// Live (real-time) backup: a few seconds after any change to the books,
-  /// the open store is copied to the phone and to the cloud. Offline, it
-  /// waits and sends as soon as the internet is back; when the app goes to
-  /// the background it is sent at once.
-  static void startLive() {
-    if (_liveStarted) return;
-    _liveStarted = true;
-    Books.changes.addListener(_changed);
-    _liveRetry?.cancel();
-    _liveRetry = Timer.periodic(const Duration(minutes: 2), (_) {
-      if (_liveDirty) _liveRun();
-    });
-  }
-
-  static void _changed() {
-    _liveDirty = true;
-    _liveWait?.cancel();
-    _liveWait = Timer(const Duration(seconds: 8), _liveRun);
-  }
+  // ---------------------------------------------------------------- live backup (see LiveSync)
+  static ValueNotifier<LiveState> get live => LiveSync.state;
+  static void startLive() => LiveSync.start();
+  static Future<void> liveNow() => LiveSync.now();
 
   /// A consistent copy of the open database without closing it (VACUUM INTO
   /// runs in the database's own queue, between sales). Phones with an old
@@ -246,84 +226,6 @@ class Backup {
       return b;
     } catch (_) {
       return AppDb.exclusive((path) => File(path).readAsBytes());
-    }
-  }
-
-  static void _liveRetryNow() {
-    if (_liveDirty) _liveRun();
-  }
-
-  /// Sends the pending change now (app going to the background).
-  static Future<void> liveNow() async {
-    _liveWait?.cancel();
-    if (_liveDirty) await _liveRun(force: true);
-  }
-
-  static Future<void> _liveRun({bool force = false}) async {
-    if (_liveBusy) return; // the running pass checks the dirty flag again
-    // at most one upload every 30 s while selling fast
-    final since = _liveLast == null ? null : DateTime.now().difference(_liveLast!);
-    if (!force && since != null && since < const Duration(seconds: 30)) {
-      _liveWait?.cancel();
-      _liveWait = Timer(const Duration(seconds: 30) - since, _liveRun);
-      return;
-    }
-    _liveBusy = true;
-    _liveDirty = false; // changes made from here on mark it again
-    try {
-      final s = await Books.settings();
-      if (s['live_backup'] == '0') {
-        live.value = const LiveState('off', null, 'Live backup is off');
-        return;
-      }
-      if (await phoneIsEmpty()) return;
-      final store = Stores.active;
-      final counts = <String, int>{
-        for (final t in ['sales', 'products', 'customers']) t: asInt((await Books.query('SELECT COUNT(*) AS c FROM $t')).first['c']),
-      };
-      // a consistent copy of the open store's database
-      final dbBytes = await snapshot();
-      if (dbBytes.length < 100 || ascii.decode(dbBytes.sublist(0, 15), allowInvalid: true) != _magic) return;
-      final archive = Archive()..addFile(ArchiveFile('hisab.db', dbBytes.length, dbBytes));
-      final meta = utf8.encode(jsonEncode({
-        'app': 'Hisab AI',
-        'created': DateTime.now().toIso8601String(),
-        'schema': AppDb.schemaVersion,
-        'store': store.id,
-        'storeName': store.name,
-        'live': true,
-        ...counts,
-      }));
-      archive.addFile(ArchiveFile('backup.json', meta.length, meta));
-      final zip = ZipEncoder().encode(archive) ?? (throw AccountingError('Could not create the backup file'));
-      // 1 · on the phone (one file per store, replaced safely)
-      final dir = await folder();
-      final tmp = File(p.join(dir.path, '.live-${store.id}.tmp'));
-      await tmp.writeAsBytes(zip, flush: true);
-      await tmp.rename(p.join(dir.path, 'Hisab-AI-live-${store.id}.zip'));
-      final now = DateTime.now();
-      _liveLast = now;
-      // 2 · to the cloud
-      await Cloud.load();
-      if (Cloud.user != null && Sub.can('cloud')) {
-        live.value = LiveState('sending', now, 'Saving to cloud…');
-        await Cloud.uploadLive(zip, storeId: store.id, storeName: store.name, counts: counts);
-        live.value = LiveState('cloud', DateTime.now(), 'Saved to cloud');
-      } else {
-        live.value = LiveState('phone', now, Cloud.user == null ? 'Saved on phone · sign in for cloud' : 'Saved on phone');
-      }
-    } catch (e) {
-      _liveDirty = true; // try again (internet back, next change or in 2 min)
-      final msg = e is SocketException || '$e'.contains('internet') || '$e'.contains('Failed host lookup')
-          ? 'Saved on phone · will send when the internet is back'
-          : 'Cloud copy waiting: $e';
-      live.value = LiveState('waiting', _liveLast, msg);
-    } finally {
-      _liveBusy = false;
-      if (_liveDirty) {
-        _liveWait?.cancel();
-        _liveWait = Timer(const Duration(seconds: 30), _liveRun);
-      }
     }
   }
 
@@ -459,17 +361,9 @@ class _AutoObserver with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       Backup.autoRun();
-      Backup._liveRetryNow();
+      LiveSync.flush();
     }
     // leaving the app: send the last change at once
-    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) Backup.liveNow();
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) LiveSync.flush();
   }
-}
-
-/// Live backup status: kind = idle | off | phone | sending | cloud | waiting.
-class LiveState {
-  final String kind;
-  final DateTime? at;
-  final String text;
-  const LiveState(this.kind, this.at, this.text);
 }

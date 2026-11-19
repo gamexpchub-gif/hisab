@@ -1111,7 +1111,11 @@ class Books {
   static Future<List<Rec>> query(String sql, [List<Object?>? args]) async => (await _db).rawQuery(sql, args);
 
   /// Runs a statement that changes data (no rows returned).
-  static Future<void> execute(String sql, [List<Object?>? args]) async => (await _db).execute(sql, args);
+  static Future<void> execute(String sql, [List<Object?>? args]) async {
+    await (await _db).execute(sql, args);
+    // a write: screens reload and the live backup sends it
+    if (!RegExp(r'^\s*(SELECT|PRAGMA|VACUUM)', caseSensitive: false).hasMatch(sql)) changes.value++;
+  }
 
   static Future<List<Rec>> accounts({String? kind, String? type}) async {
     final db = await _db;
