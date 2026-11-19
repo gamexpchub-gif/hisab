@@ -11,6 +11,7 @@ import 'package:hisab/core/insights.dart';
 import 'package:hisab/core/daily_report.dart';
 import 'package:hisab/core/analytics.dart';
 import 'package:hisab/core/autopilot.dart';
+import 'package:hisab/core/brain.dart';
 import 'package:hisab/core/plan.dart';
 import 'package:hisab/core/stores.dart';
 import 'package:hisab/core/gst_report.dart';
@@ -465,6 +466,57 @@ void main() {
     final close = await Autopilot.close(expected - 5000, note: 'short');
     expect(close.diff, -5000);
     expect((await Autopilot.closedToday())!.counted, expected - 5000);
+    await expectBalanced();
+  });
+
+  test('AI brain: margin guard, flags, customer score, forecast, ask', () async {
+    final now = DateTime.now();
+    String ago(int d) => ymd(now.subtract(Duration(days: d)));
+    final sup = await Books.saveParty('supplier', {'name': 'Brain Supplier'});
+    final good = await Books.saveParty('customer', {'name': 'Good Payer'});
+    final bad = await Books.saveParty('customer', {'name': 'Slow Payer'});
+    final cat = await Books.addCategory('Mobile');
+    final vivo = await Books.saveProduct({'name': 'Vivo Y28', 'brand': 'Vivo', 'gst_bp': 0, 'price': 1500000, 'category_id': cat});
+    final redmi = await Books.saveProduct({'name': 'Redmi 13C', 'brand': 'Xiaomi', 'gst_bp': 0, 'price': 900000, 'category_id': cat});
+    await Books.createPurchase(items: [ItemIn(vivo, 1, 1200000, 'BR-V1'), ItemIn(vivo, 1, 1200000, 'BR-V2'), ItemIn(redmi, 3, 800000)],
+        supplierId: sup, date: ago(40));
+    final cash = asInt((await Books.moneyAccounts()).first['id']);
+    final lm = DateTime(now.year, now.month - 1, 10);
+    await Books.createSale(items: [ItemIn(vivo, 1, 1500000, 'BR-V1')], customerId: good, paid: 1500000, accountId: cash, date: ymd(lm));
+    await Books.createSale(items: [ItemIn(redmi, 1, 700000)], customerId: bad, paid: 0, accountId: cash, date: ago(25)); // loss + due
+    await Books.createSale(items: [ItemIn(vivo, 1, 1500000, 'NEVER-BOUGHT-1')], customerId: good, paid: 1500000, accountId: cash, date: ago(1));
+
+    // margin guard
+    final p = (await Books.query('SELECT * FROM products WHERE id = ?', [redmi])).first;
+    expect(Brain.marginCheck([(p, 700000)]).single.loss, isTrue);
+    expect(Brain.marginCheck([(p, 1000000)]), isEmpty);
+
+    // flags: IMEI never bought, sale below cost
+    final f = await Brain.flags();
+    expect(f.any((x) => x.kind == 'imei_not_bought'), isTrue);
+    expect(f.any((x) => x.kind == 'below_cost'), isTrue);
+
+    // customer score: the slow payer scores lower
+    final sGood = await Brain.customerScore(good), sBad = await Brain.customerScore(bad);
+    expect(sGood.score, greaterThan(sBad.score));
+    expect(sBad.daysLate, 25);
+
+    // forecast has a number and brand trends
+    final fc = await Brain.forecast();
+    expect(fc.sales, greaterThanOrEqualTo(0));
+    expect(fc.brands.map((b) => b.brand), contains('Vivo'));
+
+    // ask
+    final a1 = await Brain.ask('gato mash-e Vivo-te koto labh?');
+    expect(a1.text, contains('Profit'));
+    expect(a1.text, contains('Vivo'));
+    expect(a1.text, contains(Money.rs(300000)));
+    final a2 = await Brain.ask('who owes me the most');
+    expect(a2.rows.first.$1, 'Slow Payer');
+    final a3 = await Brain.ask('stock of redmi');
+    expect(a3.text, startsWith('2 in stock'));
+    final a4 = await Brain.ask('kal koto bikri');
+    expect(a4.text, contains(Money.rs(1500000)));
     await expectBalanced();
   });
 

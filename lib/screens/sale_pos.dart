@@ -9,6 +9,8 @@ import '../core/books.dart';
 import '../core/drafts.dart';
 import '../core/imei_smart.dart';
 import '../core/quick.dart';
+import '../core/brain.dart';
+import 'brain.dart' show ScoreBadge;
 import '../ui/voice.dart';
 import '../core/money.dart';
 import '../print/print_screen.dart';
@@ -720,6 +722,49 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
       toast(context, 'Select a customer to give credit (₹${Money.inr(due)} due)', error: true);
       return;
     }
+    // AI margin guard: below cost / almost no margin
+    final issues = Brain.marginCheck([for (final l in cart) (l.p, l.rate)]);
+    if (issues.isNotEmpty) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          icon: Icon(issues.any((i) => i.loss) ? Icons.trending_down_rounded : Icons.warning_amber_rounded, color: const Color(0xFFE0245E), size: 40),
+          title: Text(issues.any((i) => i.loss) ? 'Selling at a loss' : 'Very low margin'),
+          content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            for (final i in issues)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text(
+                    '${i.name}: price ${Money.rs(i.price)}, cost ${Money.rs(i.cost)} — '
+                    '${i.loss ? 'loss ${Money.rs(i.cost - i.price)} each' : 'margin ${i.marginPct.toStringAsFixed(1)}%'}',
+                    style: const TextStyle(fontWeight: FontWeight.w600)),
+              ),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Fix price')),
+            TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Sell anyway')),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
+    // AI credit score: warn before giving credit to a risky customer
+    if (customer != null && due > 0 && score != null && score!.score < 40) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          icon: const Icon(Icons.shield_rounded, color: Color(0xFFE0245E), size: 40),
+          title: Text('Risky credit · score ${score!.score}'),
+          content: Text('${customer!['name']} already owes ${Money.rs(score!.due)}'
+              '${score!.daysLate > 0 ? ' for ${score!.daysLate} days' : ''}. ${score!.advice}. Give ${Money.rs(due)} more credit?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Take payment')),
+            TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Give credit')),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
     if (customer != null && due > 0) {
       final limit = asInt(customer!['credit_limit']);
       final after = (dues[asInt(customer!['id'])] ?? 0) + due;
@@ -885,8 +930,22 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
       );
 
   // ---------------------------------------------------------------- customer card
+  CustomerScore? score;
+  int? scoreFor;
+
+  /// The AI credit score of the chosen customer (loaded once per customer).
+  void _loadScore() {
+    final id = customer == null ? null : asInt(customer!['id']);
+    if (id == null || id == scoreFor) return;
+    scoreFor = id;
+    Brain.customerScore(id).then((s) {
+      if (mounted && scoreFor == id) setState(() => score = s);
+    }).catchError((_) {});
+  }
+
   Widget _customerCard() {
     final c = customer;
+    _loadScore();
     final cDue = c == null ? 0 : dues[asInt(c['id'])] ?? 0;
     final limit = c == null ? 0 : asInt(c['credit_limit']);
     return GestureDetector(
@@ -922,6 +981,7 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
               ),
             ]),
           ),
+          if (c != null && score != null && asInt(c['id']) == scoreFor) ...[ScoreBadge(score!, compact: true), const SizedBox(width: 6)],
           if (c != null)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
