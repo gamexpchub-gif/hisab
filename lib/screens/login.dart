@@ -260,8 +260,8 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 4),
                 Center(
-                  child: Text('Smart accounting for your shop — billing, stock, khata & AI',
-                      style: _j(13, FontWeight.w600, const Color(0xDDFFFFFF))),
+                  child: Text('Smart shop accounting',
+                      maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(13, FontWeight.w600, const Color(0xDDFFFFFF))),
                 ),
                 const SizedBox(height: 18),
                 Row(mainAxisAlignment: MainAxisAlignment.center, children: [
