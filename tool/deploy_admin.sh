@@ -57,6 +57,27 @@ $SUDO rm -rf "$WEB/hisab/dashboard.old" /tmp/hisab-admin "$WEB/gamex"
 $SUDO chown -R www-data:www-data "$WEB" 2>/dev/null || true
 $SUDO find "$WEB" -type d -exec chmod 755 {} \; ; $SUDO find "$WEB" -type f -exec chmod 644 {} \;
 
+# phone model database mirror for the app's Smart IMEI (Osmocom TAC database,
+# refreshed weekly) — served at /hisab/tacdb/tacdb.csv
+$SUDO mkdir -p "$WEB/hisab/tacdb"
+$SUDO tee /usr/local/bin/hisab-tacdb-refresh >/dev/null <<'SH'
+#!/bin/sh
+# Hisab AI — refreshes the TAC (IMEI model) database mirror. Managed by deploy_admin.sh
+OUT=/var/www/hisab-admin/hisab/tacdb
+TMP=$(mktemp)
+for U in https://tacdb.osmocom.org/export/tacdb.csv http://tacdb.osmocom.org/export/tacdb.csv; do
+  if curl -fsSL -m 300 -A "HisabAI-mirror/1.0" -o "$TMP" "$U" && [ "$(wc -l < "$TMP")" -gt 1000 ] && head -1 "$TMP" | grep -qi tac; then
+    install -m 644 "$TMP" "$OUT/tacdb.csv.new" && mv -f "$OUT/tacdb.csv.new" "$OUT/tacdb.csv"
+    rm -f "$TMP"; echo "tacdb: $(wc -l < "$OUT/tacdb.csv") lines from $U"; exit 0
+  fi
+done
+rm -f "$TMP"; echo "tacdb: download failed (old copy kept)" >&2; exit 1
+SH
+$SUDO chmod 755 /usr/local/bin/hisab-tacdb-refresh
+$SUDO ln -sf /usr/local/bin/hisab-tacdb-refresh /etc/cron.weekly/hisab-tacdb-refresh
+echo "  downloading the phone model database…"
+$SUDO /usr/local/bin/hisab-tacdb-refresh || echo "  ⚠ phone model database download failed — the app falls back to Osmocom directly"
+
 # the location block, shared by both cases
 $SUDO mkdir -p /etc/nginx/snippets
 $SUDO tee "$SNIP" >/dev/null <<NGINX
@@ -67,6 +88,14 @@ location = /hisab/dashboard { return 301 /hisab/dashboard/; }
 # the old address keeps working
 location = /gamex { return 301 /hisab/dashboard/; }
 location ^~ /gamex/ { return 301 /hisab/dashboard/; }
+location ^~ /hisab/tacdb/ {
+    root $WEB;
+    default_type text/csv;
+    gzip on;
+    gzip_types text/csv text/plain;
+    add_header Cache-Control "public, max-age=86400";
+    add_header X-Content-Type-Options "nosniff" always;
+}
 location ^~ /hisab/dashboard/ {
     root $WEB;
     index index.html;

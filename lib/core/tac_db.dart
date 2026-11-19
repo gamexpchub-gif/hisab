@@ -16,7 +16,14 @@ class TacModel {
 /// downloaded once and kept on the phone; refreshed every 30 days.
 /// Coverage is best for well-known models; very new phones may be missing.
 class TacDb {
-  static const url = 'https://tacdb.osmocom.org/export/tacdb.csv';
+  /// Tried in order: the Hisab AI mirror on our own server (refreshed weekly
+  /// from Osmocom by tool/deploy_admin.sh), then Osmocom itself.
+  static const urls = [
+    'https://admin.deencircle.online/hisab/tacdb/tacdb.csv',
+    'https://tacdb.osmocom.org/export/tacdb.csv',
+    'http://tacdb.osmocom.org/export/tacdb.csv',
+  ];
+  static Future<int>? _running;
   static Map<String, TacModel>? _map;
   static DateTime? _failedAt; // don't retry a failed download for 10 minutes
   /// Why the last download failed (shown to the user), or null.
@@ -93,39 +100,58 @@ class TacDb {
   }
 
   /// Downloads (or refreshes) the database. Returns how many models it has.
-  static Future<int> download() async {
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 20);
-    try {
-      final req = await client.getUrl(Uri.parse(url));
-      req.headers.set(HttpHeaders.userAgentHeader, 'HisabAI/1.0');
-      final res = await req.close().timeout(const Duration(seconds: 90));
-      if (res.statusCode != 200) {
-        lastError = 'Model database server answered ${res.statusCode}';
-        return 0;
+  static Future<int> download() => _running ??= _download().whenComplete(() => _running = null);
+
+  static Future<int> _download() async {
+    String? why;
+    for (final url in urls) {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+      try {
+        final req = await client.getUrl(Uri.parse(url));
+        req.headers.set(HttpHeaders.userAgentHeader, 'HisabAI/1.0');
+        final res = await req.close().timeout(const Duration(seconds: 90));
+        if (res.statusCode != 200) {
+          why ??= 'Model database server answered ${res.statusCode}';
+          await res.drain<void>();
+          continue;
+        }
+        final text = await res.transform(utf8.decoder).join().timeout(const Duration(minutes: 3));
+        final map = _parse(text);
+        if (map.length < 100) {
+          why ??= 'Model database download was empty';
+          continue;
+        }
+        await (await _file()).writeAsString(text, flush: true);
+        _map = map;
+        lastError = null;
+        _failedAt = null;
+        return map.length;
+      } on SocketException {
+        why ??= 'No internet — connect once to download phone models';
+      } on TimeoutException {
+        why ??= 'Model database download timed out';
+      } on HandshakeException {
+        why ??= 'Secure connection to the model database failed';
+      } catch (_) {
+        why ??= 'Model database download failed';
+      } finally {
+        client.close(force: true);
       }
-      final text = await res.transform(utf8.decoder).join();
-      final map = _parse(text);
-      if (map.isEmpty) {
-        lastError = 'Model database download was empty';
-        return 0;
-      }
-      await (await _file()).writeAsString(text, flush: true);
-      _map = map;
-      lastError = null;
-      _failedAt = null;
-      return map.length;
-    } on SocketException {
-      lastError = 'No internet — connect once to download phone models';
-      return 0;
-    } on TimeoutException {
-      lastError = 'Model database download timed out';
-      return 0;
-    } catch (e) {
-      lastError = 'Model database download failed';
-      return 0;
-    } finally {
-      client.close();
     }
+    lastError = why;
+    return 0;
+  }
+
+  /// Downloads the database in the background when the phone has none yet,
+  /// so the first IMEI scan is already named.
+  static Future<void> warmUp() async {
+    try {
+      if (await (await _file()).exists()) {
+        await _load(download: false);
+        return;
+      }
+      await download();
+    } catch (_) {}
   }
 
   static Future<Map<String, TacModel>> _load({bool download = true}) async {

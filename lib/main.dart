@@ -7,6 +7,7 @@ import 'core/daily_report.dart';
 import 'core/plan.dart';
 import 'core/stores.dart';
 import 'cloud/cloud.dart';
+import 'core/tac_db.dart';
 import 'screens/plans.dart';
 import 'screens/dashboard.dart';
 import 'screens/home.dart';
@@ -46,6 +47,10 @@ Future<void> main() async {
   Future<void>.delayed(const Duration(seconds: 9), DailyReport.start);
   // plan, admin rights and usage from the cloud account
   Future<void>.delayed(const Duration(seconds: 3), Accounts.sync);
+  // phone model database for Smart IMEI (downloaded once, in the background)
+  Future<void>.delayed(const Duration(seconds: 15), () {
+    if (Sub.can('smart_imei')) TacDb.warmUp();
+  });
 }
 
 class HisabApp extends StatelessWidget {

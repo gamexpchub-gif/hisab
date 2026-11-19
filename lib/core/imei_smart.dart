@@ -148,7 +148,7 @@ class SmartImei {
     }
     if (product == null && sName == null && isImei && Sub.can('smart_imei')) {
       // public TAC database (online, cached on the phone)
-      final m = await TacDb.lookup(code);
+      final m = await TacDb.lookup(code).timeout(const Duration(seconds: 25), onTimeout: () => null);
       if (m != null) {
         sName = m.name;
         sBrand = m.brand;

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../core/books.dart';
 import '../core/imei_smart.dart';
+import '../core/tac_db.dart';
 import '../core/money.dart';
 import '../core/product_lookup.dart';
 import '../core/smart.dart';
@@ -241,7 +242,8 @@ class _ProductFormState extends State<ProductForm> {
           setState(() => smartNote = !m.valid
               ? '⚠ IMEI check digit looks wrong — please re-scan the number'
               : 'First phone of this model (TAC ${m.tac}) in Hisab AI — type its name once and save. '
-                  'From then on brand, category, RAM and storage fill in automatically, in every Hisab AI shop');
+                  'From then on brand, category, RAM and storage fill in automatically, in every Hisab AI shop'
+                  '${TacDb.lastError != null ? '. (Model database: ${TacDb.lastError})' : ''}');
         }
         return;
       }
