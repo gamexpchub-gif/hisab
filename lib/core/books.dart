@@ -973,11 +973,36 @@ class Books {
   }
 
   /// type: 'customer' or 'supplier'
+  /// The last 10 digits of a mobile number (so +91 / spaces / 0 prefixes match).
+  static String phoneKey(Object? phone) {
+    final d = '${phone ?? ''}'.replaceAll(RegExp(r'\D'), '');
+    return d.length > 10 ? d.substring(d.length - 10) : d;
+  }
+
+  static String _nameKey(Object? name) => '${name ?? ''}'.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+
+  /// A customer / supplier with the same name AND the same mobile number.
+  static Future<Rec?> findDuplicateParty(String type, String name, String? phone, {int? exceptId, DatabaseExecutor? x}) async {
+    final p = phoneKey(phone), n = _nameKey(name);
+    if (p.length < 10 || n.isEmpty) return null;
+    final table = type == 'customer' ? 'customers' : 'suppliers';
+    final rows = await (x ?? await _db).rawQuery(
+        "SELECT * FROM $table WHERE REPLACE(REPLACE(REPLACE(IFNULL(phone, ''), ' ', ''), '-', ''), '+', '') LIKE ? AND id != ?", ['%$p', exceptId ?? -1]);
+    for (final r in rows) {
+      if (phoneKey(r['phone']) == p && _nameKey(r['name']) == n) return r;
+    }
+    return null;
+  }
+
   static Future<int> saveParty(String type, Rec data, {int? id, int opening = 0}) {
     return _write((x) async {
       final table = type == 'customer' ? 'customers' : 'suppliers';
       final name = (data['name'] as String? ?? '').trim();
       if (name.isEmpty) throw AccountingError('Name is required');
+      final dup = await findDuplicateParty(type, name, data['phone'] as String?, exceptId: id, x: x);
+      if (dup != null) {
+        throw AccountingError('${type == 'customer' ? 'Customer' : 'Supplier'} already added — ${dup['name']} · ${dup['phone']}');
+      }
       final values = {...data, 'name': name};
       if (id != null) {
         await x.update(table, values, where: 'id = ?', whereArgs: [id]);

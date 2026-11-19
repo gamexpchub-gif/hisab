@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -74,12 +76,25 @@ class _PartyFormState extends State<PartyForm> {
   late String? aadhaarImg = widget.party?['aadhaar_img'] as String?;
   late String? panImg = widget.party?['pan_img'] as String?;
   bool saving = false;
+  Rec? duplicate; // same name + same mobile already saved
+  Timer? _dupWait;
 
   bool get isC => widget.type == 'customer';
+
+  /// Checks (as the user types) whether this name + mobile is already saved.
+  void _checkDuplicate() {
+    _dupWait?.cancel();
+    _dupWait = Timer(const Duration(milliseconds: 350), () async {
+      final d = await Books.findDuplicateParty(widget.type, c['name']!.text, c['phone']!.text,
+          exceptId: isNew ? null : asInt(widget.party!['id']));
+      if (mounted && (d?['id'] != duplicate?['id'])) setState(() => duplicate = d);
+    });
+  }
   bool get isNew => widget.party == null;
 
   @override
   void dispose() {
+    _dupWait?.cancel();
     for (final x in c.values) {
       x.dispose();
     }
@@ -92,6 +107,7 @@ class _PartyFormState extends State<PartyForm> {
     if (c['name']!.text.trim().isEmpty) return 'Enter the name';
     final ph = c['phone']!.text.replaceAll(RegExp(r'[^0-9]'), '');
     if (ph.isNotEmpty && ph.length < 10) return 'Mobile number looks too short';
+    if (duplicate != null) return '${isC ? 'Customer' : 'Supplier'} already added — ${duplicate!['name']} · ${duplicate!['phone']}';
     final a = c['aadhaar']!.text.replaceAll(RegExp(r'[^0-9]'), '');
     if (a.isNotEmpty && a.length != 12) return 'Aadhaar number must have 12 digits';
     final p = c['pan']!.text.trim().toUpperCase();
@@ -185,6 +201,26 @@ class _PartyFormState extends State<PartyForm> {
             _section(Icons.contact_phone_rounded, 'Contact', [
               _field('name', 'Full name *', Icons.person_rounded, caps: TextCapitalization.words),
               _field('phone', 'Mobile number', Icons.phone_rounded, keyboard: TextInputType.phone),
+              if (duplicate != null)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFDECEC),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: const Color(0xFFF5B5C2)),
+                  ),
+                  child: Row(children: [
+                    const Icon(Icons.person_off_rounded, color: Color(0xFFC8102E), size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '${isC ? 'Customer' : 'Supplier'} already added — ${duplicate!['name']} · ${duplicate!['phone']}',
+                        style: _j(12.5, FontWeight.w800, const Color(0xFFC8102E)),
+                      ),
+                    ),
+                  ]),
+                ),
               _field('alt_phone', 'Alternate number', Icons.phone_forwarded_rounded, keyboard: TextInputType.phone),
               _field('email', 'Email', Icons.alternate_email_rounded, keyboard: TextInputType.emailAddress),
               _field('address', 'Address', Icons.location_on_rounded, lines: 2, caps: TextCapitalization.sentences),
@@ -383,7 +419,14 @@ class _PartyFormState extends State<PartyForm> {
           keyboardType: lines > 1 ? TextInputType.multiline : keyboard,
           maxLines: lines,
           textCapitalization: caps,
-          onChanged: key == 'name' ? (_) => setState(() {}) : null,
+          onChanged: key == 'name'
+              ? (_) {
+                  setState(() {});
+                  _checkDuplicate();
+                }
+              : key == 'phone'
+                  ? (_) => _checkDuplicate()
+                  : null,
           style: _j(14.5, FontWeight.w600, _ink),
           decoration: InputDecoration(
             labelText: label,

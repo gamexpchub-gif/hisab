@@ -651,6 +651,20 @@ void main() {
     await dir.delete(recursive: true);
   });
 
+  test('Same name + same mobile is "already added"', () async {
+    final id = await Books.saveParty('customer', {'name': 'Rahim Sheikh', 'phone': '98300 55555'});
+    await expectLater(Books.saveParty('customer', {'name': '  rahim   sheikh ', 'phone': '+91 9830055555'}),
+        throwsA(isA<AccountingError>().having((e) => '$e', 'message', contains('already added'))));
+    // same name, other number / same number, other name: allowed
+    await Books.saveParty('customer', {'name': 'Rahim Sheikh', 'phone': '9830066666'});
+    await Books.saveParty('customer', {'name': 'Karim Sheikh', 'phone': '9830055555'});
+    // editing the customer itself is fine
+    await Books.saveParty('customer', {'name': 'Rahim Sheikh', 'phone': '9830055555'}, id: id);
+    expect(await Books.findDuplicateParty('customer', 'RAHIM SHEIKH', '09830055555'), isNotNull);
+    // suppliers are checked separately
+    await Books.saveParty('supplier', {'name': 'Rahim Sheikh', 'phone': '9830055555'});
+  });
+
   test('Product purchase cost is kept with no opening stock', () async {
     final p = await Books.saveProduct({'name': 'Cost Keeper', 'gst_bp': 0, 'price': 150000}, openingCost: 100000);
     var r = (await Books.query('SELECT stock, cost FROM products WHERE id = ?', [p])).first;
