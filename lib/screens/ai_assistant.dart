@@ -57,6 +57,8 @@ class _AiAssistantState extends State<AiAssistant> {
     (Icons.person_add_alt_1_rounded, 'New customer Bablu 9830077777'),
     (Icons.today_rounded, 'Aj koto bikri?'),
     (Icons.trending_up_rounded, 'Gato mash-e Vivo-te koto labh?'),
+    (Icons.sell_rounded, 'Dokan vara 8000 khoroch'),
+    (Icons.inventory_rounded, 'Kon product kom ache?'),
     (Icons.account_balance_wallet_rounded, 'Who owes me the most?'),
   ];
 
@@ -89,6 +91,9 @@ class _AiAssistantState extends State<AiAssistant> {
         case ReceiptCommand r:
           reply = r.customer == null ? 'Who paid?' : 'Money received — confirm';
           card = _ReceiptCard(cmd: r, key: UniqueKey());
+        case ExpenseCommand x:
+          reply = 'Expense — confirm';
+          card = _ExpenseCard(cmd: x, key: UniqueKey());
         case CustomerCommand c:
           reply = c.existing != null ? 'This customer is already saved' : 'New customer — confirm';
           card = _CustomerCard(cmd: c, key: UniqueKey());
@@ -96,7 +101,7 @@ class _AiAssistantState extends State<AiAssistant> {
           final a = await Brain.ask(text);
           await Brain.remember(text);
           reply = a.text;
-          card = _AnswerCard(a);
+          card = _AnswerCard(a, onAsk: _send);
       }
     } catch (e) {
       reply = 'Sorry, something went wrong';
@@ -185,6 +190,7 @@ class _AiAssistantState extends State<AiAssistant> {
       ),
       const SizedBox(height: 12),
       if (msgs.isEmpty) ...[
+        _Briefing(onAsk: _send),
         Text('  Try', style: _j(12.5, FontWeight.w800, _muted)),
         const SizedBox(height: 6),
         for (final (icon, e) in _examples)
@@ -303,7 +309,8 @@ class _TypingState extends State<_Typing> with SingleTickerProviderStateMixin {
 // =============================================================================
 class _AnswerCard extends StatelessWidget {
   final Answer a;
-  const _AnswerCard(this.a);
+  final void Function(String)? onAsk;
+  const _AnswerCard(this.a, {this.onAsk});
   @override
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.all(14),
@@ -322,8 +329,141 @@ class _AnswerCard extends StatelessWidget {
                 ]),
               ),
           ],
+          if (a.next.isNotEmpty && onAsk != null) ...[
+            const SizedBox(height: 10),
+            Wrap(spacing: 6, runSpacing: 6, children: [
+              for (final n in a.next)
+                ActionChip(
+                  avatar: const Icon(Icons.subdirectory_arrow_right_rounded, size: 15, color: _brand),
+                  label: Text(n, style: _j(11.5, FontWeight.w700, _brand)),
+                  backgroundColor: const Color(0xFFF2EEFF),
+                  side: BorderSide.none,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  onPressed: () => onAsk!(n),
+                ),
+            ]),
+          ],
         ]),
       );
+}
+
+/// Today at a glance — tap a tile to ask about it.
+class _Briefing extends StatelessWidget {
+  final void Function(String) onAsk;
+  const _Briefing({required this.onAsk});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<Brief>>(
+      future: Brain.briefing(),
+      builder: (context, s) {
+        final items = s.data ?? const <Brief>[];
+        if (items.isEmpty) return const SizedBox.shrink();
+        final h = DateTime.now().hour;
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('  ${h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'} · today at a glance', style: _j(12.5, FontWeight.w800, _muted)),
+            const SizedBox(height: 6),
+            SizedBox(
+              height: 86,
+              child: ListView(scrollDirection: Axis.horizontal, children: [
+                for (final b in items)
+                  GestureDetector(
+                    onTap: () => onAsk(b.ask),
+                    child: Container(
+                      width: 148,
+                      margin: const EdgeInsets.only(right: 8),
+                      padding: const EdgeInsets.all(12),
+                      decoration: _card(
+                          border: switch (b.tone) {
+                        'good' => const Color(0xFFCDEFE0),
+                        'bad' => const Color(0xFFF8CCD8),
+                        'warn' => const Color(0xFFFFE2BF),
+                        _ => null,
+                      }),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(b.label, style: _j(11, FontWeight.w700, _muted)),
+                        const Spacer(),
+                        Text(b.value,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: _j(15, FontWeight.w800, switch (b.tone) {
+                              'good' => _green,
+                              'bad' => _red,
+                              'warn' => const Color(0xFFF97316),
+                              _ => _ink,
+                            })),
+                      ]),
+                    ),
+                  ),
+              ]),
+            ),
+          ]),
+        );
+      },
+    );
+  }
+}
+
+// =============================================================================
+// Expense
+// =============================================================================
+class _ExpenseCard extends StatefulWidget {
+  final ExpenseCommand cmd;
+  const _ExpenseCard({super.key, required this.cmd});
+  @override
+  State<_ExpenseCard> createState() => _ExpenseCardState();
+}
+
+class _ExpenseCardState extends State<_ExpenseCard> {
+  late String pay = widget.cmd.pay ?? 'cash';
+  bool done = false, saving = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.cmd;
+    if (done) return _AnswerCard(Answer('✓ ${Money.rs(c.amount)} expense saved · ${c.head}'));
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: _card(border: const Color(0xFFF8CCD8)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [
+          const Icon(Icons.sell_rounded, color: _red),
+          const SizedBox(width: 8),
+          Expanded(child: Text('Expense · ${c.head}', style: _j(15, FontWeight.w800, _ink))),
+          Text(Money.rs(c.amount), style: _j(18, FontWeight.w800, _red)),
+        ]),
+        if (c.note.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 4), child: Text(c.note, style: _j(12, FontWeight.w600, _muted))),
+        const SizedBox(height: 10),
+        Wrap(spacing: 6, children: [
+          for (final (k, l) in const [('cash', 'Cash'), ('upi', 'UPI'), ('card', 'Card')])
+            ChoiceChip(label: Text(l), selected: pay == k, onSelected: (_) => setState(() => pay = k)),
+        ]),
+        const SizedBox(height: 10),
+        FilledButton.icon(
+          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(46), backgroundColor: _red),
+          onPressed: saving
+              ? null
+              : () async {
+                  setState(() => saving = true);
+                  try {
+                    await AiActions.saveExpense(c, pay: pay);
+                    HapticFeedback.mediumImpact();
+                    if (mounted) setState(() => done = true);
+                  } catch (e) {
+                    if (mounted) {
+                      setState(() => saving = false);
+                      toast(context, '$e', error: true);
+                    }
+                  }
+                },
+          icon: const Icon(Icons.check_rounded),
+          label: const Text('Save expense'),
+        ),
+      ]),
+    );
+  }
 }
 
 // =============================================================================

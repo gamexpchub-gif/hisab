@@ -268,7 +268,18 @@ void main() {
       key: key,
       child: MaterialApp(debugShowCheckedModeBanner: false, theme: buildTheme(), home: const BrainScreen()),
     ));
-    await t.pump(const Duration(milliseconds: 300));
+    for (var i = 0; i < 60; i++) {
+      await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 15)));
+      await t.pump(const Duration(milliseconds: 50));
+    }
+    final home = key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+    await t.runAsync(() async {
+      final image = await home.toImage(pixelRatio: 2.75);
+      final png = await image.toByteData(format: ui.ImageByteFormat.png);
+      File('screenshots/ai_assistant_home.png')
+        ..createSync(recursive: true)
+        ..writeAsBytesSync(png!.buffer.asUint8List());
+    });
     await t.enterText(find.byType(TextField).first, 'Karim Uddin 9830099999 ke Redmi Note 13 Pro ekta 23 hajar ar AirPods Pro upi');
     await t.tap(find.byIcon(Icons.arrow_upward_rounded));
     for (var i = 0; i < 200; i++) {

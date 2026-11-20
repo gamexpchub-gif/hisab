@@ -94,7 +94,17 @@ class Answer {
   final String text;
   final String? detail;
   final List<(String, String)> rows; // label → value
-  const Answer(this.text, {this.detail, this.rows = const []});
+  final List<String> next; // follow-up questions to offer
+  const Answer(this.text, {this.detail, this.rows = const [], this.next = const []});
+
+  Answer withNext(List<String> n) => Answer(text, detail: detail, rows: rows, next: n);
+}
+
+/// One tile of the morning briefing.
+class Brief {
+  final String label, value, ask;
+  final String tone; // good | warn | bad | info
+  const Brief(this.label, this.value, this.ask, {this.tone = 'info'});
 }
 
 class Brain {
@@ -312,7 +322,7 @@ class Brain {
   }
 
   // ---------------------------------------------------------------- ask
-  static const examples = [
+  static const examplesOld = [
     'Today\'s sale',
     'Last month profit',
     'Gato mash-e Vivo-te koto labh?',
@@ -358,7 +368,47 @@ class Brain {
     return (d(today), d(today), 'today');
   }
 
+  /// Today at a glance (only what the person may see).
+  static Future<List<Brief>> briefing({DateTime? now}) async {
+    final t = ymd(now ?? DateTime.now());
+    Future<int> v(String sql, [List<Object?> a = const []]) async => asInt((await Books.query(sql, a)).first['v']);
+    final out = <Brief>[];
+    final figures = Books.can('dashboard') || Books.can('reports');
+    if (figures) {
+      final sales = await v('SELECT IFNULL(SUM(total), 0) AS v FROM sales WHERE date = ?', [t]);
+      final bills = await v('SELECT COUNT(*) AS v FROM sales WHERE date = ?', [t]);
+      out.add(Brief('Sales today', '${Money.compact(sales)} · $bills bill${bills == 1 ? '' : 's'}', "Today's sale", tone: sales > 0 ? 'good' : 'info'));
+      if (Books.can('profit')) {
+        final profit = await v('SELECT IFNULL(SUM(i.amount - i.unit_cost * i.qty), 0) AS v FROM sale_items i JOIN sales s ON s.id = i.sale_id WHERE s.date = ?', [t]);
+        out.add(Brief('Profit today', Money.compact(profit), "Today's profit", tone: profit >= 0 ? 'good' : 'bad'));
+      }
+    }
+    if (Books.can('customers') || figures) {
+      final dues = (await Books.partyBalances('customer')).values.where((x) => x > 0).toList();
+      if (dues.isNotEmpty) out.add(Brief('To collect', '${Money.compact(dues.fold(0, (a, b) => a + b))} · ${dues.length}', 'Who owes me the most?', tone: 'warn'));
+    }
+    final low = await v('SELECT COUNT(*) AS v FROM products WHERE stock <= CASE WHEN low_stock > 0 THEN low_stock ELSE 1 END AND stock < 1000000');
+    if (low > 0) out.add(Brief('Low stock', '$low product${low == 1 ? '' : 's'}', 'Low stock', tone: 'bad'));
+    final ready = await v("SELECT COUNT(*) AS v FROM repairs WHERE status = 'ready'");
+    if (ready > 0) out.add(Brief('Repairs ready', '$ready to deliver', 'Repairs ready', tone: 'warn'));
+    return out;
+  }
+
   static Future<Answer> ask(String question, {DateTime? now}) async {
+    final a = await _ask(question, now: now);
+    if (a.next.isNotEmpty) return a;
+    // follow-ups that fit the answer
+    final q = question.toLowerCase();
+    final next = <String>[
+      if (!q.contains('last month') && !q.contains('gato')) 'Last month profit',
+      if (!q.contains('owe') && !q.contains('baki')) 'Who owes me the most?',
+      if (!q.contains('low')) 'Low stock',
+      if (!q.contains('best')) 'Best seller this month',
+    ];
+    return a.withNext(next.take(3).toList());
+  }
+
+  static Future<Answer> _ask(String question, {DateTime? now}) async {
     final t0 = now ?? DateTime.now();
     final q = ' ${question.toLowerCase().replaceAll(RegExp(r'[?!.,]'), ' ').replaceAll('-e ', ' ').replaceAll('-te ', ' ')} '
         .replaceAll(RegExp(r'\s+'), ' ');
@@ -367,6 +417,87 @@ class Brain {
 
     // what the question is about: a brand, product, category or customer
     final products = await Books.query('SELECT p.*, c.name AS category FROM products p LEFT JOIN categories c ON c.id = p.category_id');
+
+    // one customer's khata: "Rahim er baki koto", "Rahim Sheikh khata"
+    if (has(['baki', 'due', 'khata', 'balance', 'owe', 'owes', 'pabo', 'hisab']) && !has(['most', 'sobcheye', 'beshi', 'top', 'all', 'sob'])) {
+      final said = SmartSearch.words(q).where((w) => w.length >= 3 && !_stop.contains(w)).toList();
+      Rec? who;
+      for (final c in await Books.query('SELECT * FROM customers')) {
+        final n = SmartSearch.words('${c['name']}');
+        if (n.isNotEmpty && n.every(said.contains) || (n.length > 1 && said.contains(n.first) && said.contains(n.last))) {
+          who = c;
+          break;
+        }
+        if (n.isNotEmpty && said.contains(n.first) && who == null) who = c;
+      }
+      if (who != null) {
+        if (!Books.can('customers') && !Books.can('collect')) return const Answer('🔒 Customer khata is for the owner');
+        final id = asInt(who['id']);
+        final due = (await Books.partyBalances('customer'))[id] ?? 0;
+        final bills = await Books.query('SELECT number, date, total, paid FROM sales WHERE customer_id = ? ORDER BY date DESC, id DESC LIMIT 5', [id]);
+        return Answer(due > 0 ? '${who['name']} owes ${Money.rs(due)}' : '${who['name']} owes nothing ✓',
+            detail: '${who['phone'] ?? ''}${bills.isEmpty ? '' : ' · last bill ${prettyDate('${bills.first['date']}')}'}',
+            rows: [for (final b in bills) ('${b['number']} · ${prettyDate('${b['date']}')}', Money.rs(asInt(b['total'])))],
+            next: ['${who['name']} ${due > 0 ? Money.inr(due) : '500'} joma', 'Who owes me the most?']);
+      }
+    }
+
+    // low stock: "kon product kom", "low stock", "stock shesh"
+    if (has(['low', 'kom', 'shesh', 'finish', 'out of stock', 'reorder', 'order korte'])) {
+      final rows = await Books.query(
+          'SELECT name, stock, low_stock FROM products WHERE stock <= CASE WHEN low_stock > 0 THEN low_stock ELSE 1 END ORDER BY stock, name LIMIT 12');
+      return Answer(rows.isEmpty ? 'Stock is fine — nothing is running out' : '${rows.length} product${rows.length == 1 ? '' : 's'} running low',
+          rows: [for (final r in rows) ('${r['name']}', asInt(r['stock']) <= 0 ? 'out' : '${r['stock']} left')],
+          next: [if (Books.can('ai_insights')) 'What should I re-order?', 'Best seller this month']);
+    }
+
+    // price: "Vivo T3 er dam koto", "price of iphone"
+    if (has(['dam', 'price', 'rate', 'mrp', 'koto taka'])) {
+      final words = SmartSearch.words(q).where((w) => !_stop.contains(w) && !['dam', 'price', 'rate', 'mrp', 'taka', 'er', 'of'].contains(w)).join(' ');
+      final hits = words.isEmpty ? <Rec>[] : SmartSearch.rank(products, words, limit: 4);
+      if (hits.isNotEmpty) {
+        final p = hits.first;
+        final price = asInt(p['price']), gst = asInt(p['gst_bp']);
+        final withGst = price + Money.percent(price, gst);
+        return Answer('${p['name']}: ${Money.rs(withGst)}',
+            detail: [
+              if (gst > 0) '${Money.rs(price)} + ${gst / 100}% GST',
+              'stock ${p['stock']}',
+              if (asInt(p['mrp']) > 0) 'MRP ${Money.rs(asInt(p['mrp']))}',
+              if (Books.can('profit')) 'cost ${Money.rs(asInt(p['cost']))}',
+            ].join(' · '),
+            rows: [for (final h in hits.skip(1)) ('${h['name']}', Money.rs(asInt(h['price']) + Money.percent(asInt(h['price']), asInt(h['gst_bp']))))],
+            next: ['${p['name']} ekta ${Money.inr(withGst).replaceAll(',', '')} cash']);
+      }
+    }
+
+    // today's / recent bills
+    if (has(['bills', 'bill gulo', 'invoices', 'recent sales', 'last bill', 'koyta bill'])) {
+      if (!(Books.can('dashboard') || Books.can('reports') || Books.can('sale'))) return const Answer('🔒 Bills are for the owner');
+      final rows = await Books.query(
+          'SELECT s.number, s.total, s.paid, c.name AS customer FROM sales s LEFT JOIN customers c ON c.id = s.customer_id WHERE s.date BETWEEN ? AND ? ORDER BY s.id DESC LIMIT 12',
+          [from, to]);
+      final total = rows.fold<int>(0, (a, r) => a + asInt(r['total']));
+      return Answer('${rows.length} bill${rows.length == 1 ? '' : 's'} $label${Books.can('dashboard') || Books.can('reports') ? ' · ${Money.rs(total)}' : ''}',
+          rows: [
+            for (final r in rows) ('${r['number']} · ${r['customer'] ?? 'Walk-in'}', '${Money.rs(asInt(r['total']))}${asInt(r['paid']) < asInt(r['total']) ? ' · due' : ''}')
+          ]);
+    }
+
+    // re-order
+    if (has(['re-order', 'reorder', 'order dite', 'kinte hobe', 'what should i buy', 're order'])) {
+      if (!Books.can('ai_insights') && !Books.can('purchase')) return const Answer('🔒 Re-order planning is for the owner');
+      return const Answer('Open AI Autopilot → Re-order: products that run out within 10 days, grouped by supplier, ready to send on WhatsApp');
+    }
+
+    // repairs ready
+    if (has(['repair', 'repairs', 'job', 'jobs', 'mobile thik'])) {
+      final rows = await Books.query(
+          "SELECT r.number, r.device, r.status, c.name AS customer FROM repairs r LEFT JOIN customers c ON c.id = r.customer_id WHERE r.status NOT IN ('delivered', 'cancelled') ORDER BY CASE r.status WHEN 'ready' THEN 0 ELSE 1 END, r.id DESC LIMIT 12");
+      final ready = rows.where((r) => r['status'] == 'ready').length;
+      return Answer(rows.isEmpty ? 'No repair jobs in the shop' : '${rows.length} job${rows.length == 1 ? '' : 's'} in the shop · $ready ready',
+          rows: [for (final r in rows) ('${r['number']} · ${r['device']} · ${r['customer'] ?? ''}', Shop.repairLabels[r['status']] ?? '${r['status']}')]);
+    }
     String? brand, category;
     Rec? product;
     final words = SmartSearch.words(q).where((w) => w.length >= 3 && !_stop.contains(w)).toList();

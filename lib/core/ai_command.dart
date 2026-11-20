@@ -42,6 +42,15 @@ class ReceiptCommand extends AiCommand {
   const ReceiptCommand(this.customer, this.name, this.amount, this.pay);
 }
 
+/// "rent 5000 khoroch", "electric bill 1200 expense", "cha 150 khoroch upi"
+class ExpenseCommand extends AiCommand {
+  final String head; // expense head (Rent, Electricity…)
+  final int amount;
+  final String? pay;
+  final String note;
+  const ExpenseCommand(this.head, this.amount, this.pay, this.note);
+}
+
 class CustomerCommand extends AiCommand {
   final String name, phone;
   final Rec? existing;
@@ -111,6 +120,16 @@ class AiCommands {
     if (isCustomerCmd && phone != null && !RegExp(r'\d{2,}').hasMatch(text)) {
       final name = _name(text.split(' '));
       if (name.isNotEmpty) return CustomerCommand(name, phone, customer);
+    }
+
+    // an expense: "rent 5000 khoroch"
+    if (has({'khoroch', 'khorch', 'kharcha', 'khorcha', 'expense', 'expenses', 'kharch'})) {
+      final amt = RegExp(r'\b(\d{1,9})\b').firstMatch(text);
+      if (amt != null) {
+        final rest = text.replaceAll(amt.group(0)!, ' ').split(' ').where((w) => w.length >= 2 && !{'khoroch', 'khorch', 'kharcha', 'khorcha', 'expense', 'expenses', 'kharch', 'holo', 'hoyeche', 'dilam', 'add', 'koro'}.contains(w));
+        final head = _expenseHead(rest.join(' '));
+        return ExpenseCommand(head, int.parse(amt.group(1)!) * 100, pay ?? 'cash', rest.join(' ').trim());
+      }
     }
 
     // money received: "Rahim 5000 joma"
@@ -222,6 +241,25 @@ class AiCommands {
     return best;
   }
 
+  /// Common shop expenses (Banglish / English words → head).
+  static String _expenseHead(String s) {
+    const heads = {
+      'Rent': ['rent', 'vara', 'bhara', 'bhada', 'dokan vara'],
+      'Electricity': ['electric', 'current', 'bijli', 'light bill', 'electricity', 'kareng'],
+      'Salary': ['salary', 'beton', 'betan', 'staff', 'mojuri', 'wages'],
+      'Tea & snacks': ['cha', 'chai', 'tea', 'nasta', 'snacks', 'khabar', 'tiffin'],
+      'Transport': ['transport', 'auto', 'toto', 'bus', 'courier', 'delivery', 'petrol', 'fuel', 'gari'],
+      'Internet & phone': ['internet', 'wifi', 'recharge', 'phone bill', 'mobile recharge', 'data'],
+      'Repairs & maintenance': ['repair', 'maintenance', 'mistri', 'thik'],
+      'Stationery': ['paper', 'pen', 'stationery', 'print', 'xerox', 'roll'],
+    };
+    for (final e in heads.entries) {
+      if (e.value.any((w) => RegExp('\\b${RegExp.escape(w)}\\b').hasMatch(s))) return e.key;
+    }
+    final w = s.split(' ').where((x) => x.length >= 3).take(2).join(' ');
+    return w.isEmpty ? 'Other expenses' : w[0].toUpperCase() + w.substring(1);
+  }
+
   static String _name(List<String> words) {
     final w = words
         .map((x) => x.trim())
@@ -276,6 +314,15 @@ class AiActions {
     final dup = await Books.findDuplicateParty('customer', name, phone);
     if (dup != null) return asInt(dup['id']);
     return Books.saveParty('customer', {'name': name.trim().isEmpty ? 'Customer ${phone ?? ''}'.trim() : name.trim(), 'phone': phone});
+  }
+
+  /// Records an expense under its head (made if new).
+  static Future<int> saveExpense(ExpenseCommand c, {String? pay}) async {
+    final heads = await Books.query("SELECT id, name FROM accounts WHERE type = 'expense'");
+    final hit = heads.where((h) => '${h['name']}'.toLowerCase() == c.head.toLowerCase()).firstOrNull ??
+        heads.where((h) => '${h['name']}'.toLowerCase().contains(c.head.toLowerCase().split(' ').first)).firstOrNull;
+    final head = hit != null ? asInt(hit['id']) : await Books.addExpenseHead(c.head);
+    return Books.createExpense(headId: head, amount: c.amount, accountId: (await account(pay ?? c.pay))!, note: c.note.isEmpty ? null : c.note);
   }
 
   /// Saves the bill. Phones get the oldest IMEIs in stock, one line each.

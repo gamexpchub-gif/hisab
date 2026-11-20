@@ -711,6 +711,38 @@ void main() {
     await expectBalanced();
   });
 
+  test('AI brain: khata, low stock, price, bills, expense, briefing', () async {
+    final c = await Books.saveParty('customer', {'name': 'Rahim Sheikh', 'phone': '9830011111'});
+    final p = await Books.saveProduct({'name': 'Vivo T3', 'brand': 'Vivo', 'gst_bp': 1800, 'price': 1500000, 'low_stock': 2}, openingQty: 3, openingCost: 1200000);
+    final cash = asInt((await Books.moneyAccounts()).first['id']);
+    await Books.createSale(items: [ItemIn(p, 2, 1500000)], customerId: c, paid: 1000000, accountId: cash);
+
+    var a = await Brain.ask('Rahim er baki koto?');
+    expect(a.text, contains('Rahim Sheikh owes'));
+    expect(a.next.first, contains('joma'));
+    a = await Brain.ask('kon product kom ache?');
+    expect(a.rows.map((r) => r.$1), contains('Vivo T3'));
+    a = await Brain.ask('Vivo T3 er dam koto?');
+    expect(a.text, 'Vivo T3: ${Money.rs(1770000)}');
+    a = await Brain.ask('aj-er bill gulo');
+    expect(a.text, startsWith('1 bill'));
+    expect(a.next, isNotEmpty);
+
+    final products = await Books.query('SELECT * FROM products');
+    final x = AiCommands.parse('dokan vara 8000 khoroch', products, await Books.query('SELECT * FROM customers')) as ExpenseCommand;
+    expect(x.head, 'Rent');
+    expect(x.amount, 800000);
+    await AiActions.saveExpense(x);
+    expect('${(await Books.query("SELECT a.name FROM expenses e JOIN accounts a ON a.id = e.head_id")).single['name']}', contains('Rent')); // the existing 'Shop Rent' head
+    final t = AiCommands.parse('cha 150 khoroch upi', products, const []) as ExpenseCommand;
+    expect(t.head, 'Tea & snacks');
+    expect(t.pay, 'upi');
+
+    final b = await Brain.briefing();
+    expect(b.map((x) => x.label), containsAll(['Sales today', 'To collect', 'Low stock']));
+    await expectBalanced();
+  });
+
   test('Product purchase cost is kept with no opening stock', () async {
     final p = await Books.saveProduct({'name': 'Cost Keeper', 'gst_bp': 0, 'price': 150000}, openingCost: 100000);
     var r = (await Books.query('SELECT stock, cost FROM products WHERE id = ?', [p])).first;
