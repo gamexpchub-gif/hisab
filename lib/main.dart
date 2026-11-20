@@ -1,0 +1,163 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import 'core/backup.dart';
+import 'core/books.dart';
+import 'core/daily_report.dart';
+import 'core/plan.dart';
+import 'core/stores.dart';
+import 'cloud/cloud.dart';
+import 'core/tac_db.dart';
+import 'core/widget_sync.dart';
+import 'core/autopilot.dart';
+import 'core/staff.dart';
+import 'screens/staff_screen.dart';
+import 'screens/purchases_book.dart';
+import 'screens/sale_return.dart';
+import 'screens/shop_work.dart';
+import 'screens/parties_list.dart';
+import 'screens/brain.dart';
+import 'screens/plans.dart';
+import 'screens/dashboard.dart';
+import 'screens/home.dart';
+import 'screens/menu.dart';
+import 'screens/products.dart';
+import 'screens/sale_form.dart';
+import 'screens/login.dart';
+import 'screens/security.dart';
+import 'ui/theme.dart';
+import 'ui/liquid_nav.dart';
+import 'ui/widgets.dart';
+
+export 'ui/liquid_nav.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  // the store in use (each store has its own books) and the plan
+  await Stores.load();
+  // staff login & permissions (who is using the app)
+  await Staff.load();
+  // the plan of the signed-in ID (each ID keeps its own plan)
+  await Cloud.load();
+  await Sub.load(uid: Cloud.user?.uid);
+  Books.guard = Sub.guard;
+  // keep the store list the same on every phone of the account
+  Stores.onChange = () => Cloud.saveStores(Stores.cloudJson()).catchError((_) {});
+  showPlans = (context) => open(context, const PlansScreen());
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.dark,
+    systemNavigationBarColor: Colors.transparent,
+    systemNavigationBarIconBrightness: Brightness.dark,
+  ));
+  runApp(const HisabApp());
+  // automatic backups: phone daily, cloud for every store (on start, on resume, every 30 min)
+  Backup.startAuto();
+  // live backup: every change goes to the phone and the cloud within seconds
+  Backup.startLive();
+  // tonight's AI report notification, kept fresh as the books change
+  Future<void>.delayed(const Duration(seconds: 9), DailyReport.start);
+  // plan, admin rights and usage from the cloud account
+  Future<void>.delayed(const Duration(seconds: 3), Accounts.sync);
+  // AI Autopilot: tomorrow morning's "messages ready" notification
+  Future<void>.delayed(const Duration(seconds: 20), Autopilot.scheduleMorning);
+  // home-screen widget: today's sale, cash and dues
+  Future<void>.delayed(const Duration(seconds: 6), WidgetSync.start);
+  // phone model database for Smart IMEI (downloaded once, in the background)
+  Future<void>.delayed(const Duration(seconds: 15), () {
+    if (Sub.can('smart_imei')) TacDb.warmUp();
+  });
+}
+
+class HisabApp extends StatelessWidget {
+  const HisabApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Hisab AI',
+      debugShowCheckedModeBanner: false,
+      theme: buildTheme(),
+      home: const AuthGate(child: AppLockGate(child: StaffGate(child: Shell()))),
+    );
+  }
+}
+
+/// Bottom-navigation shell: Home · Dashboard · Products · Menu.
+class Shell extends StatefulWidget {
+  final int initialIndex;
+  const Shell({super.key, this.initialIndex = 0});
+
+  static void goTo(BuildContext context, int index) => context.findAncestorStateOfType<_ShellState>()?.select(index);
+
+  @override
+  State<Shell> createState() => _ShellState();
+}
+
+class _ShellState extends State<Shell> {
+  late int index = widget.initialIndex;
+
+  void select(int i) {
+    if (i == index) return;
+    HapticFeedback.selectionClick();
+    setState(() => index = i);
+  }
+
+  void _staffAction(BuildContext context, String a) {
+    switch (a) {
+      case 'sale':
+        open(context, const SaleForm());
+      case 'ai':
+        open(context, const BrainScreen());
+      case 'collect':
+      case 'customers':
+        open(context, const PartiesScreen());
+      case 'repairs':
+        open(context, const RepairsScreen());
+      case 'returns':
+        open(context, const SaleReturnsScreen());
+      case 'purchase':
+        open(context, const PurchasesScreen());
+      case 'products':
+        select(2);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mq = MediaQuery.of(context);
+    Ref.u = mq.size.width / 849;
+    final navOuter = LiquidGlassNav.outerHeight(mq.padding.bottom, context);
+    return PopScope(
+      canPop: index == 0,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) select(0);
+      },
+      child: Scaffold(
+        extendBody: true,
+        body: Stack(children: [
+          Positioned.fill(
+            // staff see only what they may: no home figures / dashboard without permission
+            child: ValueListenableBuilder<StaffMember?>(
+              valueListenable: Staff.current,
+              builder: (context, _, __) => IndexedStack(index: index, children: [
+                Staff.can('dashboard') ? const HomeScreen() : StaffHome(onAction: _staffAction),
+                Staff.can('dashboard') ? const DashboardScreen() : const LockedView('The dashboard'),
+                const ProductsScreen(),
+                const MenuScreen(),
+              ]),
+            ),
+          ),
+          if (index <= 1)
+            Positioned(
+              right: p(22),
+              bottom: navOuter + p(22),
+              child: NewSaleFab(onTap: () => open(context, const SaleForm())),
+            ),
+        ]),
+        bottomNavigationBar: LiquidGlassNav(index: index, onTap: select),
+      ),
+    );
+  }
+}

@@ -1,0 +1,510 @@
+part of 'cloud.dart';
+
+// =============================================================================
+// Accounts, plans and the admin panel, on Firestore:
+//   accounts/{uid}  email, name, shop, phone, plan, planUntil, trialUntil,
+//                   blocked, pending, stores, products, sales, lastSeen
+//   requests/{id}   uid, email, name, plan, months, note, status, created
+// The rules let a user create their own account (as a trial) and update
+// everything except plan / planUntil / trialUntil / blocked; only the admin
+// (by email, in the rules) can read every account and change plans.
+// =============================================================================
+
+class CloudAccount {
+  final String uid, email, name, shop, phone, plan, note;
+  final DateTime? planUntil, trialUntil, lastSeen, created;
+  final bool blocked;
+  final String? pending;
+  final int stores, products, sales;
+  CloudAccount({
+    required this.uid,
+    required this.email,
+    required this.name,
+    required this.shop,
+    required this.phone,
+    required this.plan,
+    required this.note,
+    this.planUntil,
+    this.trialUntil,
+    this.lastSeen,
+    this.created,
+    required this.blocked,
+    this.pending,
+    required this.stores,
+    required this.products,
+    required this.sales,
+  });
+
+  DateTime? get until => plan == 'trial' ? trialUntil : planUntil;
+  bool get active => !blocked && until != null && until!.isAfter(DateTime.now()) && plan != 'none';
+  int get price => active ? (planById(plan)?.price ?? 0) : 0;
+  String get status => blocked ? 'Blocked' : !active ? 'Expired' : plan == 'trial' ? 'Trial' : planById(plan)?.name ?? plan;
+}
+
+class PlanRequest {
+  final String id, uid, email, name, plan, note, status;
+  final int months;
+  final DateTime? created;
+  PlanRequest(this.id, this.uid, this.email, this.name, this.plan, this.months, this.note, this.status, this.created);
+  int get amount => planById(plan)?.amount(months) ?? 0;
+}
+
+/// A phone model from the community list.
+class TacInfo {
+  final String model;
+  final String? brand, category, ram, storage;
+  const TacInfo(this.model, [this.brand, this.category, this.ram, this.storage]);
+}
+
+// Firestore value helpers ---------------------------------------------------
+Map<String, dynamic> _v(Object? v) => switch (v) {
+      null => {'nullValue': null},
+      bool b => {'booleanValue': b},
+      int i => {'integerValue': '$i'},
+      DateTime d => {'timestampValue': d.toUtc().toIso8601String()},
+      _ => {'stringValue': '$v'},
+    };
+
+Object? _read(Map<String, dynamic>? f) {
+  if (f == null) return null;
+  if (f.containsKey('stringValue')) return f['stringValue'];
+  if (f.containsKey('integerValue')) return int.tryParse('${f['integerValue']}');
+  if (f.containsKey('booleanValue')) return f['booleanValue'];
+  if (f.containsKey('timestampValue')) return DateTime.tryParse('${f['timestampValue']}')?.toLocal();
+  return null;
+}
+
+String _mask(Iterable<String> keys) => '?${keys.map((k) => 'updateMask.fieldPaths=$k').join('&')}';
+
+CloudAccount _account(Map<String, dynamic> d) {
+  final f = (d['fields'] ?? {}) as Map<String, dynamic>;
+  T? g<T>(String k) => _read(f[k] as Map<String, dynamic>?) as T?;
+  return CloudAccount(
+    uid: '${d['name']}'.split('/').last,
+    email: g<String>('email') ?? '',
+    name: g<String>('name') ?? '',
+    shop: g<String>('shop') ?? '',
+    phone: g<String>('phone') ?? '',
+    plan: g<String>('plan') ?? 'trial',
+    note: g<String>('note') ?? '',
+    planUntil: g<DateTime>('planUntil'),
+    trialUntil: g<DateTime>('trialUntil'),
+    lastSeen: g<DateTime>('lastSeen'),
+    created: g<DateTime>('created'),
+    blocked: g<bool>('blocked') ?? false,
+    pending: g<String>('pending'),
+    stores: g<int>('stores') ?? 1,
+    products: g<int>('products') ?? 0,
+    sales: g<int>('sales') ?? 0,
+  );
+}
+
+class Accounts {
+  /// Reads (or creates) this user's account, applies the plan on the phone
+  /// and reports usage. Quietly does nothing offline.
+  static Future<void> sync() async {
+    await Cloud.load();
+    if (Cloud.user == null) return;
+    try {
+      final token = await Cloud._token();
+      final uid = Cloud._uid!;
+      CloudAccount? acc;
+      try {
+        acc = _account(await Cloud._call('GET', Cloud._doc('accounts/$uid'), token: token));
+      } on CloudError {
+        if (Cloud._status != 404) rethrow;
+      }
+      if (acc == null) {
+        // first sign-in: a trial that ends when the phone's trial ends (≤ 7 days)
+        final end = Sub.until != null && Sub.plan == 'trial' && Sub.until!.isBefore(DateTime.now().add(const Duration(days: 7)))
+            ? Sub.until!
+            : DateTime.now().add(const Duration(days: Sub.trialDays));
+        await Cloud._call('PATCH', Cloud._doc('accounts/$uid', '?currentDocument.exists=false'), token: token, body: {
+          'fields': {
+            'email': _v(Cloud._email ?? ''),
+            'name': _v(Cloud._name ?? ''),
+            'plan': _v('trial'),
+            'trialUntil': _v(end),
+            'blocked': _v(false),
+            'created': _v(DateTime.now()),
+          }
+        });
+        acc = _account(await Cloud._call('GET', Cloud._doc('accounts/$uid'), token: token));
+      }
+      // admin? (only the admin may list every account)
+      var admin = false;
+      try {
+        await Cloud._call('GET', Cloud._doc('accounts', '?pageSize=1'), token: token);
+        admin = true;
+      } on CloudError {
+        admin = false;
+      }
+      await Sub.apply(plan: acc.plan, until: acc.until, admin: admin, blocked: acc.blocked, pending: acc.pending, uid: uid);
+      // stores made on other phones of this account
+      try {
+        final remote = await Cloud.loadStores();
+        if (remote != null) await Stores.mergeCloud(remote);
+        await Cloud.saveStores(Stores.cloudJson());
+      } catch (_) {}
+      // usage for the admin panel
+      final s = await Books.settings();
+      final counts = await Stores.counts();
+      final usage = <String, Object?>{
+        'email': Cloud._email ?? acc.email,
+        'name': Cloud._name ?? acc.name,
+        'shop': (s['business_name'] ?? '').trim(),
+        'phone': (s['phone'] ?? '').trim(),
+        'stores': Stores.all.length,
+        'products': counts.values.fold<int>(0, (a, c) => a + c.$1),
+        'sales': counts.values.fold<int>(0, (a, c) => a + c.$2),
+        'lastSeen': DateTime.now(),
+      };
+      await Cloud._call('PATCH', Cloud._doc('accounts/$uid', _mask(usage.keys)),
+          token: token, body: {'fields': {for (final e in usage.entries) e.key: _v(e.value)}});
+      // teach the community model list from this shop's past IMEIs (once)
+      SmartImei.shareHistory().catchError((_) => 0);
+    } catch (_) {
+      // offline or rules not updated yet: keep what the phone knows
+    }
+  }
+
+  // ---------------------------------------------------------------- online invoices
+  /// Web address customers open to see (and pay) a bill.
+  static const invoiceBase = 'https://admin.deencircle.online/hisab/invoice/';
+
+  /// Publishes a sale as an online invoice and returns its link. The link
+  /// carries a long random id; the same sale keeps the same link.
+  static Future<String> publishInvoice(int saleId) async {
+    if (Cloud.user == null) throw CloudError('Sign in (Menu → Account & Cloud) to share invoice links');
+    final st = await Books.settings();
+    final key = 'inv_link_${Stores.current}_$saleId';
+    var id = st[key];
+    if (id == null || id.isEmpty) {
+      final r = Random.secure();
+      const abc = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      id = List.generate(22, (_) => abc[r.nextInt(abc.length)]).join();
+    }
+    final sale = (await Books.query('SELECT s.*, c.name AS customer, c.phone AS customer_phone, c.gstin AS customer_gstin FROM sales s '
+            'LEFT JOIN customers c ON c.id = s.customer_id WHERE s.id = ?',
+            [saleId]))
+        .first;
+    final items = await Books.query('SELECT name, qty, rate, gst_bp, amount, tax, serial FROM sale_items WHERE sale_id = ? ORDER BY id', [saleId]);
+    final paid = asInt(sale['paid']) +
+        asInt((await Books.query("SELECT IFNULL(SUM(amount), 0) AS v FROM payments WHERE kind = 'receipt' AND reference = ?", [sale['number']]))
+            .first['v']);
+    String t(String k) => (st[k] ?? '').trim();
+    final data = {
+      'v': 1,
+      'shop': {
+        'name': t('business_name').isEmpty ? Stores.active.name : t('business_name'),
+        'phone': t('phone'),
+        'address': t('address'),
+        'gstin': t('gstin'),
+        'upi': t('upi_id'),
+        'email': t('email'),
+      },
+      'number': '${sale['number']}',
+      'date': '${sale['date']}',
+      'customer': {'name': '${sale['customer'] ?? 'Walk-in customer'}', 'phone': '${sale['customer_phone'] ?? ''}', 'gstin': '${sale['customer_gstin'] ?? ''}'},
+      'items': [
+        for (final i in items)
+          {
+            'name': '${i['name']}',
+            'qty': asInt(i['qty']),
+            'rate': asInt(i['rate']),
+            'gst': asInt(i['gst_bp']),
+            'amount': asInt(i['amount']),
+            'tax': asInt(i['tax']),
+            if ((i['serial'] ?? '').toString().trim().isNotEmpty) 'serial': '${i['serial']}'.trim(),
+          }
+      ],
+      'subtotal': asInt(sale['subtotal']),
+      'discount': asInt(sale['discount']),
+      'tax': asInt(sale['tax']),
+      'total': asInt(sale['total']),
+      'paid': paid > asInt(sale['total']) ? asInt(sale['total']) : paid,
+      'terms': t('invoice_terms'),
+    };
+    final json = jsonEncode(data);
+    if (json.length > 60000) throw CloudError('This bill is too large to share as a link');
+    final token = await Cloud._token();
+    await Cloud._call('PATCH', Cloud._doc('invoices/$id'), token: token, body: {
+      'fields': {'json': _v(json), 'owner': _v(Cloud._uid), 'number': _v('${sale['number']}'), 'created': _v(DateTime.now())}
+    });
+    await Books.setSetting(key, id);
+    return '$invoiceBase?i=$id';
+  }
+
+  // ---------------------------------------------------------------- community IMEI models
+  /// Model name for a TAC (first 8 IMEI digits) from the Hisab AI community
+  /// list — every shop that names a phone model teaches it to all shops.
+  static Future<TacInfo?> tacGet(String tac) async {
+    if (Cloud.user == null || !RegExp(r'^\d{8}$').hasMatch(tac)) return null;
+    try {
+      final token = await Cloud._token();
+      final r = await Cloud._call('GET', Cloud._doc('tac/$tac'), token: token);
+      final f = (r['fields'] as Map?)?.cast<String, dynamic>() ?? const {};
+      String g(String k) => '${_read(f[k] as Map<String, dynamic>?) ?? ''}'.trim();
+      final model = g('model');
+      if (model.isEmpty) return null;
+      String? n(String v) => v.isEmpty ? null : v;
+      return TacInfo(model, n(g('brand')), n(g('category')), n(g('ram')), n(g('storage')));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Shares a phone model (name, brand, category, RAM, storage) for a TAC
+  /// with every Hisab AI shop.
+  static Future<bool> tacPut(String tac, TacInfo t) async {
+    String cut(String? v, int n) {
+      final x = (v ?? '').trim();
+      return x.length > n ? x.substring(0, n) : x;
+    }
+
+    final model = cut(t.model, 80);
+    if (Cloud.user == null || !RegExp(r'^\d{8}$').hasMatch(tac) || model.length < 2) return false;
+    try {
+      final token = await Cloud._token();
+      await Cloud._call('PATCH', Cloud._doc('tac/$tac'), token: token, body: {
+        'fields': {
+          'model': _v(model),
+          'brand': _v(cut(t.brand, 40)),
+          'category': _v(cut(t.category, 40)),
+          'ram': _v(cut(t.ram, 20)),
+          'storage': _v(cut(t.storage, 20)),
+          'by': _v(Cloud._uid),
+          'updated': _v(DateTime.now()),
+        }
+      });
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Asks the admin for a plan (payment is settled outside the app for now).
+  static Future<void> requestPlan(String plan, int months, String note) async {
+    final token = await Cloud._token();
+    await Cloud._call('POST', Cloud._doc('requests'), token: token, body: {
+      'fields': {
+        'uid': _v(Cloud._uid),
+        'email': _v(Cloud._email ?? ''),
+        'name': _v(Cloud._name ?? ''),
+        'plan': _v(plan),
+        'months': _v(months),
+        'note': _v(note.trim()),
+        'status': _v('pending'),
+        'created': _v(DateTime.now()),
+      }
+    });
+    await Cloud._call('PATCH', Cloud._doc('accounts/${Cloud._uid}', _mask(['pending'])), token: token, body: {
+      'fields': {'pending': _v('$plan × $months')}
+    });
+    await Sub.apply(plan: Sub.plan, until: Sub.until, admin: Sub.admin, blocked: Sub.blocked, pending: '$plan × $months', uid: Cloud._uid);
+  }
+
+  // ---------------------------------------------------------------- admin
+  static Future<List<CloudAccount>> listAccounts() async {
+    final token = await Cloud._token();
+    final out = <CloudAccount>[];
+    String? page;
+    do {
+      final r = await Cloud._call('GET', Cloud._doc('accounts', '?pageSize=300${page == null ? '' : '&pageToken=$page'}'), token: token);
+      for (final d in (r['documents'] as List? ?? const [])) {
+        out.add(_account(d as Map<String, dynamic>));
+      }
+      page = r['nextPageToken'] as String?;
+    } while (page != null);
+    out.sort((a, b) => (b.lastSeen ?? DateTime(2000)).compareTo(a.lastSeen ?? DateTime(2000)));
+    return out;
+  }
+
+  static Future<List<PlanRequest>> listRequests() async {
+    final token = await Cloud._token();
+    final r = await Cloud._call('GET', Cloud._doc('requests', '?pageSize=300'), token: token);
+    final out = <PlanRequest>[];
+    for (final d in (r['documents'] as List? ?? const [])) {
+      final m = d as Map<String, dynamic>;
+      final f = (m['fields'] ?? {}) as Map<String, dynamic>;
+      T? g<T>(String k) => _read(f[k] as Map<String, dynamic>?) as T?;
+      out.add(PlanRequest('${m['name']}'.split('/').last, g<String>('uid') ?? '', g<String>('email') ?? '', g<String>('name') ?? '',
+          g<String>('plan') ?? '', g<int>('months') ?? 1, g<String>('note') ?? '', g<String>('status') ?? 'pending', g<DateTime>('created')));
+    }
+    out.sort((a, b) => (b.created ?? DateTime(2000)).compareTo(a.created ?? DateTime(2000)));
+    return out;
+  }
+
+  /// Sets a user's plan until [until] (admin only).
+  static Future<void> setPlan(String uid, String plan, DateTime until) async {
+    final token = await Cloud._token();
+    final fields = <String, Object?>{
+      'plan': plan,
+      if (plan == 'trial') 'trialUntil': until else 'planUntil': until,
+      'blocked': false,
+      'pending': null,
+    };
+    await Cloud._call('PATCH', Cloud._doc('accounts/$uid', _mask(fields.keys)),
+        token: token, body: {'fields': {for (final e in fields.entries) e.key: _v(e.value)}});
+    if (uid == Cloud._uid) await sync();
+  }
+
+  static Future<void> setBlocked(String uid, bool blocked) async {
+    final token = await Cloud._token();
+    await Cloud._call('PATCH', Cloud._doc('accounts/$uid', _mask(['blocked'])), token: token, body: {
+      'fields': {'blocked': _v(blocked)}
+    });
+  }
+
+  static Future<void> setNote(String uid, String note) async {
+    final token = await Cloud._token();
+    await Cloud._call('PATCH', Cloud._doc('accounts/$uid', _mask(['note'])), token: token, body: {
+      'fields': {'note': _v(note)}
+    });
+  }
+
+  /// Approves a request: the plan runs from today (or from the current end
+  /// if the user still has days left) for the requested months.
+  static Future<void> approve(PlanRequest r, CloudAccount? acc) async {
+    final start = acc != null && acc.active && acc.plan == r.plan && acc.until != null ? acc.until! : DateTime.now();
+    await setPlan(r.uid, r.plan, addMonths(start, r.months));
+    await _closeRequest(r.id, 'approved');
+  }
+
+  static Future<void> reject(PlanRequest r) async {
+    await _closeRequest(r.id, 'rejected');
+    final token = await Cloud._token();
+    await Cloud._call('PATCH', Cloud._doc('accounts/${r.uid}', _mask(['pending'])), token: token, body: {
+      'fields': {'pending': _v(null)}
+    });
+  }
+
+  static Future<void> _closeRequest(String id, String status) async {
+    final token = await Cloud._token();
+    await Cloud._call('PATCH', Cloud._doc('requests/$id', _mask(['status', 'closed'])), token: token, body: {
+      'fields': {'status': _v(status), 'closed': _v(DateTime.now())}
+    });
+  }
+}
+
+/// Firestore rules for Hisab AI (same as firebase/firestore.rules). Paste into
+/// Firebase → Firestore → Rules and press Publish.
+const firestoreRules = r'''rules_version = '2';
+
+// =============================================================================
+// Hisab AI — Firestore security rules
+//   users/{uid}/backups/**   cloud backups: only the owner reads and writes;
+//                            the admin can read (support / restore help)
+//   accounts/{uid}           plan & usage: the owner creates it as a trial and
+//                            may update only usage fields; plan, dates, block
+//                            and notes are changed by the admin only
+//   requests/{id}            plan requests: the owner creates a pending one;
+//                            the admin approves or rejects
+//   tac/{tac}                community phone model names (IMEI first 8 digits)
+//   invoices/{id}            bills shared as a link (open by link only)
+// Everything else is denied.
+// =============================================================================
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------------------------------------------------------------- helpers
+    function signedIn() { return request.auth != null; }
+    function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
+    function isAdmin() {
+      return signedIn() && request.auth.token.email in [
+        'said8180@deencircle.online'
+      ];
+    }
+    function incoming() { return request.resource.data; }
+    function changed() { return incoming().diff(resource.data).affectedKeys(); }
+    function validPlan(p) { return p in ['basic', 'gold', 'premium']; }
+
+    // ---------------------------------------------------------------- backups
+    match /users/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow create, update: if isOwner(uid)
+        && incoming().keys().hasOnly(['email', 'name', 'lastBackup']);
+      allow delete: if isOwner(uid);
+
+      match /{document=**} {
+        allow read: if isOwner(uid) || isAdmin();
+        allow write: if isOwner(uid);
+      }
+    }
+
+    // ---------------------------------------------------------------- accounts
+    match /accounts/{uid} {
+      allow get: if isOwner(uid) || isAdmin();
+      allow list: if isAdmin();
+
+      // first sign-in: a 7-day trial, nothing more
+      allow create: if isAdmin() || (isOwner(uid)
+        && incoming().keys().hasOnly(['email', 'name', 'plan', 'trialUntil', 'blocked', 'created'])
+        && incoming().plan == 'trial'
+        && incoming().blocked == false
+        && incoming().trialUntil is timestamp
+        && incoming().trialUntil <= request.time + duration.value(8, 'd'));
+
+      // the app reports usage; it can never change its own plan
+      allow update: if isAdmin() || (isOwner(uid)
+        && changed().hasOnly(['email', 'name', 'shop', 'phone', 'stores', 'products', 'sales', 'lastSeen', 'pending']));
+
+      allow delete: if isAdmin();
+    }
+
+    // ---------------------------------------------------------------- plan requests
+    match /requests/{id} {
+      allow create: if signedIn()
+        && incoming().keys().hasOnly(['uid', 'email', 'name', 'plan', 'months', 'note', 'status', 'created'])
+        && incoming().uid == request.auth.uid
+        && incoming().status == 'pending'
+        && validPlan(incoming().plan)
+        && incoming().months is int && incoming().months >= 1 && incoming().months <= 24
+        && incoming().note is string && incoming().note.size() <= 200;
+
+      allow get: if signedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow list, update, delete: if isAdmin();
+    }
+
+    // ---------------------------------------------------------------- online invoices
+    // invoices/{random id}: a bill the shop shared as a link. Anyone with the
+    // link can open that one bill (no listing); only the shop changes it.
+    match /invoices/{id} {
+      allow get: if true;
+      allow list: if false;
+      allow create, update: if signedIn()
+        && id.size() >= 16
+        && (resource == null || resource.data.owner == request.auth.uid)
+        && incoming().keys().hasOnly(['json', 'owner', 'number', 'created'])
+        && incoming().owner == request.auth.uid
+        && incoming().json is string && incoming().json.size() <= 60000
+        && incoming().number is string && incoming().number.size() <= 40
+        && incoming().created is timestamp;
+      allow delete: if signedIn() && resource.data.owner == request.auth.uid;
+    }
+
+    // ---------------------------------------------------------------- community IMEI models
+    // tac/{8 digits}: phone model names shared by every Hisab AI shop. Any
+    // signed-in shop reads; the shop that named a model (or the admin) may fix it.
+    match /tac/{tac} {
+      allow read: if signedIn();
+      allow create, update: if signedIn()
+        && tac.matches('^[0-9]{8}$')
+        && (resource == null || resource.data.by == request.auth.uid || isAdmin())
+        && incoming().keys().hasOnly(['model', 'brand', 'category', 'ram', 'storage', 'by', 'updated'])
+        && incoming().model is string && incoming().model.size() >= 2 && incoming().model.size() <= 80
+        && incoming().brand is string && incoming().brand.size() <= 40
+        && incoming().get('category', '') is string && incoming().get('category', '').size() <= 40
+        && incoming().get('ram', '') is string && incoming().get('ram', '').size() <= 20
+        && incoming().get('storage', '') is string && incoming().get('storage', '').size() <= 20
+        && incoming().by == request.auth.uid
+        && incoming().updated is timestamp;
+      allow delete: if isAdmin();
+    }
+
+    // ---------------------------------------------------------------- everything else
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}''';

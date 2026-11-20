@@ -1,0 +1,1257 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
+import 'package:hisab/core/books.dart';
+import 'package:hisab/core/db.dart';
+import 'package:hisab/core/money.dart';
+import 'package:hisab/core/imei_smart.dart';
+import 'package:hisab/core/insights.dart';
+import 'package:hisab/core/daily_report.dart';
+import 'package:hisab/core/analytics.dart';
+import 'package:hisab/core/autopilot.dart';
+import 'package:hisab/core/ai_command.dart';
+import 'package:hisab/core/brain.dart';
+import 'package:hisab/core/staff.dart';
+import 'package:hisab/core/plan.dart';
+import 'package:hisab/core/stores.dart';
+import 'package:hisab/core/gst_report.dart';
+import 'package:hisab/core/gst.dart';
+import 'package:hisab/core/edocs.dart';
+import 'package:hisab/core/xlsx.dart';
+import 'package:hisab/core/smart.dart';
+import 'package:hisab/core/quick.dart';
+import 'package:hisab/print/invoice_pdf.dart';
+import 'package:hisab/screens/sales_book.dart' show matchSale, matchDoc;
+
+Future<void> freshDb() async {
+  sqfliteFfiInit();
+  final db = await databaseFactoryFfi.openDatabase(inMemoryDatabasePath,
+      options: OpenDatabaseOptions(version: AppDb.schemaVersion, onConfigure: AppDb.configure, onCreate: AppDb.create, singleInstance: false));
+  AppDb.useDatabase(db);
+}
+
+Future<void> expectBalanced() async {
+  final tb = await Books.trialBalance();
+  final dr = tb.fold<int>(0, (a, r) => a + asInt(r['dr']));
+  final cr = tb.fold<int>(0, (a, r) => a + asInt(r['cr']));
+  expect(dr, cr, reason: 'trial balance must balance');
+  final bs = await Books.balanceSheet(ymd(DateTime.now()));
+  expect(bs.totalAssets, bs.totalLiabilities + bs.totalEquity, reason: 'balance sheet must balance');
+}
+
+void main() {
+  setUp(freshDb);
+
+  test('money parsing and Indian formatting', () {
+    expect(Money.parse('1,234.5'), 123450);
+    expect(Money.parse('0.07'), 7);
+    expect(Money.inr(123456789), '12,34,567.89');
+    expect(Money.inr(10000000), '1,00,000');
+    expect(Money.percent(10000, 1800), 1800);
+  });
+
+  test('purchase → sale → receipt keeps books balanced', () async {
+    final s = await Books.saveParty('supplier', {'name': 'Distributor'});
+    final c = await Books.saveParty('customer', {'name': 'Rahul'});
+    final p = await Books.saveProduct({'name': 'iPhone', 'gst_bp': 1800, 'price': 3000000});
+    final money = await Books.moneyAccounts();
+    final cash = asInt(money.first['id']);
+
+    await Books.createPurchase(items: [ItemIn(p, 2, 2500000)], supplierId: s, paid: 1000000, accountId: cash);
+    expect(await Books.partyBalance('supplier', s), 5900000 - 1000000);
+
+    await Books.createSale(items: [ItemIn(p, 1, 3000000, 'IMEI1')], customerId: c, paid: 500000, accountId: cash);
+    expect(await Books.partyBalance('customer', c), 3540000 - 500000);
+
+    await Books.createPayment(kind: 'receipt', partyId: c, amount: 1000000, accountId: cash);
+    expect(await Books.partyBalance('customer', c), 2040000);
+
+    final prod = (await Books.query('SELECT stock, cost FROM products WHERE id = ?', [p])).first;
+    expect(asInt(prod['stock']), 1);
+    expect(asInt(prod['cost']), 2500000);
+
+    final pl = await Books.profitLoss(null, ymd(DateTime.now()));
+    expect(pl.revenue, 3000000);
+    expect(pl.cogs, 2500000);
+    expect(pl.netProfit, 500000);
+    expect(await Books.balanceByCode('1000'), -1000000 + 500000 + 1000000);
+    await expectBalanced();
+  });
+
+  test('cannot oversell stock or leave walk-in unpaid', () async {
+    final p = await Books.saveProduct({'name': 'Mouse', 'gst_bp': 0, 'price': 50000}, openingQty: 1, openingCost: 30000);
+    await expectLater(Books.createSale(items: [ItemIn(p, 2, 50000)]), throwsA(isA<AccountingError>()));
+    await expectLater(Books.createSale(items: [ItemIn(p, 1, 50000)], paid: 0), throwsA(isA<AccountingError>()));
+    await Books.createSale(items: [ItemIn(p, 1, 50000)]);
+    await expectBalanced();
+  });
+
+  test('a document cannot be posted twice', () async {
+    final db = await AppDb.instance;
+    final cash = await Books.accountId(db, '1000');
+    final sales = await Books.accountId(db, '4000');
+    await Books.post(db, 'manual', 1, ymd(DateTime.now()), 'x', [JL(cash, 100, 0), JL(sales, 0, 100)]);
+    await expectLater(Books.post(db, 'manual', 1, ymd(DateTime.now()), 'x', [JL(cash, 100, 0), JL(sales, 0, 100)]),
+        throwsA(isA<AccountingError>()));
+    await expectLater(Books.post(db, 'manual', 2, ymd(DateTime.now()), 'x', [JL(cash, 100, 0), JL(sales, 0, 90)]),
+        throwsA(isA<AccountingError>()));
+  });
+
+  test('dashboard analytics: series add up to period totals', () async {
+    await Books.loadDemo();
+    final now = DateTime.now();
+    for (final from in [DateTime(now.year, now.month, now.day), DateTime(now.year, now.month, 1), DateTime(now.year, 1, 1)]) {
+      final a = await Books.analytics(from, now);
+      expect(a.series.fold<int>(0, (s, p) => s + p.sales), a.cur.sales);
+      expect(a.series.fold<int>(0, (s, p) => s + p.purchases), a.cur.purchases);
+    }
+    final year = await Books.analytics(DateTime(now.year - 1, now.month, now.day), now);
+    expect(year.granularity, 'month');
+  });
+
+  test('smart assist reads product names', () async {
+    final a = Smart.analyse('iPhone 15 Pro 8GB 256GB Natural Titanium');
+    expect(a.category, 'Mobile');
+    expect(a.brand, 'Apple');
+    expect(a.hsn, '8517');
+    expect(a.ram, '8GB');
+    expect(a.storage, '256GB');
+    expect(a.color, 'Natural Titanium');
+    final b = Smart.analyse('HP Victus 15 16GB 512GB SSD');
+    expect(b.category, 'Laptop');
+    expect(b.brand, 'HP');
+    expect(b.storage, '512GB SSD');
+    expect(Smart.analyse('Apple 20W USB-C Charger').category, 'Accessories');
+    expect(Smart.analyse('Redmi Note 13 8/128 Blue').variant, '8GB • 128GB • Blue');
+    expect(Smart.suggestPrice(4200000, 'Mobile'), 4539900);
+    expect(await Smart.nextSku('Mobile', 'Apple'), 'GX-MOB-APP-0001');
+  });
+
+  test('due ageing settles the oldest bills first', () async {
+    final c = await Books.saveParty('customer', {'name': 'Ageing Test'});
+    final p = await Books.saveProduct({'name': 'Cable', 'gst_bp': 0, 'price': 10000}, openingQty: 10, openingCost: 5000);
+    final cash = asInt((await Books.moneyAccounts()).first['id']);
+    final now = DateTime.now();
+    String ago(int d) => ymd(now.subtract(Duration(days: d)));
+    await Books.createSale(items: [ItemIn(p, 1, 10000)], customerId: c, paid: 0, accountId: cash, date: ago(75)); // ₹100
+    await Books.createSale(items: [ItemIn(p, 1, 10000)], customerId: c, paid: 0, accountId: cash, date: ago(40)); // ₹100
+    await Books.createSale(items: [ItemIn(p, 1, 10000)], customerId: c, paid: 0, accountId: cash, date: ago(5)); // ₹100
+    await Books.createPayment(kind: 'receipt', partyId: c, amount: 15000, accountId: cash); // ₹150 clears oldest + half
+    final a = (await Books.ageing('customer'))[c]!;
+    expect(a.buckets, [10000, 5000, 0, 0]);
+    expect(a.total, await Books.partyBalance('customer', c));
+    expect(a.oldestDays, 40);
+    final stats = await Books.partyStats('customer', c);
+    expect(stats.docs, 3);
+    expect(stats.business, 30000);
+    expect(stats.paymentsTotal, 15000);
+  });
+
+  test('split payment posts each account and keeps books balanced', () async {
+    final c = await Books.saveParty('customer', {'name': 'Split Test'});
+    final p = await Books.saveProduct({'name': 'Phone', 'gst_bp': 0, 'price': 1000000}, openingQty: 2, openingCost: 800000);
+    final acc = await Books.moneyAccounts();
+    final cash = asInt(acc[0]['id']), bank = asInt(acc[1]['id']);
+    final id = await Books.createSale(
+      items: [ItemIn(p, 1, 1000000)],
+      customerId: c,
+      splits: [MapEntry(cash, 400000), MapEntry(bank, 500000)],
+    );
+    expect(await Books.balance(cash, 'asset'), 400000);
+    expect(await Books.balance(bank, 'asset'), 500000);
+    expect(await Books.partyBalance('customer', c), 100000);
+    final sp = await Books.query('SELECT account_id, amount FROM sale_payments WHERE sale_id = ? ORDER BY amount', [id]);
+    expect(sp.map((r) => asInt(r['amount'])).toList(), [400000, 500000]);
+    await expectBalanced();
+  });
+
+  test('expense insights: totals, recurring rent and spikes', () async {
+    final heads = await Books.accounts(kind: 'expense');
+    final rent = asInt(heads.first['id']);
+    final cash = asInt((await Books.moneyAccounts()).first['id']);
+    final now = DateTime.now();
+    for (var m = 1; m <= 3; m++) {
+      await Books.createExpense(headId: rent, amount: 1200000, accountId: cash, date: ymd(DateTime(now.year, now.month - m, 5)));
+    }
+    await Books.createExpense(headId: asInt(heads.last['id']), amount: 30000, accountId: cash, date: ymd(now));
+    final x = await Books.expenseInsights(DateTime(now.year, now.month, 1), now);
+    expect(x.total, 30000);
+    expect(x.recurring.single.name, heads.first['name']);
+    expect(x.recurring.single.typical, 1200000);
+    expect(x.recurring.single.day, 5);
+    expect(x.recurring.single.paidThisMonth, isFalse);
+    expect(x.months.length, 6);
+  });
+
+  test('khata: cash given / got, goods on credit, due dates and feed', () async {
+    final c = await Books.saveParty('customer', {'name': 'Khata Test', 'phone': '9800000099', 'aadhaar': '123412341234'});
+    final p = await Books.saveProduct({'name': 'Charger', 'gst_bp': 0, 'price': 50000}, openingQty: 5, openingCost: 30000);
+    final cash = asInt((await Books.moneyAccounts()).first['id']);
+    await Books.createSale(items: [ItemIn(p, 2, 50000)], customerId: c, paid: 20000, accountId: cash); // ₹800 on credit
+    await Books.createLend(kind: 'gave', partyType: 'customer', partyId: c, amount: 300000, accountId: cash, reason: 'Cash loan');
+    await Books.createLend(kind: 'got', partyType: 'customer', partyId: c, amount: 100000, accountId: cash, reason: 'Loan returned');
+    expect(await Books.partyBalance('customer', c), 80000 + 300000 - 100000);
+
+    final split = await Books.creditSplit('customer', c);
+    expect(split.goods, 80000);
+    expect(split.cashGave, 300000);
+    expect(split.cashGot, 100000);
+
+    final t = await Books.khataTotals();
+    expect(t.youGet, 280000);
+    expect(t.cashLent, 300000);
+
+    final feed = await Books.khataFeed();
+    expect(feed.map((e) => e['kind']).toSet(), containsAll(['goods', 'cash_gave', 'cash_got']));
+    expect(feed.firstWhere((e) => e['kind'] == 'goods')['reason'], 'Charger ×2');
+
+    final due = await Books.addDue('customer', c, 280000, ymd(DateTime.now().add(const Duration(days: 7))), 'After salary');
+    expect((await Books.dues()).single['party'], 'Khata Test');
+    await Books.setDueStatus(due, 'paid');
+    expect(await Books.dues(), isEmpty);
+    expect((await Books.dues(partyType: 'customer', partyId: c, openOnly: false)).single['status'], 'paid');
+    expect((await Books.boughtBy(c)).single['qty'], 2);
+    await expectBalanced();
+  });
+
+  test('credit card: spends fall due after bill days, payments settle oldest first', () async {
+    final acc = await Books.moneyAccounts();
+    final bank = asInt(acc[1]['id']);
+    final card = await Books.saveMoneyAccount(
+        {'name': 'Test Credit', 'card_type': 'credit', 'credit_limit': 1000000, 'bill_days': 40}, opening: 0);
+    final rec = (await Books.query('SELECT * FROM accounts WHERE id = ?', [card])).single;
+    expect(rec['type'], 'liability');
+    expect((await Books.moneyAccounts()).any((a) => asInt(a['id']) == card), isFalse);
+    expect((await Books.moneyAccounts(withCards: true)).any((a) => asInt(a['id']) == card), isTrue);
+    final heads = await Books.accounts(kind: 'expense');
+    final now = DateTime.now();
+    String ago(int d) => ymd(now.subtract(Duration(days: d)));
+    await Books.createExpense(headId: asInt(heads[0]['id']), amount: 300000, accountId: card, date: ago(30));
+    await Books.createExpense(headId: asInt(heads[0]['id']), amount: 200000, accountId: card, date: ago(10));
+    var st = await Books.cardStatus(rec);
+    expect(st.outstanding, 500000);
+    expect(st.available, 500000);
+    expect(st.dues.first.key, ymd(DateTime.parse(ago(30)).add(const Duration(days: 40))));
+    expect(st.dues.first.value, 300000);
+    await Books.createTransfer(fromId: bank, toId: card, amount: 350000);
+    st = await Books.cardStatus(rec);
+    expect(st.outstanding, 150000);
+    expect(st.dues.length, 1);
+    expect(st.next!.value, 150000);
+    expect(st.next!.key, ymd(DateTime.parse(ago(10)).add(const Duration(days: 40))));
+    final debit = await Books.saveMoneyAccount({'name': 'My Debit', 'card_type': 'debit', 'acc_no': '1234'}, opening: 100000);
+    expect(await Books.balance(debit, 'asset'), 100000);
+    await expectBalanced();
+  });
+
+  test('sales book search: mobile, IMEI, amount, address', () async {
+    final c = await Books.saveParty('customer', {'name': 'Rahul Das', 'phone': '98300 12345', 'address': 'Salt Lake, Kolkata'});
+    final p = await Books.saveProduct({'name': 'iPhone 15', 'gst_bp': 0, 'price': 7000000}, openingQty: 2, openingCost: 6000000);
+    await Books.createSale(items: [ItemIn(p, 1, 7000000, '356789104455667')], customerId: c, paid: 7000000, accountId: asInt((await Books.moneyAccounts())[0]['id']));
+    final rows = await Books.salesBook();
+    expect(rows.single['serials'], '356789104455667');
+    expect(rows.single['accounts'], 'Cash in Hand');
+    expect(matchSale(rows.single, '9830012345')?.$1, 'Mobile');
+    expect(matchSale(rows.single, '4455667')?.$1, 'IMEI / Serial');
+    expect(matchSale(rows.single, '70000')?.$1, 'Amount');
+    expect(matchSale(rows.single, 'salt lake')?.$1, 'Address');
+    expect(matchSale(rows.single, 'iphone')?.$1, 'Product');
+    expect(matchSale(rows.single, 'samsung'), isNull);
+  });
+
+  test('purchases book and stock supplied by a supplier', () async {
+    final sup = await Books.saveParty('supplier', {'name': 'Kolkata Mobile Dist', 'phone': '033 2222 1111', 'gstin': '19ABCDE1234F1ZX'});
+    final p = await Books.saveProduct({'name': 'Redmi Note 13', 'gst_bp': 0, 'price': 1500000});
+    final bank = asInt((await Books.moneyAccounts())[1]['id']);
+    await Books.createPurchase(
+        items: [ItemIn(p, 2, 1200000, '861234500012345')], supplierId: sup, paid: 1000000, accountId: bank, billNo: 'KMD/77');
+    final rows = await Books.purchasesBook();
+    expect(rows.single['supplier'], 'Kolkata Mobile Dist');
+    expect(asInt(rows.single['qty']), 2);
+    expect(matchDoc(rows.single, 'kmd/77', party: 'supplier', accounts: 'account')?.$1, 'Bill no.');
+    expect(matchDoc(rows.single, '00012345', party: 'supplier', accounts: 'account')?.$1, 'IMEI / Serial');
+    expect(matchDoc(rows.single, 'kolkata', party: 'supplier', accounts: 'account')?.$1, 'Supplier');
+    expect(matchDoc(rows.single, '19abcde', party: 'supplier', accounts: 'account')?.$1, 'GSTIN');
+    final supplied = await Books.suppliedBy(sup);
+    expect(supplied.single['bill_no'], 'KMD/77');
+    expect(asInt(supplied.single['qty']), 2);
+  });
+
+  test('sale return: refund less than value, the rest is profit, stock comes back', () async {
+    final c = await Books.saveParty('customer', {'name': 'Return Test'});
+    final p = await Books.saveProduct({'name': 'Phone X', 'gst_bp': 0, 'price': 1000000}, openingQty: 2, openingCost: 800000);
+    final acc = await Books.moneyAccounts();
+    final cash = asInt(acc[0]['id']);
+    final sale = await Books.createSale(items: [ItemIn(p, 1, 1000000)], customerId: c, paid: 1000000, accountId: cash);
+    final before = await Books.profitLoss(ymd(DateTime.now()), ymd(DateTime.now()));
+    final lines = await Books.returnable(sale);
+    expect(lines.single.left, 1);
+    expect(lines.single.unitValue, 1000000);
+    await Books.createSaleReturn(saleId: sale, qty: {asInt(lines.single.item['id']): 1}, refund: 900000, accountId: cash);
+    expect(await Books.balance(cash, 'asset'), 100000);
+    expect(asInt((await Books.query('SELECT stock FROM products WHERE id = ?', [p])).first['stock']), 2);
+    final after = await Books.profitLoss(ymd(DateTime.now()), ymd(DateTime.now()));
+    // sale profit 2,000 is reversed; the 1,000 kept stays as profit
+    expect(after.netProfit, before.netProfit - 200000 + 100000);
+    expect((await Books.returnable(sale)).single.left, 0);
+    expect(() => Books.createSaleReturn(saleId: sale, qty: {asInt(lines.single.item['id']): 1}, refund: 0, accountId: cash),
+        throwsA(isA<AccountingError>()));
+    expect((await Books.saleReturns()).single['deduction'], 100000);
+    await expectBalanced();
+  });
+
+  test('sale return adjusted against customer due', () async {
+    final c = await Books.saveParty('customer', {'name': 'Due Return'});
+    final p = await Books.saveProduct({'name': 'Earbuds', 'gst_bp': 1800, 'price': 200000}, openingQty: 3, openingCost: 100000);
+    final sale = await Books.createSale(items: [ItemIn(p, 2, 200000)], customerId: c, paid: 0);
+    expect(await Books.partyBalance('customer', c), 472000);
+    final l = (await Books.returnable(sale)).single;
+    await Books.createSaleReturn(saleId: sale, qty: {asInt(l.item['id']): 1}, refund: 236000, restock: false);
+    expect(await Books.partyBalance('customer', c), 236000);
+    expect(asInt((await Books.query('SELECT stock FROM products WHERE id = ?', [p])).first['stock']), 1);
+    await expectBalanced();
+  });
+
+  test('amount in words (Indian system)', () {
+    expect(amountInWords(2000000), 'TWENTY THOUSAND RUPEES ONLY');
+    expect(amountInWords(12345678950), 'TWELVE CRORE THIRTY FOUR LAKH FIFTY SIX THOUSAND SEVEN HUNDRED EIGHTY NINE RUPEES AND FIFTY PAISE ONLY');
+    expect(amountInWords(10100), 'ONE HUNDRED ONE RUPEES ONLY');
+  });
+
+  test('edit sale: items, payment and stock are replaced in place', () async {
+    final c = await Books.saveParty('customer', {'name': 'Edit Me'});
+    final a = await Books.saveProduct({'name': 'Phone A', 'gst_bp': 0, 'price': 1000000}, openingQty: 3, openingCost: 800000);
+    final b = await Books.saveProduct({'name': 'Phone B', 'gst_bp': 0, 'price': 500000}, openingQty: 3, openingCost: 400000);
+    final cash = asInt((await Books.moneyAccounts())[0]['id']);
+    final id = await Books.createSale(items: [ItemIn(a, 2, 1000000, 'IMEI1', 'OPP-7')], customerId: c, paid: 1000000, accountId: cash);
+    final number = (await Books.query('SELECT number FROM sales WHERE id = ?', [id])).first['number'];
+    expect((await Books.query('SELECT opp_id FROM sale_items WHERE sale_id = ?', [id])).first['opp_id'], 'OPP-7');
+    await Books.updateSale(id, items: [ItemIn(b, 1, 500000)], customerId: c, paid: 500000, accountId: cash);
+    final pa = (await Books.query('SELECT stock FROM products WHERE id = ?', [a])).first;
+    final pb = (await Books.query('SELECT stock FROM products WHERE id = ?', [b])).first;
+    expect(asInt(pa['stock']), 3);
+    expect(asInt(pb['stock']), 2);
+    final s = (await Books.query('SELECT * FROM sales WHERE id = ?', [id])).first;
+    expect(s['number'], number);
+    expect(asInt(s['total']), 500000);
+    expect(await Books.partyBalance('customer', c), 0);
+    expect(await Books.balance(cash, 'asset'), 500000);
+    expect(asInt((await Books.query("SELECT COUNT(*) AS n FROM journal_entries WHERE source_type = 'sale' AND source_id = ?", [id])).first['n']), 1);
+    await expectBalanced();
+  });
+
+  test('edit purchase replaces stock; refuses when units are already sold', () async {
+    final sup = await Books.saveParty('supplier', {'name': 'Edit Supplier'});
+    final p = await Books.saveProduct({'name': 'Cable', 'gst_bp': 0, 'price': 30000});
+    final pid = await Books.createPurchase(items: [ItemIn(p, 10, 10000)], supplierId: sup);
+    await Books.createPurchase(items: [ItemIn(p, 4, 12000)], supplierId: sup, editId: pid);
+    expect(asInt((await Books.query('SELECT stock FROM products WHERE id = ?', [p])).first['stock']), 4);
+    expect(await Books.partyBalance('supplier', sup), 48000);
+    await Books.createSale(items: [ItemIn(p, 3, 30000)]);
+    expect(() => Books.createPurchase(items: [ItemIn(p, 1, 12000)], supplierId: sup, editId: pid), throwsA(isA<AccountingError>()));
+    await expectBalanced();
+  });
+
+  test('EMI: schedule, shop collections post receipts, plan closes when paid', () async {
+    expect(ymd(addMonths(DateTime(2026, 1, 31), 1)), '2026-02-28');
+    final c = await Books.saveParty('customer', {'name': 'EMI Buyer'});
+    final p = await Books.saveProduct({'name': 'Vivo Y28', 'gst_bp': 0, 'price': 1500000}, openingQty: 1, openingCost: 1200000);
+    final cash = asInt((await Books.moneyAccounts())[0]['id']);
+    final sale = await Books.createSale(items: [ItemIn(p, 1, 1500000, '861111222233334')], customerId: c, paid: 300000, accountId: cash);
+    final plan = await Books.createEmiPlan(
+        customerId: c, kind: 'shop', emi: 400000, months: 3, startDate: '2026-12-05', saleId: sale, price: 1500000, downPayment: 300000);
+    final inst = await Books.emiInstallments(plan);
+    expect(inst.map((r) => r['due_date']).toList(), ['2026-12-05', '2027-01-05', '2027-02-05']);
+    var row = (await Books.emiPlans()).single;
+    expect(row['next_due'], '2026-12-05');
+    expect(asInt(row['paid_n']), 0);
+    for (final r in inst) {
+      await Books.payEmi(asInt(r['id']), amount: 400000, accountId: cash);
+    }
+    row = (await Books.emiPlans()).single;
+    expect(row['status'], 'closed');
+    expect(asInt(row['paid_sum']), 1200000);
+    expect(await Books.partyBalance('customer', c), 0);
+    expect(() => Books.deleteEmiPlan(plan), throwsA(isA<AccountingError>()));
+    final f = await Books.createEmiPlan(customerId: c, kind: 'finance', financer: 'Bajaj Finserv', emi: 250000, months: 6, startDate: '2026-12-10');
+    final fi = (await Books.emiInstallments(f)).first;
+    await Books.payEmi(asInt(fi['id']), amount: 250000);
+    expect(await Books.partyBalance('customer', c), 0); // finance plans never touch the books
+    await expectBalanced();
+  });
+
+  test('IMEI history: purchase, sale, return and warranty', () async {
+    final sup = await Books.saveParty('supplier', {'name': 'IMEI Supplier'});
+    final c = await Books.saveParty('customer', {'name': 'IMEI Customer', 'phone': '9000000000'});
+    final p = await Books.saveProduct({'name': 'Redmi 13C', 'gst_bp': 0, 'price': 900000, 'warranty_months': 12});
+    await Books.createPurchase(items: [ItemIn(p, 1, 800000, '865432100001111')], supplierId: sup, billNo: 'B-77');
+    final sale = await Books.createSale(items: [ItemIn(p, 1, 900000, '865432100001111')], customerId: c, paid: 900000);
+    var r = (await Books.imeiLookup('00001111')).single;
+    expect(r.status, 'sold');
+    expect(r.purchase!['party'], 'IMEI Supplier');
+    expect(r.sale!['party'], 'IMEI Customer');
+    expect(r.warrantyMonths, 12);
+    expect(r.warrantyDaysLeft, greaterThan(300));
+    final line = (await Books.returnable(sale)).single;
+    await Books.createSaleReturn(saleId: sale, qty: {asInt(line.item['id']): 1}, refund: 900000, accountId: asInt((await Books.moneyAccounts())[0]['id']));
+    r = (await Books.imeiLookup('865432100001111')).single;
+    expect(r.status, 'returned');
+    expect(await Books.imeiLookup('99999999'), isEmpty);
+  });
+
+  test('delete sale, purchase, return and parties keeps the books right', () async {
+    final sup = await Books.saveParty('supplier', {'name': 'Del Supplier'});
+    final c = await Books.saveParty('customer', {'name': 'Del Customer'}, opening: 50000);
+    final p = await Books.saveProduct({'name': 'Del Phone', 'gst_bp': 0, 'price': 1000000});
+    final cash = asInt((await Books.moneyAccounts())[0]['id']);
+    final pur = await Books.createPurchase(items: [ItemIn(p, 3, 800000)], supplierId: sup, paid: 800000, accountId: cash);
+    final sale = await Books.createSale(items: [ItemIn(p, 1, 1000000)], customerId: c, paid: 400000, accountId: cash);
+    Future<int> st() async => asInt((await Books.query('SELECT stock FROM products WHERE id = ?', [p])).first['stock']);
+    expect(await st(), 2);
+    // party with bills cannot be deleted
+    expect(await Books.partyLinks('customer', c), isNotEmpty);
+    expect(() => Books.deleteParty('customer', c), throwsA(isA<AccountingError>()));
+    // a sale with a return must lose the return first
+    final line = (await Books.returnable(sale)).single;
+    final ret = await Books.createSaleReturn(saleId: sale, qty: {asInt(line.item['id']): 1}, refund: 900000, accountId: cash);
+    expect(await st(), 3);
+    expect(() => Books.deleteSale(sale), throwsA(isA<AccountingError>()));
+    await Books.deleteSaleReturn(ret);
+    expect(await st(), 2);
+    await Books.deleteSale(sale);
+    expect(await st(), 3);
+    expect(await Books.partyBalance('customer', c), 50000);
+    // purchase can be deleted once nothing from it is sold
+    await Books.deletePurchase(pur);
+    expect(await st(), 0);
+    expect(await Books.balance(cash, 'asset'), 0);
+    expect(await Books.partyBalance('supplier', sup), 0);
+    await Books.deleteParty('customer', c);
+    await Books.deleteParty('supplier', sup);
+    expect(await Books.query('SELECT * FROM customers WHERE id = ?', [c]), isEmpty);
+    await expectBalanced();
+  });
+
+  test('Autopilot: due reminders get firmer, follow-ups, reorder, cash close', () async {
+    final now = DateTime.now();
+    String ago(int d) => ymd(now.subtract(Duration(days: d)));
+    final sup = await Books.saveParty('supplier', {'name': 'Auto Supplier', 'phone': '9800000001'});
+    final c = await Books.saveParty('customer', {'name': 'Late Payer', 'phone': '9800000002'});
+    final cat = await Books.addCategory('Mobile');
+    final p = await Books.saveProduct({'name': 'Auto Phone', 'gst_bp': 0, 'price': 1000000, 'category_id': cat, 'low_stock': 0});
+    await Books.createPurchase(items: [ItemIn(p, 4, 800000)], supplierId: sup, date: ago(20));
+    final cash = asInt((await Books.moneyAccounts()).first['id']);
+    // 8 days ago, on credit
+    await Books.createSale(items: [ItemIn(p, 1, 1000000, 'AP-1')], customerId: c, paid: 0, accountId: cash, date: ago(8));
+    var tasks = await Autopilot.today();
+    final due = tasks.where((t) => t.kind == 'due').single;
+    expect(due.level, 2);
+    expect(due.amount, 1000000);
+    expect(due.message, contains('8 days'));
+    // the same reminder is not offered twice
+    await Autopilot.markSent(due.key);
+    expect((await Autopilot.today()).where((t) => t.kind == 'due'), isEmpty);
+    // a week-old phone sale → follow-up
+    expect(tasks.where((t) => t.kind == 'follow7').length, 1);
+
+    // fast seller with little stock → reorder from its supplier
+    for (var i = 0; i < 2; i++) {
+      await Books.createSale(items: [ItemIn(p, 1, 1000000)], paid: 1000000, accountId: cash, date: ago(2 + i));
+    }
+    final r = await Autopilot.reorder();
+    expect(r.single.product['id'], p);
+    expect(r.single.supplier, 'Auto Supplier');
+    expect(r.single.suggest, greaterThan(0));
+    expect(Autopilot.orderText({'business_name': 'GameX'}, 'Auto Supplier', r), contains('Auto Phone'));
+
+    // cash close
+    final expected = await Autopilot.expectedCash();
+    final close = await Autopilot.close(expected - 5000, note: 'short');
+    expect(close.diff, -5000);
+    expect((await Autopilot.closedToday())!.counted, expected - 5000);
+    await expectBalanced();
+  });
+
+  test('AI brain: margin guard, flags, customer score, forecast, ask', () async {
+    final now = DateTime.now();
+    String ago(int d) => ymd(now.subtract(Duration(days: d)));
+    final sup = await Books.saveParty('supplier', {'name': 'Brain Supplier'});
+    final good = await Books.saveParty('customer', {'name': 'Good Payer'});
+    final bad = await Books.saveParty('customer', {'name': 'Slow Payer'});
+    final cat = await Books.addCategory('Mobile');
+    final vivo = await Books.saveProduct({'name': 'Vivo Y28', 'brand': 'Vivo', 'gst_bp': 0, 'price': 1500000, 'category_id': cat});
+    final redmi = await Books.saveProduct({'name': 'Redmi 13C', 'brand': 'Xiaomi', 'gst_bp': 0, 'price': 900000, 'category_id': cat});
+    await Books.createPurchase(items: [ItemIn(vivo, 1, 1200000, 'BR-V1'), ItemIn(vivo, 1, 1200000, 'BR-V2'), ItemIn(redmi, 3, 800000)],
+        supplierId: sup, date: ago(40));
+    final cash = asInt((await Books.moneyAccounts()).first['id']);
+    final lm = DateTime(now.year, now.month - 1, 10);
+    await Books.createSale(items: [ItemIn(vivo, 1, 1500000, 'BR-V1')], customerId: good, paid: 1500000, accountId: cash, date: ymd(lm));
+    await Books.createSale(items: [ItemIn(redmi, 1, 700000)], customerId: bad, paid: 0, accountId: cash, date: ago(25)); // loss + due
+    await Books.createSale(items: [ItemIn(vivo, 1, 1500000, 'NEVER-BOUGHT-1')], customerId: good, paid: 1500000, accountId: cash, date: ago(1));
+
+    // margin guard
+    final p = (await Books.query('SELECT * FROM products WHERE id = ?', [redmi])).first;
+    expect(Brain.marginCheck([(p, 700000)]).single.loss, isTrue);
+    expect(Brain.marginCheck([(p, 1000000)]), isEmpty);
+
+    // flags: IMEI never bought, sale below cost
+    final f = await Brain.flags();
+    expect(f.any((x) => x.kind == 'imei_not_bought'), isTrue);
+    expect(f.any((x) => x.kind == 'below_cost'), isTrue);
+
+    // customer score: the slow payer scores lower
+    final sGood = await Brain.customerScore(good), sBad = await Brain.customerScore(bad);
+    expect(sGood.score, greaterThan(sBad.score));
+    expect(sBad.daysLate, 25);
+
+    // forecast has a number and brand trends
+    final fc = await Brain.forecast();
+    expect(fc.sales, greaterThanOrEqualTo(0));
+    expect(fc.brands.map((b) => b.brand), contains('Vivo'));
+
+    // ask
+    final a1 = await Brain.ask('gato mash-e Vivo-te koto labh?');
+    expect(a1.text, contains('Profit'));
+    expect(a1.text, contains('Vivo'));
+    expect(a1.text, contains(Money.rs(300000)));
+    final a2 = await Brain.ask('who owes me the most');
+    expect(a2.rows.first.$1, 'Slow Payer');
+    final a3 = await Brain.ask('stock of redmi');
+    expect(a3.text, startsWith('2 in stock'));
+    final a4 = await Brain.ask('kal koto bikri');
+    expect(a4.text, contains(Money.rs(1500000)));
+    await expectBalanced();
+  });
+
+  test('Mobile shop: repair job, exchange phone, finance payout, IMEI history', () async {
+    final cash = asInt((await Books.moneyAccounts()).first['id']);
+    // repair: ₹500 advance, delivered for ₹1,500, ₹1,000 paid at pickup
+    final cid = await Shop.customerFor('Repair Raju', '98300 11111');
+    expect(await Shop.customerFor('', '+91 9830011111'), cid); // same phone = same customer
+    final job = await Shop.createRepair(customerId: cid, device: 'Redmi Note 12', imei: '351234560000010', problem: 'Screen broken',
+        estimate: 150000, advance: 50000, accountId: cash);
+    await Shop.repairStatus(job, 'ready', charge: 150000, partsCost: 90000);
+    expect((await Shop.repairs(status: 'open')).single['status'], 'ready');
+    final left = await Shop.deliverRepair(job, charge: 150000, partsCost: 90000, paidNow: 100000, accountId: cash);
+    expect(left, 0);
+    expect((await Books.partyBalances('customer'))[cid] ?? 0, 0);
+    expect(await Books.balanceByCode(serviceIncomeCode), 150000);
+    expect(await Books.balance(cash, 'asset'), 150000);
+    await expectBalanced();
+
+    // exchange: buy a used iPhone for ₹20,000 → in stock as a used product
+    final ex = await Shop.buyUsed(sellerName: 'Old Phone Owner', sellerPhone: '9830022222', model: 'iPhone 11 64GB', brand: 'Apple',
+        imei: '351234560007775', price: 2000000, resale: 2400000, grade: 'A', battery: 86, accountId: cash);
+    final e = (await Shop.exchanges()).single;
+    expect(asInt(e['id']), ex);
+    expect(asInt(e['stock']), 1);
+    final p = (await Books.query('SELECT * FROM products WHERE id = ?', [e['product_id']])).single;
+    expect(p['condition'], 'used');
+    expect(asInt(p['price']), 2400000);
+    expect(await SmartImei.inStock(asInt(p['id'])), ['351234560007775']);
+    await expectBalanced();
+
+    // finance company sale: ₹30,000 phone, ₹5,000 down, ₹25,000 from Bajaj later
+    final c2 = await Books.saveParty('customer', {'name': 'Finance Buyer'});
+    final ph = await Books.saveProduct({'name': 'Samsung A35', 'gst_bp': 0, 'price': 3000000}, openingQty: 1, openingCost: 2500000);
+    final sale = await Books.createSale(items: [ItemIn(ph, 1, 3000000, '490154203237518', 'OPP-77')], customerId: c2, paid: 500000, accountId: cash);
+    final plan = await Books.createEmiPlan(customerId: c2, kind: 'finance', emi: 250000, months: 10, startDate: ymd(DateTime.now()),
+        saleId: sale, financer: 'Bajaj Finserv', imei: '490154203237518', price: 3000000, downPayment: 500000);
+    expect(asInt((await Shop.financePending()).single['expected']), 2500000);
+    await Shop.financeReceivedOn(plan, 2500000, accountId: cash);
+    expect(await Shop.financePending(), isEmpty);
+    expect((await Books.partyBalances('customer'))[c2] ?? 0, 0);
+    await expectBalanced();
+
+    // IMEI history: repair + sale + finance in one timeline
+    final h1 = await Shop.imeiHistory('351234560000010');
+    expect(h1.map((x) => x.kind), contains('repair'));
+    final h2 = await Shop.imeiHistory('490154203237518');
+    expect(h2.map((x) => x.kind), containsAll(['sold', 'emi']));
+    final h3 = await Shop.imeiHistory('351234560007775');
+    expect(h3.map((x) => x.kind), containsAll(['bought', 'exchange']));
+  });
+
+  test('Staff: PIN sign-in, permissions enforced by the books, actions logged by name', () async {
+    await Staff.load();
+    try {
+      await expectLater(Staff.setMode(true), throwsA(isA<AccountingError>())); // owner PIN first
+      await Staff.setOwnerPin('9999');
+      await Staff.setMode(true);
+      // the owner sets up stock and a supplier first
+      final p = await Books.saveProduct({'name': 'Staff Phone', 'gst_bp': 0, 'price': 100000}, openingQty: 5, openingCost: 80000);
+      final sup = await Books.saveParty('supplier', {'name': 'Staff Supplier'});
+      final c = await Books.saveParty('customer', {'name': 'Staff Customer'});
+      final cash = asInt((await Books.moneyAccounts()).first['id']);
+      final sales = await Staff.add('Rafiq', '1234', 'sales', Staff.roles['sales']!.$2);
+      await Staff.add('Mina', '5678', 'manager', Staff.roles['manager']!.$2);
+      await expectLater(Staff.add('Copy', '1234', 'sales', {}), throwsA(isA<AccountingError>())); // PIN taken
+      await expectLater(Staff.signIn('0000'), throwsA(isA<AccountingError>()));
+
+      // salesman: sells, collects, adds a customer while billing — nothing else
+      expect((await Staff.signIn('1234'))!.id, sales.id);
+      expect(Staff.can('profit'), isFalse);
+      expect(Staff.can('dashboard'), isFalse);
+      final sale = await Books.createSale(items: [ItemIn(p, 1, 100000)], paid: 100000, accountId: cash);
+      await Books.saveParty('customer', {'name': 'Walk-in Added By Salesman'});
+      await expectLater(Books.createSale(items: [ItemIn(p, 1, 100000)], paid: 90000, accountId: cash, discount: 10000), throwsA(isA<AccountingError>()));
+      await expectLater(Books.createSale(items: [ItemIn(p, 1, 100000)], customerId: c, paid: 0, accountId: cash), throwsA(isA<AccountingError>())); // no credit
+      expect(() => Books.deleteSale(sale), throwsA(isA<AccountingError>()));
+      expect(() => Books.createPurchase(items: [ItemIn(p, 1, 80000)], supplierId: sup), throwsA(isA<AccountingError>()));
+      await expectLater(Books.saveProduct({'name': 'Not allowed', 'gst_bp': 0, 'price': 1}), throwsA(isA<AccountingError>()));
+      expect(() => Books.saveParty('customer', {'name': 'Edit Try'}, id: c), throwsA(isA<AccountingError>()));
+      expect(() => Books.createPayment(kind: 'payment', partyId: sup, amount: 100, accountId: cash), throwsA(isA<AccountingError>()));
+      final log = await Books.activity(5);
+      expect(log.any((a) => a['staff'] == 'Rafiq'), isTrue);
+
+      // manager: discounts, credit and purchases, but no delete
+      await Staff.signIn('5678');
+      await Books.createSale(items: [ItemIn(p, 1, 100000)], paid: 90000, accountId: cash, discount: 10000);
+      await Books.createSale(items: [ItemIn(p, 1, 100000)], customerId: c, paid: 0, accountId: cash);
+      await Books.createPurchase(items: [ItemIn(p, 1, 80000)], supplierId: sup);
+      expect(() => Books.deleteSale(sale), throwsA(isA<AccountingError>()));
+
+      // owner: everything
+      expect(await Staff.signIn('9999'), isNull);
+      await Books.deleteSale(sale);
+      Staff.signOut();
+      expect(Staff.picking.value, isTrue);
+      await expectBalanced();
+    } finally {
+      Staff.current.value = null;
+      await Staff.setMode(false).catchError((_) {});
+    }
+    expect(Staff.picking.value, isFalse);
+  });
+
+  test('Staff limits: price floor, discount %, credit cap, own bills, hidden phones, hours, owner override', () async {
+    await Staff.load();
+    try {
+      await Staff.setOwnerPin('4321');
+      await Staff.setMode(true);
+      final p = await Books.saveProduct({'name': 'Limit Phone', 'gst_bp': 0, 'price': 100000}, openingQty: 10, openingCost: 80000);
+      final c = await Books.saveParty('customer', {'name': 'Limit Customer', 'phone': '9876543210'});
+      final cash = asInt((await Books.moneyAccounts()).first['id']);
+      await Staff.add('Joy', '2468', 'cashier', {...Staff.roles['cashier']!.$2}..removeAll({'see_phones', 'all_bills'}),
+          limits: const StaffLimits(maxDiscount: 5, maxCredit: 20000));
+      await Staff.add('Owl', '1357', 'cashier', Staff.roles['cashier']!.$2, limits: StaffLimits(fromHour: (DateTime.now().hour + 2) % 24, toHour: (DateTime.now().hour + 3) % 24));
+      await expectLater(Staff.signIn('1357'), throwsA(isA<AccountingError>())); // outside working hours
+
+      await Staff.signIn('2468');
+      // below the list price: needs 'price_edit'
+      await expectLater(Books.createSale(items: [ItemIn(p, 1, 90000)], paid: 90000, accountId: cash), throwsA(isA<AccountingError>()));
+      // 5% discount ok, 6% blocked
+      await Books.createSale(items: [ItemIn(p, 1, 100000)], paid: 95000, accountId: cash, discount: 5000);
+      await expectLater(Books.createSale(items: [ItemIn(p, 1, 100000)], paid: 94000, accountId: cash, discount: 6000), throwsA(isA<AccountingError>()));
+      // credit up to ₹200 on one bill
+      await Books.createSale(items: [ItemIn(p, 1, 100000)], customerId: c, paid: 80000, accountId: cash);
+      await expectLater(Books.createSale(items: [ItemIn(p, 1, 100000)], customerId: c, paid: 70000, accountId: cash), throwsA(isA<AccountingError>()));
+      // the owner's PIN allows it once
+      await expectLater(Staff.withOwner('0000', () => Books.createSale(items: [ItemIn(p, 1, 90000)], paid: 90000, accountId: cash)),
+          throwsA(isA<AccountingError>()));
+      await Staff.withOwner('4321', () => Books.createSale(items: [ItemIn(p, 1, 90000)], customerId: c, paid: 0, accountId: cash));
+      // phones hidden, only own bills
+      expect(Staff.phone('9876543210'), '98•••••210');
+      Staff.signOut();
+      expect(await Staff.signIn('4321'), isNull); // owner
+      await Books.createSale(items: [ItemIn(p, 1, 100000)], paid: 100000, accountId: cash);
+      expect((await Books.salesBook()).length, 4);
+      await Staff.signIn('2468');
+      expect((await Books.salesBook()).length, 3);
+      expect((await Staff.sales())['Joy']?.$1, 3);
+      // idle auto-lock
+      Staff.current.value!.lockMinutes = 1;
+      Staff.checkIdle();
+      expect(Staff.current.value, isNotNull);
+      await expectBalanced();
+    } finally {
+      Staff.current.value = null;
+      await Staff.setMode(false).catchError((_) {});
+    }
+  });
+
+  test('Review fixes: buy-back IMEI back in stock, links block delete, repair dues age', () async {
+    final cash = asInt((await Books.moneyAccounts()).first['id']);
+    final sup = await Books.saveParty('supplier', {'name': 'RF Supplier'});
+    final a = await Books.saveParty('customer', {'name': 'RF Buyer', 'phone': '9830033333'});
+    final p = await Books.saveProduct({'name': 'RF Phone', 'gst_bp': 0, 'price': 1000000});
+    await Books.createPurchase(items: [ItemIn(p, 1, 800000, '351234560000010')], supplierId: sup);
+    await Books.createSale(items: [ItemIn(p, 1, 1000000, '351234560000010')], customerId: a, paid: 1000000, accountId: cash);
+    expect(await SmartImei.inStock(p), isEmpty);
+    // the customer sells the same phone back (exchange)
+    await Shop.buyUsed(sellerName: 'RF Buyer', sellerPhone: '9830033333', model: 'RF Phone used', imei: '351234560000010', price: 600000, accountId: cash);
+    final used = asInt((await Shop.exchanges()).first['product_id']);
+    expect(await SmartImei.inStock(used), ['351234560000010']);
+    expect(await SmartImei.inStock(p), isEmpty);
+    expect((await SmartImei.match('351234560000010')).soldOn, isNull);
+
+    // a customer with only a repair job cannot be deleted (friendly message, no FK crash)
+    final r = await Shop.customerFor('RF Repair', '9830044444');
+    final job = await Shop.createRepair(customerId: r, device: 'Old phone', problem: 'Battery');
+    expect(await Books.partyLinks('customer', r), contains('1 repair job'));
+    await expectLater(Books.deleteParty('customer', r), throwsA(isA<AccountingError>()));
+
+    // a repair charge left due is aged from its delivery date
+    await Shop.deliverRepair(job, charge: 150000, date: ymd(DateTime.now().subtract(const Duration(days: 9))));
+    final t = (await Autopilot.today()).where((x) => x.kind == 'due' && x.customerId == r).single;
+    expect(t.level, 2);
+    await expectBalanced();
+  });
+
+  test('Live backup snapshot: VACUUM INTO copies the open books', () async {
+    final p = await Books.saveProduct({'name': 'Snapshot Phone', 'gst_bp': 0, 'price': 100000}, openingQty: 2, openingCost: 80000);
+    final dir = await Directory.systemTemp.createTemp('snap');
+    final path = '${dir.path}/copy.db';
+    final db = await AppDb.instance;
+    await db.execute('VACUUM INTO ?', [path]);
+    final copy = await databaseFactoryFfi.openDatabase(path, options: OpenDatabaseOptions(readOnly: true));
+    final r = await copy.rawQuery('SELECT name, stock FROM products WHERE id = ?', [p]);
+    expect(r.single['name'], 'Snapshot Phone');
+    expect(r.single['stock'], 2);
+    await copy.close();
+    await dir.delete(recursive: true);
+  });
+
+  test('Same name + same mobile is "already added"', () async {
+    final id = await Books.saveParty('customer', {'name': 'Rahim Sheikh', 'phone': '98300 55555'});
+    await expectLater(Books.saveParty('customer', {'name': '  rahim   sheikh ', 'phone': '+91 9830055555'}),
+        throwsA(isA<AccountingError>().having((e) => '$e', 'message', contains('already added'))));
+    // same name, other number / same number, other name: allowed
+    await Books.saveParty('customer', {'name': 'Rahim Sheikh', 'phone': '9830066666'});
+    await Books.saveParty('customer', {'name': 'Karim Sheikh', 'phone': '9830055555'});
+    // editing the customer itself is fine
+    await Books.saveParty('customer', {'name': 'Rahim Sheikh', 'phone': '9830055555'}, id: id);
+    expect(await Books.findDuplicateParty('customer', 'RAHIM SHEIKH', '09830055555'), isNotNull);
+    // suppliers are checked separately
+    await Books.saveParty('supplier', {'name': 'Rahim Sheikh', 'phone': '9830055555'});
+  });
+
+  test('Own AI: Bangla amounts, discount, several commands, follow-ups, learning, typos', () async {
+    await AiMemory.load(force: true);
+    await AiMemory.forget();
+    final phone = await Books.saveProduct({'name': 'Redmi Note 13 Pro', 'brand': 'Xiaomi', 'gst_bp': 0, 'price': 2500000}, openingQty: 5, openingCost: 2000000);
+    final charger = await Books.saveProduct({'name': 'Fast Charger 33W', 'gst_bp': 0, 'price': 50000}, openingQty: 20, openingCost: 20000);
+    final glass = await Books.saveProduct({'name': 'Tempered Glass', 'gst_bp': 0, 'price': 20000}, openingQty: 20, openingCost: 5000);
+    final rahim = await Books.saveParty('customer', {'name': 'Rahim Sheikh', 'phone': '9830011122'});
+    var products = await Books.query('SELECT * FROM products');
+    final customers = await Books.query('SELECT * FROM customers');
+
+    expect(AiCommands.spoken('dera lakh'), '1.5 lakh');
+    expect(VoiceBill.normalise(AiCommands.spoken('sare 18 hajar')), '18500');
+    expect(VoiceBill.normalise(AiCommands.spoken('arai hajar')), '2500');
+
+    // typo in the name, amount in words, discount, UPI
+    final b = AiCommands.parse('Rahim Sekh ke redmi note 13 pro sare 24 hajar, 500 discount upi', products, customers) as BillCommand;
+    expect(asInt(b.customer!['id']), rahim);
+    expect(asInt(b.lines.single.product['id']), phone);
+    expect(b.lines.single.rate, 2450000);
+    expect(b.discount, 50000);
+    expect(b.pay, 'upi');
+    expect(AiActions.total(b.lines) - AiActions.discountOf(b), 2400000);
+    expect(AiCommands.parse('charger 10% discount', products, customers) is BillCommand, isTrue);
+    expect((AiCommands.parse('charger 10% discount', products, customers) as BillCommand).discountPct, 1000);
+
+    // follow-ups change the same bill
+    var f = AiCommands.refine(b, 'aro duita charger 450 kore', products, customers)!;
+    expect(f.lines.length, 2);
+    expect(f.lines.last.qty, 2);
+    expect(f.lines.last.rate, 45000);
+    f = AiCommands.refine(f, 'dam 24000', products, customers)!;
+    expect(f.lines.last.rate, 2400000); // the last line's price changed
+    f = AiCommands.refine(f, 'charger bad dao', products, customers)!;
+    expect(f.lines.map((l) => asInt(l.product['id'])), [phone]);
+    f = AiCommands.refine(f, 'baki te', products, customers)!;
+    expect(f.pay, 'due');
+    f = AiCommands.refine(f, 'advance 10000', products, customers)!;
+    expect(f.paidNow, 1000000);
+    expect(AiCommands.refine(f, 'aj koto bikri?', products, customers), isNull);
+
+    // several things in one message
+    final many = AiCommands.parseAll('Rahim ke tempered glass ekta 200 cash\nRahim 5000 joma\ncha 120 khoroch', products, customers);
+    expect(many.length, 3);
+    expect(many[0], isA<BillCommand>());
+    expect(many[1], isA<ReceiptCommand>());
+    expect(many[2], isA<ExpenseCommand>());
+
+    // learning: the shop calls the glass "screen guard"
+    expect(AiCommands.parse('screen guard 250 cash', products, customers), isNull);
+    final sold = BillCommand([CmdLine(products.firstWhere((p) => asInt(p['id']) == glass), 1, 25000, 'screen guard')], pay: 'cash');
+    await AiActions.saveBill(sold, pay: 'cash');
+    await AiMemory.load(force: true);
+    products = await Books.query('SELECT * FROM products');
+    final learnt = AiCommands.parse('ekta screen guard 250 cash', products, customers) as BillCommand;
+    expect(asInt(learnt.lines.single.product['id']), glass);
+    expect(AiMemory.size, greaterThan(0));
+    expect(charger, isPositive);
+
+    // a discount is saved on the bill
+    final (sale, _, total, paid) = await AiActions.saveBill(b, pay: 'upi');
+    expect(total, 2400000);
+    expect(paid, 2400000);
+    expect(asInt((await Books.query('SELECT discount FROM sales WHERE id = ?', [sale])).first['discount']), 50000);
+    await AiMemory.forget();
+    await expectBalanced();
+  });
+
+  test('AI command: one sentence makes the customer and the bill', () async {
+    final sup = await Books.saveParty('supplier', {'name': 'AI Supplier'});
+    final p = await Books.saveProduct({'name': 'Vivo T3', 'brand': 'Vivo', 'gst_bp': 0, 'price': 1900000});
+    await Books.createPurchase(items: [ItemIn(p, 1, 1500000, 'AI-IMEI-1'), ItemIn(p, 1, 1500000, 'AI-IMEI-2')], supplierId: sup);
+    final cover = await Books.saveProduct({'name': 'Back Cover', 'gst_bp': 1800, 'price': 25000}, openingQty: 10, openingCost: 10000);
+    final products = await Books.query('SELECT * FROM products');
+    final customers = await Books.query('SELECT * FROM customers');
+
+    // new customer, phone with an IMEI, a cover with GST, 5000 advance, rest due
+    final cmd = AiCommands.parse('Karim Uddin 9830099999 ke Vivo T3 ekta 18 hajar ar back cover 295 advance 5000 baki', products, customers) as BillCommand;
+    expect(cmd.newName, 'Karim Uddin');
+    final (sale, number, total, paid) = await AiActions.saveBill(cmd, pay: 'due', paidNow: cmd.paidNow);
+    expect(number, startsWith('INV-'));
+    expect(total, 1800000 + 29500);
+    expect(paid, 500000);
+    final items = await Books.query('SELECT product_id, serial, rate FROM sale_items WHERE sale_id = ? ORDER BY id', [sale]);
+    expect(items.first['serial'], 'AI-IMEI-1');
+    expect(items.last['product_id'], cover);
+    expect(items.last['rate'], 25000); // 295 incl. 18% GST
+    final cid = asInt((await Books.query('SELECT customer_id FROM sales WHERE id = ?', [sale])).first['customer_id']);
+    expect((await Books.query('SELECT name, phone FROM customers WHERE id = ?', [cid])).first['name'], 'Karim Uddin');
+    expect((await Books.partyBalances('customer'))[cid], 1329500);
+
+    // the same customer again (by phone): no duplicate
+    final again = AiCommands.parse('9830099999 back cover 295 cash', products, await Books.query('SELECT * FROM customers')) as BillCommand;
+    expect(again.customer?['id'], cid);
+    await AiActions.saveBill(again, pay: 'cash');
+    expect((await Books.query("SELECT COUNT(*) AS c FROM customers WHERE name = 'Karim Uddin'")).first['c'], 1);
+    await expectBalanced();
+  });
+
+  test('AI brain: khata, low stock, price, bills, expense, briefing', () async {
+    final c = await Books.saveParty('customer', {'name': 'Rahim Sheikh', 'phone': '9830011111'});
+    final p = await Books.saveProduct({'name': 'Vivo T3', 'brand': 'Vivo', 'gst_bp': 1800, 'price': 1500000, 'low_stock': 2}, openingQty: 3, openingCost: 1200000);
+    final cash = asInt((await Books.moneyAccounts()).first['id']);
+    await Books.createSale(items: [ItemIn(p, 2, 1500000)], customerId: c, paid: 1000000, accountId: cash);
+
+    var a = await Brain.ask('Rahim er baki koto?');
+    expect(a.text, contains('Rahim Sheikh owes'));
+    expect(a.next.first, contains('joma'));
+    a = await Brain.ask('kon product kom ache?');
+    expect(a.rows.map((r) => r.$1), contains('Vivo T3'));
+    a = await Brain.ask('Vivo T3 er dam koto?');
+    expect(a.text, 'Vivo T3: ${Money.rs(1770000)}');
+    a = await Brain.ask('aj-er bill gulo');
+    expect(a.text, startsWith('1 bill'));
+    expect(a.next, isNotEmpty);
+
+    final products = await Books.query('SELECT * FROM products');
+    final x = AiCommands.parse('dokan vara 8000 khoroch', products, await Books.query('SELECT * FROM customers')) as ExpenseCommand;
+    expect(x.head, 'Rent');
+    expect(x.amount, 800000);
+    await AiActions.saveExpense(x);
+    expect('${(await Books.query("SELECT a.name FROM expenses e JOIN accounts a ON a.id = e.head_id")).single['name']}', contains('Rent')); // the existing 'Shop Rent' head
+    final t = AiCommands.parse('cha 150 khoroch upi', products, const []) as ExpenseCommand;
+    expect(t.head, 'Tea & snacks');
+    expect(t.pay, 'upi');
+
+    final b = await Brain.briefing();
+    expect(b.map((x) => x.label), containsAll(['Sales today', 'To collect', 'Low stock']));
+    await expectBalanced();
+  });
+
+  test('Product purchase cost is kept with no opening stock', () async {
+    final p = await Books.saveProduct({'name': 'Cost Keeper', 'gst_bp': 0, 'price': 150000}, openingCost: 100000);
+    var r = (await Books.query('SELECT stock, cost FROM products WHERE id = ?', [p])).first;
+    expect(asInt(r['stock']), 0);
+    expect(asInt(r['cost']), 100000);
+    // no stock yet: the cost can be corrected
+    await Books.saveProduct({'name': 'Cost Keeper', 'gst_bp': 0, 'price': 150000, 'cost': 110000}, id: p);
+    r = (await Books.query('SELECT cost FROM products WHERE id = ?', [p])).first;
+    expect(asInt(r['cost']), 110000);
+    await expectBalanced();
+  });
+
+  test('IMEIs saved at purchase are offered when selling', () async {
+    final sup = await Books.saveParty('supplier', {'name': 'IMEI Stock Supplier'});
+    final c = await Books.saveParty('customer', {'name': 'IMEI Stock Buyer'});
+    final p = await Books.saveProduct({'name': 'Stock Phone', 'gst_bp': 0, 'price': 1000000});
+    final cash = asInt((await Books.moneyAccounts()).first['id']);
+    await Books.createPurchase(
+        items: [ItemIn(p, 1, 800000, 'SN-A1'), ItemIn(p, 1, 800000, 'SN-B2'), ItemIn(p, 1, 800000, 'SN-C3')], supplierId: sup);
+    expect(await SmartImei.inStock(p), ['SN-A1', 'SN-B2', 'SN-C3']);
+    final sale = await Books.createSale(items: [ItemIn(p, 1, 1000000, 'SN-A1')], customerId: c, paid: 1000000, accountId: cash);
+    expect(await SmartImei.inStock(p), ['SN-B2', 'SN-C3']);
+    // returned phone is back in stock
+    final lines = await Books.returnable(sale);
+    await Books.createSaleReturn(saleId: sale, qty: {asInt(lines.single.item['id']): 1}, refund: 1000000, accountId: cash);
+    expect(await SmartImei.inStock(p), ['SN-A1', 'SN-B2', 'SN-C3']);
+    await expectBalanced();
+  });
+
+  test('Smart IMEI: model name shared with the community', () {
+    expect(SmartImei.modelName('Vivo Y28 8/128 Blue'), 'Vivo Y28');
+    expect(SmartImei.modelName('iPhone 15 Pro Max 256GB Natural Titanium'), 'iPhone 15 Pro Max');
+    expect(SmartImei.modelName('Samsung Galaxy A15 5G (6GB+128GB) Black'), 'Samsung Galaxy A15 5G');
+    expect(SmartImei.modelName('Redmi 13C 4/128'), 'Redmi 13C');
+    expect(SmartImei.modelName('Blue'), 'Blue');
+  });
+
+  test('Smart IMEI: a learned model fills brand, category, RAM and storage', () async {
+    await SmartImei.learn('351234560000010', name: 'Vivo T3 8/256 Blue', brand: 'Vivo');
+    final m = await SmartImei.match('351234560007775');
+    expect(m.product, isNull);
+    expect(m.suggestName, 'Vivo T3');
+    expect(m.suggestBrand, 'Vivo');
+    expect(m.suggestCategory, 'Mobile');
+    expect(m.suggestRam, '8GB');
+    expect(m.suggestStorage, '256GB');
+  });
+
+  test('Smart IMEI: check digit, model from TAC, duplicates', () async {
+    expect(SmartImei.luhn('490154203237518'), isTrue);
+    expect(SmartImei.luhn('490154203237519'), isFalse);
+    final sup = await Books.saveParty('supplier', {'name': 'TAC Supplier'});
+    final p = await Books.saveProduct({'name': 'Vivo Y28 8/128', 'gst_bp': 0, 'price': 1500000});
+    await Books.createPurchase(items: [ItemIn(p, 1, 1200000, '490154203237518')], supplierId: sup);
+    // exact device bought earlier
+    var m = await SmartImei.match('490154203237518');
+    expect(m.how, 'exact');
+    expect(asInt(m.product!['id']), p);
+    expect(m.warning(), isNull);
+    expect(m.warning(selling: false), contains('Already purchased'));
+    // another unit of the same model (same first 8 digits)
+    m = await SmartImei.match('490154209999991');
+    expect(m.how, 'tac');
+    expect(asInt(m.product!['id']), p);
+    // once sold, selling it again is flagged
+    await Books.createSale(items: [ItemIn(p, 1, 1500000, '490154203237518')]);
+    m = await SmartImei.match('490154203237518');
+    expect(m.warning(), contains('Already sold'));
+    // unknown model
+    m = await SmartImei.match('111111111111116');
+    expect(m.product, isNull);
+    // once picked by hand, the model is learned for the next unit
+    final p2 = await Books.saveProduct({'name': 'Redmi 13C 4/128', 'gst_bp': 0, 'price': 900000});
+    await SmartImei.learn('111111111111116', productId: p2, name: 'Redmi 13C 4/128', brand: 'Redmi');
+    m = await SmartImei.match('111111112222224');
+    expect(m.how, 'learned');
+    expect(asInt(m.product!['id']), p2);
+  });
+
+  test('Smart AI: promised dues, low stock and trend', () async {
+    final c = await Books.saveParty('customer', {'name': 'AI Customer', 'phone': '9876543210'});
+    final p = await Books.saveProduct({'name': 'AI Phone', 'gst_bp': 1800, 'price': 1000000, 'low_stock': 2});
+    final sup = await Books.saveParty('supplier', {'name': 'AI Supplier'});
+    await Books.createPurchase(items: [ItemIn(p, 3, 800000)], supplierId: sup);
+    await Books.createSale(items: [ItemIn(p, 2, 1000000)], customerId: c, paid: 0);
+    await Books.addDue('customer', c, 500000, ymd(DateTime.now()), 'Bill test');
+    final ai = await Insights.build();
+    final due = ai.firstWhere((i) => i.kind == 'due' && i.targetId == c);
+    expect(due.level, 'urgent');
+    expect(due.message, contains('AI Customer'));
+    expect(ai.any((i) => i.kind == 'stock'), isTrue);
+    expect(ai.first.rank, 0);
+  });
+
+  test('GST report: output, ITC, credit notes and B2B', () async {
+    final today = ymd(DateTime.now());
+    final before = await GstReport.load(today, today);
+    final b2b = await Books.saveParty('customer', {'name': 'GST Firm', 'gstin': '19ABCDE1234F1ZX'});
+    final p = await Books.saveProduct({'name': 'GST Laptop', 'gst_bp': 1800, 'price': 5000000, 'hsn': '8471'});
+    final sup = await Books.saveParty('supplier', {'name': 'GST Supplier', 'gstin': '19AAACG1234K1ZQ'});
+    await Books.createPurchase(items: [ItemIn(p, 2, 4000000)], supplierId: sup);
+    await Books.createSale(items: [ItemIn(p, 1, 5000000)], customerId: b2b, paid: 0);
+    final g = await GstReport.load(today, today);
+    expect(g.outTax - before.outTax, 900000);
+    expect(g.itc - before.itc, 1440000);
+    expect(g.b2b.any((b) => b['gstin'] == '19ABCDE1234F1ZX'), isTrue);
+    expect(g.hsn.keys.any((k) => k.startsWith('8471|')), isTrue);
+    expect(g.payable, g.netOutTax - g.itc);
+    expect(g.sheets().length, 8);
+  });
+
+  test('e-Invoice and e-Way bill: checks, government JSON, IRN and EWB saved', () async {
+    final old = await Books.settings();
+    await Books.setSetting('gstin', '19FGHIJ5678K1ZY');
+    await Books.setSetting('pin', '732201');
+    await Books.setSetting('address', 'Station Road, Malda');
+    try {
+      final buyer = await Books.saveParty('customer', {'name': 'Mumbai Retail', 'gstin': '27AABCU9603R1ZN', 'address': 'Andheri East, Mumbai 400069'});
+      final p = await Books.saveProduct({'name': 'EDoc Phone', 'gst_bp': 1800, 'price': 5000000, 'hsn': '8517'}, openingQty: 3, openingCost: 4000000);
+      final noHsn = await Books.saveProduct({'name': 'EDoc Cover', 'gst_bp': 1800, 'price': 50000}, openingQty: 3, openingCost: 20000);
+      final sale = await Books.createSale(items: [ItemIn(p, 1, 5000000)], customerId: buyer, discount: 118000, paid: 5782000);
+      final d = (await EDoc.load(sale))!;
+      expect(d.inter, isTrue);
+      expect(d.einvoiceProblems(), isEmpty);
+      final inv = (jsonDecode(d.einvoiceJson()) as List).first as Map;
+      final v = inv['ValDtls'] as Map;
+      expect(inv['BuyerDtls']['Pos'], '27');
+      expect(inv['BuyerDtls']['Pin'], 400069);
+      expect(v['TotInvVal'], 57820.0);
+      expect(((v['AssVal'] as num) + (v['IgstVal'] as num) + (v['RndOffAmt'] as num)).toStringAsFixed(2), '57820.00');
+      expect(v['CgstVal'], 0);
+      final t = Transport(distance: 450, vehicle: 'WB 12 AB 1234');
+      expect(d.ewayProblems(t), isEmpty);
+      expect(t.validDays, 3);
+      final ew = ((jsonDecode(d.ewayJson(t)) as Map)['billLists'] as List).first as Map;
+      expect(ew['vehicleNo'], 'WB12AB1234');
+      expect(ew['toStateCode'], 27);
+      expect(ew['mainHsnCode'], 8517);
+      expect(d.ewayNeeded, isTrue);
+      // a walk-in bill without HSN can't be an e-invoice
+      final walk = await Books.createSale(items: [ItemIn(noHsn, 1, 50000)], paid: 59000);
+      final w = (await EDoc.load(walk))!;
+      expect(w.einvoiceProblems().any((x) => x.contains('GSTIN')), isTrue);
+      expect(w.einvoiceProblems().any((x) => x.contains('HSN')), isTrue);
+      await expectLater(EDocs.saveIrn(sale, irn: 'short'), throwsA(isA<AccountingError>()));
+      await EDocs.saveIrn(sale, irn: 'a' * 64, ackNo: '112010012345678', ackDate: '20/11/2026');
+      await expectLater(EDocs.saveEwb(sale, number: '123'), throwsA(isA<AccountingError>()));
+      await EDocs.saveEwb(sale, number: '3410 1234 5678', date: '20/11/2026', validUpto: '23/11/2026');
+      final row = (await Books.query('SELECT irn, ack_no, ewb_no FROM sales WHERE id = ?', [sale])).first;
+      expect(row['irn'], 'a' * 64);
+      expect(row['ewb_no'], '341012345678');
+      expect((await InvoiceData.load(sale))!.sale['irn'], 'a' * 64); // printed with the QR on the bill
+    } finally {
+      for (final k in ['gstin', 'pin', 'address']) {
+        await Books.setSetting(k, old[k] ?? '');
+      }
+    }
+  });
+
+  test('Exchange pro: seller as customer, phone details, checks, new phone bill linked, sellers list', () async {
+    final cash = asInt((await Books.moneyAccounts()).first['id']);
+    final seller = await Books.saveParty('customer', {'name': 'Exchange Seller', 'phone': '9830044444', 'aadhaar': '123412341234'});
+    final newPhone = await Books.saveProduct({'name': 'New Vivo X', 'gst_bp': 0, 'price': 3000000}, openingQty: 2, openingCost: 2500000);
+    final ex = await Shop.buyUsed(
+        customerId: seller,
+        model: 'Galaxy S21',
+        brand: 'Samsung',
+        imei: '356789012345671',
+        price: 1500000,
+        grade: 'A',
+        battery: 88,
+        storage: '8/128',
+        color: 'Phantom Grey',
+        checks: ['Screen OK', 'Camera OK'],
+        accessories: 'Box, Charger',
+        accountId: cash);
+    await expectLater(Shop.buyUsed(customerId: seller, model: 'Galaxy S21', imei: '356789012345671', price: 100000, accountId: cash),
+        throwsA(isA<AccountingError>())); // same IMEI already in used stock
+    final sale = await Books.createSale(items: [ItemIn(newPhone, 1, 3000000)], customerId: seller, paid: 3000000, accountId: cash);
+    await Shop.linkExchangeSale(ex, sale);
+    final e = (await Shop.exchange(ex))!;
+    expect(e['customer'], 'Exchange Seller');
+    expect(e['storage'], '8/128');
+    expect(e['color'], 'Phantom Grey');
+    expect(e['checks'], 'Screen OK,Camera OK');
+    expect(e['new_phone'], 'New Vivo X');
+    expect(asInt(e['new_total']), 3000000);
+    expect(asInt(e['stock']), 1);
+    final used = (await Books.query('SELECT * FROM products WHERE id = ?', [e['product_id']])).first;
+    expect(used['variant'], '8/128 · Phantom Grey');
+    expect(used['condition'], 'used');
+    final sellers = await Shop.sellers();
+    expect(sellers.any((c) => asInt(c['id']) == seller && asInt(c['phones']) == 1 && asInt(c['paid']) == 1500000), isTrue);
+    expect((await Shop.exchanges()).first['new_bill'], isNotNull);
+    await expectLater(Shop.buyUsed(model: 'X', price: 100, accountId: cash), throwsA(isA<AccountingError>())); // no seller
+    await expectBalanced();
+  });
+
+  test('GST pro: discount lowers GST, IGST for other states, GSTIN check, set-off, portal JSON', () async {
+    expect(Gst.check('27AAPFU0939F1ZV'), isNull); // a real-format GSTIN
+    expect(Gst.check('27AAPFU0939F1ZA'), contains('check digit'));
+    expect(Gst.check('19ABC'), contains('15'));
+    final settings = await Books.settings();
+    await Books.setSetting('gstin', '19FGHIJ5678K1ZY'); // the shop is in West Bengal
+    try {
+      final s = await Books.settings();
+      expect(Gst.shopState(s), '19');
+      expect(Gst.interState(s, '27AABCU9603R1ZN'), isTrue);
+      expect(Gst.interState(s, '19ABCDE1234F1ZX'), isFalse);
+      expect(Gst.interState(s, null), isFalse);
+
+      final today = ymd(DateTime.now());
+      final before = await GstReport.load(today, today);
+      final p = await Books.saveProduct({'name': 'GST Pro Phone', 'gst_bp': 1800, 'price': 1000000, 'hsn': '8517'}, openingQty: 5, openingCost: 800000);
+      // ₹1,180 off a ₹11,800 bill: GST is charged on ₹9,000 → ₹1,620
+      final local = await Books.createSale(items: [ItemIn(p, 1, 1000000)], discount: 118000, paid: 1062000);
+      final sale = (await Books.query('SELECT * FROM sales WHERE id = ?', [local])).first;
+      expect(asInt(sale['total']), 1062000);
+      expect(asInt(sale['tax']), 162000);
+      expect(asInt(sale['discount']), 100000); // before GST
+      // a customer in Maharashtra: IGST
+      final mh = await Books.saveParty('customer', {'name': 'Mumbai Traders', 'gstin': '27AABCU9603R1ZN'});
+      await Books.createSale(items: [ItemIn(p, 1, 1000000)], customerId: mh, paid: 1180000);
+      final g = await GstReport.load(today, today);
+      final (i, c, sg) = g.outHeads;
+      final (i0, c0, s0) = before.outHeads;
+      expect(i - i0, 180000);
+      expect((c - c0) + (sg - s0), 162000);
+      expect(g.b2bDocs.any((d) => d.pos == '27' && d.igst == 180000), isTrue);
+      expect(g.hsn.values.any((h) => h.hsn == '8517' && h.b2b), isTrue);
+      // ITC set-off never pays more than the output tax
+      final so = g.setOff;
+      expect(so.cash.$1 + so.cash.$2 + so.cash.$3, lessThanOrEqualTo(g.netOutTax.clamp(0, 1 << 40)));
+      final j = jsonDecode(g.gstr1Json()) as Map;
+      expect(j['gstin'], '19FGHIJ5678K1ZY');
+      expect((j['b2b'] as List).any((x) => x['ctin'] == '27AABCU9603R1ZN'), isTrue);
+      expect(j['hsn'], isA<Map>());
+      await expectBalanced();
+    } finally {
+      await Books.setSetting('gstin', settings['gstin'] ?? '');
+    }
+  });
+
+  test('xlsx writer makes a valid zip with sheets', () {
+    final s = Sheet('Test <&>', ['A', 'B'])
+      ..add(['x & y', const Money2(12345)])
+      ..add(['TOTAL', 7], bold: true);
+    final bytes = Xlsx.build([s, Sheet('Two', ['C'])]);
+    expect(bytes[0], 0x50); // PK
+    expect(Xlsx.col(0), 'A');
+    expect(Xlsx.col(25), 'Z');
+    expect(Xlsx.col(26), 'AA');
+  });
+
+  test('Daily AI report: sales, profit, tomorrow and reorder', () async {
+    final before = await DailyReport.load();
+    final c = await Books.saveParty('customer', {'name': 'Report Customer'});
+    final p = await Books.saveProduct({'name': 'Report Phone', 'gst_bp': 0, 'price': 1000000, 'low_stock': 1});
+    final sup = await Books.saveParty('supplier', {'name': 'Report Supplier'});
+    await Books.createPurchase(items: [ItemIn(p, 2, 700000)], supplierId: sup);
+    await Books.createSale(items: [ItemIn(p, 1, 1000000)], customerId: c, paid: 0);
+    await Books.addDue('customer', c, 1000000, ymd(DateTime.now().add(const Duration(days: 1))), null);
+    final r = await DailyReport.load();
+    expect(r.sales - before.sales, 1000000);
+    expect(r.profit - before.profit, 300000);
+    expect(r.newDue - before.newDue, 1000000);
+    expect(r.tomorrow.any((x) => x['name'] == 'Report Customer'), isTrue);
+    expect(r.reorder.any((x) => x['name'] == 'Report Phone'), isTrue);
+    expect(r.text('GameX'), contains('Report Customer'));
+    expect(r.headline(), contains('Sales'));
+  });
+
+  test('Loans: EMI maths, receive, repay with interest, close, delete', () async {
+    // 1,00,000 at 12% for 12 months (reducing) → 8,885 EMI
+    expect(Loans.emi(10000000, 1200, 12, 'reducing'), 888488);
+    expect(Loans.emi(1200000, 0, 12, 'none'), 100000);
+    expect(Loans.emi(10000000, 1200, 12, 'flat'), 933333);
+    final cash = asInt((await Books.moneyAccounts()).first['id']);
+    final before = await Books.balance(cash, 'asset');
+    final id = await Loans.create(kind: 'loan', source: 'bank', lender: 'Test Bank', principal: 10000000, accountId: cash, rateBp: 1200, months: 12);
+    expect(await Books.balance(cash, 'asset') - before, 10000000);
+    var l = (await Loans.get(id))!;
+    final s = Loans.schedule(l);
+    expect(s.length, 12);
+    expect(s.last.balance, 0);
+    expect(s.fold<int>(0, (a, r) => a + r.principal), 10000000);
+    final (pr, it) = Loans.suggest(l);
+    expect(it, 100000); // 1% of 1,00,000 for the first month
+    expect(pr + it, 888488);
+    await Loans.pay(id, principal: pr, interest: it, accountId: cash);
+    l = (await Loans.get(id))!;
+    expect(asInt(l['outstanding']), 10000000 - pr);
+    expect(asInt(l['paid_n']), 1);
+    expect(await Books.balanceByCode('6100'), greaterThanOrEqualTo(it));
+    await expectBalanced();
+    await Loans.pay(id, principal: asInt(l['outstanding']), accountId: cash);
+    expect((await Loans.get(id))!['status'], 'closed');
+    final inv = await Loans.create(kind: 'investment', source: 'owner', lender: 'Owner', principal: 5000000, accountId: cash);
+    expect(await Books.balanceByCode('3000'), greaterThanOrEqualTo(5000000));
+    await Loans.delete(inv);
+    await Loans.delete(id);
+    expect(await Books.balance(cash, 'asset'), before);
+    await expectBalanced();
+  });
+
+  test('Analytics: totals, buckets, comparison and AI lines', () async {
+    for (final p in ['today', 'week', 'month', 'year']) {
+      final a = await ProAnalytics.load(p);
+      expect(a.buckets, isNotEmpty);
+      expect(a.buckets.fold<int>(0, (s, b) => s + b.sales), a.sales);
+      expect(a.ai, isNotEmpty);
+    }
+    final w = await ProAnalytics.load('week');
+    expect(w.buckets.length, 7);
+    final t = await ProAnalytics.load('today');
+    expect(t.buckets.length, 8);
+    final c = await ProAnalytics.load('custom', from: '2025-01-01', to: '2025-12-31');
+    expect(c.buckets.length, 12);
+  });
+
+  test('Plans: 30% / 65% / 100% of features, limits and expiry', () async {
+    expect(featurePercent(1), 30);
+    expect(featurePercent(2), 65);
+    expect(featurePercent(3), 100);
+    expect(planById('basic')!.amount(12), 1999);
+    expect(planById('gold')!.amount(12), 6999);
+    expect(planById('premium')!.amount(12), 9999);
+    expect(planById('premium')!.yearSavingPct, 17);
+    expect(planById('gold')!.amount(3), 1797);
+    expect(planById('basic')!.amount(15), 1999 + 3 * 199);
+    expect(planById('basic')!.yearSavingPct, 16);
+    Books.guard = Sub.guard;
+    try {
+      Sub.plan = 'basic';
+      Sub.until = DateTime.now().add(const Duration(days: 10));
+      expect(Sub.can('sales'), isTrue);
+      expect(Sub.can('gst'), isFalse);
+      expect(Sub.can('smart_ai'), isFalse);
+      Object? err;
+      for (var i = 0; i < 70 && err == null; i++) {
+        try {
+          await Books.saveProduct({'name': 'Limit test $i', 'gst_bp': 0, 'price': 100});
+        } catch (e) {
+          err = e;
+        }
+      }
+      expect(err, isA<PlanLimitError>());
+      Sub.plan = 'gold';
+      expect(Sub.can('gst'), isTrue);
+      expect(Sub.can('analytics'), isFalse);
+      await Books.saveProduct({'name': 'Gold product', 'gst_bp': 0, 'price': 100});
+      Sub.plan = 'premium';
+      expect(Sub.can('analytics'), isTrue);
+      Sub.until = DateTime.now().subtract(const Duration(days: 1));
+      expect(Sub.active, isFalse);
+      expect(() => Books.saveProduct({'name': 'Expired', 'gst_bp': 0, 'price': 100}), throwsA(isA<PlanLimitError>()));
+    } finally {
+      Books.guard = null;
+      Sub.plan = 'trial';
+      Sub.until = null;
+    }
+  });
+
+  test('Stores: the cloud list adds missing stores, deleted ones stay deleted', () async {
+    Stores.all
+      ..clear()
+      ..add(Store('main', 'Main', 'hisab.db', ''));
+    Stores.deleted.clear();
+    await Stores.mergeCloud(jsonEncode({
+      'stores': [
+        {'id': 'main', 'name': 'Main', 'file': 'hisab.db'},
+        {'id': 'b2', 'name': 'Branch 2', 'file': 'store_b2.db'},
+        {'id': 'b3', 'name': 'Branch 3', 'file': 'store_b3.db'},
+      ],
+      'deleted': ['old'],
+    }));
+    expect(Stores.all.map((s) => s.id).toList(), ['main', 'b2', 'b3']);
+    expect(jsonDecode(Stores.cloudJson())['stores'], hasLength(3));
+    await Stores.mergeCloud(jsonEncode({
+      'stores': [
+        {'id': 'old', 'name': 'Old', 'file': 'store_old.db'},
+      ],
+      'deleted': ['b3'],
+    }));
+    expect(Stores.all.map((s) => s.id).toList(), ['main', 'b2']);
+    Stores.all.clear();
+    Stores.deleted.clear();
+  });
+
+  test('demo data loads and balances', () async {
+    await Books.loadDemo();
+    await expectBalanced();
+    final d = await Books.dashboard();
+    expect(d.months.length, 6);
+  });
+}

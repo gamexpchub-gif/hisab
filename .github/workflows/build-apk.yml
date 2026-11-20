@@ -1,0 +1,74 @@
+name: Build APK
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Prepare Android project (name, icons, camera permission)
+        run: bash tool/setup_android.sh
+
+      - run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Test (accounting engine + widgets)
+        run: flutter test
+
+      - name: Render app screenshots
+        if: github.event_name == 'push'
+        continue-on-error: true
+        run: |
+          curl -sSfLo /tmp/Roboto.ttf "https://raw.githubusercontent.com/google/fonts/main/ofl/roboto/Roboto%5Bwdth,wght%5D.ttf" || true
+          ROBOTO_TTF=/tmp/Roboto.ttf flutter test test_screens/ || echo 'some screenshots failed'
+          sudo apt-get install -y -qq poppler-utils >/dev/null || true
+          for f in screenshots/*.pdf; do [ -f "$f" ] && pdftoppm -png -r 150 -singlefile "$f" "${f%.pdf}"; done
+          rm -f screenshots/*.pdf
+
+      - name: Commit screenshots
+        if: github.event_name == 'push'
+        continue-on-error: true
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add screenshots/*.png
+          git diff --cached --quiet || (git commit -m "Update app screenshots [skip ci]" && git push)
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Rename APK
+        run: cp build/app/outputs/flutter-apk/app-release.apk GameX-Hisab.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GameX-Hisab-apk
+          path: GameX-Hisab.apk
+
+      - name: Publish download on the Releases page
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: GameX Hisab build ${{ github.run_number }}
+          files: GameX-Hisab.apk
