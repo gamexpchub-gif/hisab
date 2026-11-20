@@ -11,9 +11,9 @@ import '../core/imei_smart.dart';
 /// - The camera fills the whole screen; the scan frame sits in the middle.
 /// - HD camera stream so the thin, dense IMEI barcodes on boxes are read.
 /// - Pinch or slide to zoom, tap to focus, torch, front/back camera.
-/// - A box usually has several barcodes (IMEI 1, IMEI 2, EAN): when more
-///   than one is seen, each is listed with its type so the right one is
-///   picked; a single code is taken at once.
+/// - A box usually has several barcodes (IMEI 1, IMEI 2, EAN): IMEI 1 is
+///   taken by itself (a valid IMEI, the top one on the label); in batch mode
+///   the box's other codes are then ignored, so one box = one item.
 class BarcodeScannerScreen extends StatefulWidget {
   final String title;
 
@@ -24,11 +24,8 @@ class BarcodeScannerScreen extends StatefulWidget {
   const BarcodeScannerScreen({super.key, this.title = 'Scan barcode', this.onCode});
 
   /// Keeps scanning until Done; returns how many codes were used.
-  static Future<int> scanMany(BuildContext context,
-          {String title = 'Batch scan', required Future<String?> Function(String code) onCode}) async =>
-      await Navigator.of(context)
-          .push<int>(MaterialPageRoute(builder: (_) => BarcodeScannerScreen(title: title, onCode: onCode))) ??
-      0;
+  static Future<int> scanMany(BuildContext context, {String title = 'Batch scan', required Future<String?> Function(String code) onCode}) async =>
+      await Navigator.of(context).push<int>(MaterialPageRoute(builder: (_) => BarcodeScannerScreen(title: title, onCode: onCode))) ?? 0;
 
   static Future<String?> scan(BuildContext context, {String title = 'Scan barcode'}) =>
       Navigator.of(context).push<String>(MaterialPageRoute(builder: (_) => BarcodeScannerScreen(title: title)));
@@ -44,8 +41,7 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> with Single
     cameraResolution: const Size(1920, 1080),
     autoZoom: true,
   );
-  late final AnimationController laser = AnimationController(vsync: this, duration: const Duration(milliseconds: 1600))
-    ..repeat(reverse: true);
+  late final AnimationController laser = AnimationController(vsync: this, duration: const Duration(milliseconds: 1600))..repeat(reverse: true);
   bool torch = false;
   bool done = false;
   double zoom = 0;
@@ -53,6 +49,8 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> with Single
 
   /// Codes seen recently: value → (format, last seen).
   final seen = <String, (BarcodeFormat, DateTime)>{};
+  final tops = <String, double>{}; // where each code is on the label (smaller = higher)
+  final siblings = <String>{}; // other codes on boxes already added (batch)
   Timer? settle;
 
   // batch mode
@@ -107,6 +105,8 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> with Single
     }
     busy = true;
     beep();
+    // the box's other codes (IMEI 2, EAN) are not new items
+    siblings.addAll(seen.keys.where((k) => k != code));
     String? msg;
     try {
       msg = await widget.onCode!(code);
@@ -116,6 +116,7 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> with Single
     if (!mounted) return;
     recent[code] = DateTime.now();
     seen.clear();
+    tops.clear();
     setState(() {
       busy = false;
       if (msg != null) count++;
@@ -132,9 +133,10 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> with Single
     for (final b in capture.barcodes) {
       final v = (b.rawValue ?? '').trim();
       if (v.isEmpty) continue;
-      if (batch && (busy || (recent[v] != null && now.difference(recent[v]!).inMilliseconds < 2500))) continue;
+      if (batch && (busy || siblings.contains(v) || (recent[v] != null && now.difference(recent[v]!).inMilliseconds < 2500))) continue;
       if (!seen.containsKey(v)) added = true;
       seen[v] = (b.format, now);
+      if (b.corners.isNotEmpty) tops[v] = b.corners.map((c) => c.dy).reduce((a, c) => a < c ? a : c);
     }
     if (!added) return;
     HapticFeedback.selectionClick();
@@ -142,13 +144,30 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> with Single
     settle?.cancel();
     settle = Timer(const Duration(milliseconds: 650), () {
       if (!mounted || done) return;
-      if (seen.length == 1) {
-        _finish(seen.keys.first);
-      } else {
-        setState(() {});
-      }
+      // one code, or several on a box: take the best one (IMEI 1) at once
+      if (seen.isNotEmpty) _finish(_best());
     });
     setState(() {});
+  }
+
+  /// The code to use when a box shows several: a valid IMEI first (the top
+  /// one on the label = IMEI 1), then a box barcode, then a serial.
+  String _best() {
+    int rank(String v, BarcodeFormat f) {
+      final c = SmartImei.clean(v);
+      if (SmartImei.looksLikeImei(c)) return SmartImei.luhn(c) ? 0 : 1;
+      if (f == BarcodeFormat.ean13 || f == BarcodeFormat.ean8 || f == BarcodeFormat.upcA || f == BarcodeFormat.upcE) return 2;
+      if (RegExp(r'^[A-Z0-9]{8,14}$').hasMatch(v)) return 3;
+      return 4;
+    }
+
+    final all = seen.entries.toList()
+      ..sort((a, b) {
+        final r = rank(a.key, a.value.$1) - rank(b.key, b.value.$1);
+        if (r != 0) return r;
+        return (tops[a.key] ?? 0).compareTo(tops[b.key] ?? 0);
+      });
+    return all.first.key;
   }
 
   String _kind(String v, BarcodeFormat f) {
@@ -238,8 +257,7 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> with Single
                           const Color(0x007B5CFF),
                         ]),
                         boxShadow: [
-                          BoxShadow(
-                              color: seen.isNotEmpty ? const Color(0xCC34D399) : const Color(0xCC7B5CFF), blurRadius: 12, spreadRadius: 1),
+                          BoxShadow(color: seen.isNotEmpty ? const Color(0xCC34D399) : const Color(0xCC7B5CFF), blurRadius: 12, spreadRadius: 1),
                         ],
                       ),
                     ),
@@ -254,8 +272,7 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> with Single
                 child: Container(
                   padding: EdgeInsets.fromLTRB(14, mq.padding.top + 10, 14, 14),
                   decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                        begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xAA000000), Color(0x00000000)]),
+                    gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xAA000000), Color(0x00000000)]),
                   ),
                   child: Row(children: [
                     _glassBtn(Icons.arrow_back_rounded, _back),
@@ -285,12 +302,12 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> with Single
                     busy
                         ? 'Adding…'
                         : seen.isEmpty
-                        ? (batch
-                            ? 'Batch mode · scan items one after another'
-                            : 'Hold the barcode or IMEI label inside the frame · tap to focus · pinch to zoom')
-                        : codes.length > 1
-                            ? '${codes.length} codes found — tap the one you need'
-                            : 'Reading…',
+                            ? (batch
+                                ? 'Batch mode · scan items one after another'
+                                : 'Hold the barcode or IMEI label inside the frame · tap to focus · pinch to zoom')
+                            : codes.length > 1
+                                ? '${codes.length} codes found — tap the one you need'
+                                : 'Reading…',
                     textAlign: TextAlign.center,
                     style: const TextStyle(fontFamily: 'Jakarta', color: Color(0xEEFFFFFF), fontSize: 13, fontWeight: FontWeight.w600),
                   ),
@@ -350,8 +367,8 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> with Single
                                   style: const TextStyle(fontFamily: 'Jakarta', color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800)),
                             ),
                             title: Text(e.key,
-                                style: const TextStyle(
-                                    fontFamily: 'Jakarta', color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: .5)),
+                                style:
+                                    const TextStyle(fontFamily: 'Jakarta', color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: .5)),
                             trailing: const Icon(Icons.check_circle_rounded, color: Colors.white),
                             onTap: () => _finish(e.key),
                           ),
@@ -402,8 +419,7 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> with Single
                       child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                         Icon(Icons.keyboard_rounded, color: Colors.white),
                         SizedBox(width: 10),
-                        Text('Type code instead',
-                            style: TextStyle(fontFamily: 'Jakarta', color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700)),
+                        Text('Type code instead', style: TextStyle(fontFamily: 'Jakarta', color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700)),
                       ]),
                     ),
                   ),

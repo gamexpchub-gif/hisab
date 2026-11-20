@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -162,8 +163,7 @@ class Orb extends StatelessWidget {
         gradient: RadialGradient(center: const Alignment(-0.3, -0.4), colors: bg),
       ),
       child: ShaderMask(
-        shaderCallback: (r) =>
-            LinearGradient(colors: colors, begin: Alignment.topCenter, end: Alignment.bottomCenter).createShader(r),
+        shaderCallback: (r) => LinearGradient(colors: colors, begin: Alignment.topCenter, end: Alignment.bottomCenter).createShader(r),
         child: Icon(icon, color: Colors.white, size: size * 0.56, shadows: const [
           Shadow(color: Color(0x33000000), blurRadius: 4, offset: Offset(0, 3)),
         ]),
@@ -204,10 +204,7 @@ class ActionTile extends StatelessWidget {
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         Orb(icon: icon, colors: palette.icon, bg: palette.bg),
         const SizedBox(height: 9),
-        Text(label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w500, color: C.ink)),
+        Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w500, color: C.ink)),
       ]),
     );
   }
@@ -306,8 +303,7 @@ class RoundIcon extends StatelessWidget {
               border: Border.all(color: Colors.white, width: 2),
             ),
             alignment: Alignment.center,
-            child: Text(badge > 99 ? '99+' : '$badge',
-                style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
+            child: Text(badge > 99 ? '99+' : '$badge', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
           ),
         ),
     ]);
@@ -414,20 +410,15 @@ class ListRow extends StatelessWidget {
           const SizedBox(width: 12),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
+              Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
               if (subtitle != null && subtitle!.isNotEmpty)
-                Text(subtitle!,
-                    maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: C.muted, fontSize: 12.5)),
+                Text(subtitle!, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: C.muted, fontSize: 12.5)),
             ]),
           ),
           if (trailing != null)
             Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
               Text(trailing!, style: TextStyle(fontWeight: FontWeight.w700, color: trailingColor ?? C.ink)),
-              if (trailingSub != null)
-                Text(trailingSub!, style: TextStyle(fontSize: 12, color: trailingSubColor ?? C.muted)),
+              if (trailingSub != null) Text(trailingSub!, style: TextStyle(fontSize: 12, color: trailingSubColor ?? C.muted)),
             ]),
         ]),
       ),
@@ -449,9 +440,7 @@ class Avatar extends StatelessWidget {
       height: 42,
       decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(14)),
       alignment: Alignment.center,
-      child: icon != null
-          ? Icon(icon, color: fg, size: 22)
-          : Text(text, style: TextStyle(color: fg, fontWeight: FontWeight.w700, fontSize: 15)),
+      child: icon != null ? Icon(icon, color: fg, size: 22) : Text(text, style: TextStyle(color: fg, fontWeight: FontWeight.w700, fontSize: 15)),
     );
   }
 }
@@ -511,8 +500,7 @@ class Kpi extends StatelessWidget {
         FittedBox(
           fit: BoxFit.scaleDown,
           alignment: Alignment.centerLeft,
-          child: Text(Money.rs(value),
-              style: TextStyle(fontSize: 21, fontWeight: FontWeight.w700, color: accent ? Colors.white : (color ?? C.ink))),
+          child: Text(Money.rs(value), style: TextStyle(fontSize: 21, fontWeight: FontWeight.w700, color: accent ? Colors.white : (color ?? C.ink))),
         ),
       ]),
     );
@@ -581,6 +569,8 @@ void Function(BuildContext context)? showPlans;
 
 void toast(BuildContext context, String msg, {bool error = false}) {
   final plan = error && showPlans != null && RegExp(r'plan|upgrade|renew|trial', caseSensitive: false).hasMatch(msg);
+  // errors show at the top of the screen, where they are seen at once
+  if (error && _topError(context, msg, plan: plan)) return;
   ScaffoldMessenger.of(context).showSnackBar(SnackBar(
     content: Text(msg),
     backgroundColor: error ? C.red : C.green,
@@ -589,8 +579,112 @@ void toast(BuildContext context, String msg, {bool error = false}) {
   ));
 }
 
-Future<T?> open<T>(BuildContext context, Widget page) =>
-    Navigator.of(context).push<T>(MaterialPageRoute(builder: (_) => page));
+OverlayEntry? _errorEntry;
+
+/// A red banner that slides in at the top; tap or swipe up to close.
+bool _topError(BuildContext context, String msg, {bool plan = false}) {
+  final overlay = Overlay.maybeOf(context, rootOverlay: true);
+  if (overlay == null) return false;
+  _errorEntry?.remove();
+  _errorEntry = null;
+  late final OverlayEntry entry;
+  void close() {
+    if (_errorEntry == entry) _errorEntry = null;
+    if (entry.mounted) entry.remove();
+  }
+
+  entry = OverlayEntry(builder: (ctx) => _TopError(msg: msg, onClose: close, onPlans: plan ? () => showPlans!(context) : null));
+  _errorEntry = entry;
+  overlay.insert(entry);
+  HapticFeedback.mediumImpact();
+  return true;
+}
+
+class _TopError extends StatefulWidget {
+  final String msg;
+  final VoidCallback onClose;
+  final VoidCallback? onPlans;
+  const _TopError({required this.msg, required this.onClose, this.onPlans});
+  @override
+  State<_TopError> createState() => _TopErrorState();
+}
+
+class _TopErrorState extends State<_TopError> with SingleTickerProviderStateMixin {
+  late final AnimationController a = AnimationController(vsync: this, duration: const Duration(milliseconds: 260))..forward();
+  Timer? t;
+
+  @override
+  void initState() {
+    super.initState();
+    t = Timer(Duration(milliseconds: widget.onPlans != null ? 6000 : 4000), _hide);
+  }
+
+  Future<void> _hide() async {
+    t?.cancel();
+    if (!mounted) return;
+    await a.reverse();
+    widget.onClose();
+  }
+
+  @override
+  void dispose() {
+    t?.cancel();
+    a.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final top = MediaQuery.of(context).padding.top + 8;
+    return Positioned(
+      left: 12,
+      right: 12,
+      top: top,
+      child: SlideTransition(
+        position: Tween(begin: const Offset(0, -1.4), end: Offset.zero).animate(CurvedAnimation(parent: a, curve: Curves.easeOutCubic)),
+        child: GestureDetector(
+          onTap: _hide,
+          onVerticalDragEnd: (d) {
+            if ((d.primaryVelocity ?? 0) < 0) _hide();
+          },
+          child: Material(
+            color: Colors.transparent,
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+              decoration: BoxDecoration(
+                color: C.red,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: const [BoxShadow(color: Color(0x55000000), blurRadius: 18, offset: Offset(0, 8), spreadRadius: -6)],
+              ),
+              child: Row(children: [
+                const Icon(Icons.error_outline_rounded, color: Colors.white, size: 22),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(widget.msg,
+                      maxLines: 4,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.w700, height: 1.3)),
+                ),
+                if (widget.onPlans != null)
+                  TextButton(
+                    onPressed: () {
+                      _hide();
+                      widget.onPlans!();
+                    },
+                    child: const Text('PLANS', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+                  )
+                else
+                  const Icon(Icons.close_rounded, color: Color(0xCCFFFFFF), size: 18),
+              ]),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+Future<T?> open<T>(BuildContext context, Widget page) => Navigator.of(context).push<T>(MaterialPageRoute(builder: (_) => page));
 
 /// Isometric 3D cube icon (top face lighter, sides shaded) — the Products glyph.
 class CubeIcon extends StatelessWidget {
@@ -600,8 +694,7 @@ class CubeIcon extends StatelessWidget {
   const CubeIcon({super.key, required this.size, required this.color, this.gradient});
 
   @override
-  Widget build(BuildContext context) =>
-      SizedBox(width: size, height: size, child: CustomPaint(painter: _CubePainter(color, gradient)));
+  Widget build(BuildContext context) => SizedBox(width: size, height: size, child: CustomPaint(painter: _CubePainter(color, gradient)));
 }
 
 class _CubePainter extends CustomPainter {
