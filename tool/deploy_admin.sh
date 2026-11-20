@@ -128,16 +128,16 @@ else
   echo "  ⚠ live sync server did not start — see: journalctl -u hisab-sync -n 50"
 fi
 
-# the location block, shared by both cases
+# the location block, shared by both cases (the old one is kept until the
+# new config passes "nginx -t", so a clash never takes the other sites down)
 $SUDO mkdir -p /etc/nginx/snippets
+SNIP_OLD=""
+if [ -f "$SNIP" ]; then SNIP_OLD="$SNIP.bak-$STAMP"; $SUDO cp "$SNIP" "$SNIP_OLD"; fi
 $SUDO tee "$SNIP" >/dev/null <<NGINX
 # Hisab AI web admin — managed by tool/deploy_admin.sh
 location = /hisab { return 301 /hisab/dashboard/; }
 location = /hisab/ { return 301 /hisab/dashboard/; }
 location = /hisab/dashboard { return 301 /hisab/dashboard/; }
-# the old address keeps working
-location = /gamex { return 301 /hisab/dashboard/; }
-location ^~ /gamex/ { return 301 /hisab/dashboard/; }
 location = /hisab/invoice { return 301 /hisab/invoice/; }
 location ^~ /hisab/invoice/ {
     root $WEB;
@@ -217,9 +217,16 @@ if ! $SUDO nginx -t 2>/tmp/nginx-test.log; then
   cat /tmp/nginx-test.log
   for F in $EXISTING; do REAL=$(readlink -f "$F"); [ -f "$REAL.bak-$STAMP" ] && $SUDO cp "$REAL.bak-$STAMP" "$REAL"; done
   [ "$NEW_SITE" = 1 ] && $SUDO rm -f /etc/nginx/sites-enabled/hisab-admin /etc/nginx/sites-available/hisab-admin /etc/nginx/conf.d/hisab-admin.conf
+  if [ -n "$SNIP_OLD" ]; then $SUDO cp "$SNIP_OLD" "$SNIP"; else $SUDO rm -f "$SNIP"; fi
+  if $SUDO nginx -t >/dev/null 2>&1; then
+    echo "  your other websites are untouched (old config restored)"
+  else
+    echo "  ⚠ nginx config still fails — check: nginx -t"
+  fi
   exit 1
 fi
-$SUDO systemctl reload nginx || $SUDO nginx -s reload
+$SUDO systemctl enable nginx >/dev/null 2>&1 || true
+$SUDO systemctl reload nginx || $SUDO systemctl restart nginx || $SUDO nginx -s reload
 
 # firewall
 if command -v ufw >/dev/null 2>&1 && $SUDO ufw status | grep -q "Status: active"; then
