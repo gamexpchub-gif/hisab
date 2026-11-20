@@ -246,7 +246,8 @@ class _LedgersScreenState extends State<LedgersScreen> {
           Positioned.fill(
             child: Container(
               decoration: const BoxDecoration(
-                gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF1E1B4B), Color(0xFF4B22D8), Color(0xFF2F55E8)]),
+                gradient:
+                    LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF1E1B4B), Color(0xFF4B22D8), Color(0xFF2F55E8)]),
               ),
             ),
           ),
@@ -357,30 +358,59 @@ class _LedgersScreenState extends State<LedgersScreen> {
     }
     return [
       if (d.dues.isNotEmpty) ...[_duesStrip(d.dues), const SizedBox(height: 14)],
-      Container(
-        height: 48,
-        decoration: _card(r: 24),
-        padding: const EdgeInsets.symmetric(horizontal: 14),
-        child: Row(children: [
-          const Icon(Icons.search_rounded, color: Color(0xFF2C3B8F)),
-          const SizedBox(width: 10),
-          Expanded(
-            child: TextField(
-              onChanged: (v) => setState(() => q = v.trim()),
-              style: _j(14, FontWeight.w600, _ink),
-              decoration: InputDecoration(
-                isCollapsed: true,
-                filled: false,
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                hintText: 'Search name, reason, product, invoice',
-                hintStyle: _j(13.5, FontWeight.w400, const Color(0xFF8A8FAD)),
+      Row(children: [
+        Expanded(
+          child: Container(
+            height: 48,
+            decoration: _card(r: 24),
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: Row(children: [
+              const Icon(Icons.search_rounded, color: Color(0xFF2C3B8F)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextField(
+                  onChanged: (v) => setState(() => q = v.trim()),
+                  style: _j(14, FontWeight.w600, _ink),
+                  decoration: InputDecoration(
+                    isCollapsed: true,
+                    filled: false,
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    hintText: 'Search name, reason, product, invoice',
+                    hintStyle: _j(13.5, FontWeight.w400, const Color(0xFF8A8FAD)),
+                  ),
+                ),
               ),
+            ]),
+          ),
+        ),
+        const SizedBox(width: 10),
+        // add a customer right here
+        Tooltip(
+          message: 'Add customer',
+          child: GestureDetector(
+            onTap: () {
+              HapticFeedback.selectionClick();
+              open(context, const PartyForm(type: 'customer'));
+            },
+            child: Container(
+              height: 48,
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(24),
+                gradient: const LinearGradient(colors: [Color(0xFF6B35EE), Color(0xFF4318D2)]),
+                boxShadow: const [BoxShadow(color: Color(0x664318D2), blurRadius: 16, offset: Offset(0, 6), spreadRadius: -6)],
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.person_add_alt_1_rounded, color: Colors.white, size: 20),
+                const SizedBox(width: 6),
+                Text('Customer', style: _j(13, FontWeight.w800, Colors.white)),
+              ]),
             ),
           ),
-        ]),
-      ),
+        ),
+      ]),
       const SizedBox(height: 10),
       SingleChildScrollView(
         scrollDirection: Axis.horizontal,
@@ -453,7 +483,11 @@ class _LedgersScreenState extends State<LedgersScreen> {
             final date = d['due_date'] as String;
             final overdue = date.compareTo(today) < 0;
             final isToday = date == today;
-            final c = overdue ? _red : isToday ? _amber : _purple;
+            final c = overdue
+                ? _red
+                : isToday
+                    ? _amber
+                    : _purple;
             final isC = d['party_type'] == 'customer';
             return GestureDetector(
               onTap: () => open(context, PartyView(type: d['party_type'] as String, id: asInt(d['party_id']))),
@@ -471,7 +505,13 @@ class _LedgersScreenState extends State<LedgersScreen> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                       decoration: BoxDecoration(color: c.withAlpha(0x1F), borderRadius: BorderRadius.circular(8)),
-                      child: Text(overdue ? 'Overdue' : isToday ? 'Today' : timeUntil(date), style: _j(10.5, FontWeight.w800, c)),
+                      child: Text(
+                          overdue
+                              ? 'Overdue'
+                              : isToday
+                                  ? 'Today'
+                                  : timeUntil(date),
+                          style: _j(10.5, FontWeight.w800, c)),
                     ),
                     const Spacer(),
                     Icon(isC ? Icons.south_west_rounded : Icons.north_east_rounded, size: 16, color: isC ? _green : _red),
@@ -563,8 +603,7 @@ class _LedgersScreenState extends State<LedgersScreen> {
                   ],
                   if (isDoc && credit < amount) ...[
                     const SizedBox(height: 4),
-                    Text('Paid ${Money.rs(amount - credit)} at the time · ${Money.rs(credit)} on credit',
-                        style: _j(10.5, FontWeight.w600, _muted)),
+                    Text('Paid ${Money.rs(amount - credit)} at the time · ${Money.rs(credit)} on credit', style: _j(10.5, FontWeight.w600, _muted)),
                   ],
                   if (isDoc)
                     Align(
@@ -762,7 +801,13 @@ class _AccountLedgerScreenState extends State<AccountLedgerScreen> {
     final dayBefore = ymd(DateTime.parse(from).subtract(const Duration(days: 1)));
     final opening = await Books.balance(widget.accountId, type, to: dayBefore);
     final rows = await Books.ledger(accountId: widget.accountId, accountType: type, from: from, to: to);
-    return (a, opening, [for (final r in rows) {...r, 'balance': asInt(r['balance']) + opening}]);
+    return (
+      a,
+      opening,
+      [
+        for (final r in rows) {...r, 'balance': asInt(r['balance']) + opening}
+      ]
+    );
   }
 
   @override
