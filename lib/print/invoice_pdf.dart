@@ -261,6 +261,7 @@ class _Builder {
         if (o.banner) _banner(),
         _titleBar(),
         _parties(),
+        if ('${d.sale['irn'] ?? ''}'.isNotEmpty || '${d.sale['ewb_no'] ?? ''}'.isNotEmpty) _eDocs(),
         _itemsTable(),
         pw.SizedBox(height: 10 * s),
         _bottom(),
@@ -497,9 +498,51 @@ class _Builder {
               row('INVOICE DATE', prettyDate('${sale['date']}'), font: f.heavy, w: 66),
               row('PAYMENT MODE', _paymentMode, font: f.heavy, w: 66),
               row('STATUS', status, font: f.heavy, color: statusColor, w: 66),
+              if ('${sale['ewb_no'] ?? ''}'.isNotEmpty) row('E-WAY BILL', '${sale['ewb_no']}', font: f.heavy, w: 66),
             ]),
           ),
         ),
+      ]),
+    );
+  }
+
+  /// e-Invoice IRN + signed QR, and the e-way bill, under the parties.
+  pw.Widget _eDocs() {
+    final sale = d.sale;
+    final irn = '${sale['irn'] ?? ''}';
+    final ewb = '${sale['ewb_no'] ?? ''}';
+    pw.Widget kv(String k, String v) => pw.Padding(
+          padding: pw.EdgeInsets.only(bottom: 2 * s),
+          child: pw.RichText(
+            text: pw.TextSpan(children: [
+              pw.TextSpan(text: '$k  ', style: t(7.2, font: f.heavy, color: navy)),
+              pw.TextSpan(text: v, style: t(7.4, color: ink)),
+            ]),
+          ),
+        );
+    return pw.Container(
+      decoration: pw.BoxDecoration(border: pw.Border(bottom: pw.BorderSide(color: line, width: .8))),
+      padding: pw.EdgeInsets.symmetric(horizontal: 10 * s, vertical: 6 * s),
+      child: pw.Row(crossAxisAlignment: pw.CrossAxisAlignment.center, children: [
+        pw.Expanded(
+          child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+            if (irn.isNotEmpty) ...[
+              kv('IRN', irn),
+              if ('${sale['ack_no'] ?? ''}'.isNotEmpty) kv('ACK NO.', '${sale['ack_no']}   ACK DATE  ${sale['ack_date'] ?? ''}'),
+            ],
+            if (ewb.isNotEmpty)
+              kv('E-WAY BILL NO.', '$ewb${'${sale['ewb_date'] ?? ''}'.isEmpty ? '' : '   DATE  ${sale['ewb_date']}'}${'${sale['ewb_valid'] ?? ''}'.isEmpty ? '' : '   VALID TILL  ${sale['ewb_valid']}'}'),
+          ]),
+        ),
+        if (irn.isNotEmpty)
+          pw.BarcodeWidget(
+            barcode: pw.Barcode.qrCode(),
+            data: '${sale['signed_qr'] ?? irn}',
+            width: 70 * s,
+            height: 70 * s,
+            drawText: false,
+            textStyle: pw.TextStyle(font: f.regular),
+          ),
       ]),
     );
   }

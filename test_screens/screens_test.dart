@@ -24,6 +24,7 @@ import 'package:hisab/screens/security.dart';
 import 'package:hisab/screens/sales.dart';
 import 'package:hisab/screens/ledgers.dart';
 import 'package:hisab/screens/lend_sheet.dart';
+import 'package:hisab/screens/exchange.dart';
 import 'package:hisab/screens/parties.dart';
 import 'package:hisab/screens/product_form.dart';
 import 'package:hisab/screens/purchase_pos.dart';
@@ -124,7 +125,7 @@ void main() {
     });
   }
 
-  for (final (name, index) in [('home', 0), ('dashboard', 1), ('products', 2), ('menu', 3), ('add_product', -1), ('new_sale', -2), ('new_purchase', -3), ('ledgers', -4), ('customer_profile', -5), ('expenses', -6), ('customers', -7), ('sales', -8), ('bank', -9), ('add_card', -10), ('purchases', -11), ('supplier_profile', -12), ('sale_returns', -13), ('sale_return_form', -14), ('invoice_view', -15), ('sale_complete', -16), ('emi', -17), ('emi_plan', -18), ('imei', -19), ('backup', -20), ('security', -21), ('lock', -22), ('login', -23), ('account', -24), ('smart_ai', -25), ('gst_report', -26), ('excel_export', -27), ('daily_report', -28), ('analytics', -29), ('loans', -30), ('loan_view', -31), ('loan_form', -32), ('plans', -33), ('stores', -34), ('admin', -35), ('sheets_home', -36), ('sheet_editor', -37), ('khata_you_gave', -38)]) {
+  for (final (name, index) in [('home', 0), ('dashboard', 1), ('products', 2), ('menu', 3), ('add_product', -1), ('new_sale', -2), ('new_purchase', -3), ('ledgers', -4), ('customer_profile', -5), ('expenses', -6), ('customers', -7), ('sales', -8), ('bank', -9), ('add_card', -10), ('purchases', -11), ('supplier_profile', -12), ('sale_returns', -13), ('sale_return_form', -14), ('invoice_view', -15), ('sale_complete', -16), ('emi', -17), ('emi_plan', -18), ('imei', -19), ('backup', -20), ('security', -21), ('lock', -22), ('login', -23), ('account', -24), ('smart_ai', -25), ('gst_report', -26), ('excel_export', -27), ('daily_report', -28), ('analytics', -29), ('loans', -30), ('loan_view', -31), ('loan_form', -32), ('plans', -33), ('stores', -34), ('admin', -35), ('sheets_home', -36), ('sheet_editor', -37), ('khata_you_gave', -38), ('exchange', -39), ('exchange_form', -40)]) {
     testWidgets(name, (t) async {
       t.view.physicalSize = const Size(1080, 2340);
       t.view.devicePixelRatio = 2.75;
@@ -209,6 +210,10 @@ void main() {
                                                                                                                                                           ? const SheetsHome()
                                                                                                                                                           : index == -37
                                                                                                                                                               ? SheetEditor(book: demoBook)
+                                                                                                                                                              : index == -39
+                                                                                                                                                                  ? const ExchangeScreen()
+                                                                                                                                                              : index == -40
+                                                                                                                                                                  ? const ExchangeForm()
                                                                                                                                                               : index == -38
                                                                                                                                                                   ? const Scaffold(
                                                                                                                                                                       backgroundColor: Color(0xFF8A8FAD),

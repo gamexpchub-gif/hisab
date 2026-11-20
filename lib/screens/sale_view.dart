@@ -14,6 +14,7 @@ import 'products.dart' show ProductThumb;
 import 'emi.dart';
 import 'sale_form.dart';
 import 'sale_return.dart';
+import 'edocs_screen.dart';
 import 'sales.dart' show invoiceText;
 import 'staff_screen.dart' show askOwnerPin;
 import 'plans.dart';
@@ -104,6 +105,7 @@ class SaleView extends StatelessWidget {
                 _items(d),
                 const SizedBox(height: 14),
                 _summary(d),
+                if (Books.can('sale')) ...[const SizedBox(height: 14), EDocsCard(d.sale)],
                 if (d.returns.isNotEmpty) ...[const SizedBox(height: 14), _returns(d)],
                 if ('${s['note'] ?? ''}'.trim().isNotEmpty) ...[
                   const SizedBox(height: 14),

@@ -19,10 +19,11 @@ import 'package:hisab/core/plan.dart';
 import 'package:hisab/core/stores.dart';
 import 'package:hisab/core/gst_report.dart';
 import 'package:hisab/core/gst.dart';
+import 'package:hisab/core/edocs.dart';
 import 'package:hisab/core/xlsx.dart';
 import 'package:hisab/core/smart.dart';
 import 'package:hisab/core/quick.dart';
-import 'package:hisab/print/invoice_pdf.dart' show amountInWords;
+import 'package:hisab/print/invoice_pdf.dart';
 import 'package:hisab/screens/sales_book.dart' show matchSale, matchDoc;
 
 Future<void> freshDb() async {
@@ -967,6 +968,54 @@ void main() {
     expect(g.hsn.keys.any((k) => k.startsWith('8471|')), isTrue);
     expect(g.payable, g.netOutTax - g.itc);
     expect(g.sheets().length, 8);
+  });
+
+  test('e-Invoice and e-Way bill: checks, government JSON, IRN and EWB saved', () async {
+    final old = await Books.settings();
+    await Books.setSetting('gstin', '19FGHIJ5678K1ZY');
+    await Books.setSetting('pin', '732201');
+    await Books.setSetting('address', 'Station Road, Malda');
+    try {
+      final buyer = await Books.saveParty('customer', {'name': 'Mumbai Retail', 'gstin': '27AABCU9603R1ZN', 'address': 'Andheri East, Mumbai 400069'});
+      final p = await Books.saveProduct({'name': 'EDoc Phone', 'gst_bp': 1800, 'price': 5000000, 'hsn': '8517'}, openingQty: 3, openingCost: 4000000);
+      final noHsn = await Books.saveProduct({'name': 'EDoc Cover', 'gst_bp': 1800, 'price': 50000}, openingQty: 3, openingCost: 20000);
+      final sale = await Books.createSale(items: [ItemIn(p, 1, 5000000)], customerId: buyer, discount: 118000, paid: 5782000);
+      final d = (await EDoc.load(sale))!;
+      expect(d.inter, isTrue);
+      expect(d.einvoiceProblems(), isEmpty);
+      final inv = (jsonDecode(d.einvoiceJson()) as List).first as Map;
+      final v = inv['ValDtls'] as Map;
+      expect(inv['BuyerDtls']['Pos'], '27');
+      expect(inv['BuyerDtls']['Pin'], 400069);
+      expect(v['TotInvVal'], 57820.0);
+      expect(((v['AssVal'] as num) + (v['IgstVal'] as num) + (v['RndOffAmt'] as num)).toStringAsFixed(2), '57820.00');
+      expect(v['CgstVal'], 0);
+      final t = Transport(distance: 450, vehicle: 'WB 12 AB 1234');
+      expect(d.ewayProblems(t), isEmpty);
+      expect(t.validDays, 3);
+      final ew = ((jsonDecode(d.ewayJson(t)) as Map)['billLists'] as List).first as Map;
+      expect(ew['vehicleNo'], 'WB12AB1234');
+      expect(ew['toStateCode'], 27);
+      expect(ew['mainHsnCode'], 8517);
+      expect(d.ewayNeeded, isTrue);
+      // a walk-in bill without HSN can't be an e-invoice
+      final walk = await Books.createSale(items: [ItemIn(noHsn, 1, 50000)], paid: 59000);
+      final w = (await EDoc.load(walk))!;
+      expect(w.einvoiceProblems().any((x) => x.contains('GSTIN')), isTrue);
+      expect(w.einvoiceProblems().any((x) => x.contains('HSN')), isTrue);
+      await expectLater(EDocs.saveIrn(sale, irn: 'short'), throwsA(isA<AccountingError>()));
+      await EDocs.saveIrn(sale, irn: 'a' * 64, ackNo: '112010012345678', ackDate: '20/11/2026');
+      await expectLater(EDocs.saveEwb(sale, number: '123'), throwsA(isA<AccountingError>()));
+      await EDocs.saveEwb(sale, number: '3410 1234 5678', date: '20/11/2026', validUpto: '23/11/2026');
+      final row = (await Books.query('SELECT irn, ack_no, ewb_no FROM sales WHERE id = ?', [sale])).first;
+      expect(row['irn'], 'a' * 64);
+      expect(row['ewb_no'], '341012345678');
+      expect((await InvoiceData.load(sale))!.sale['irn'], 'a' * 64); // printed with the QR on the bill
+    } finally {
+      for (final k in ['gstin', 'pin', 'address']) {
+        await Books.setSetting(k, old[k] ?? '');
+      }
+    }
   });
 
   test('Exchange pro: seller as customer, phone details, checks, new phone bill linked, sellers list', () async {

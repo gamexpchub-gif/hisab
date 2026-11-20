@@ -631,7 +631,7 @@ class _ExchangeFormState extends State<ExchangeForm> {
                       OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
                   onPressed: _chooseSeller,
                   icon: const Icon(Icons.search_rounded),
-                  label: const Text('Choose customer'),
+                  label: const Text('Choose'),
                 ),
               ),
               const SizedBox(width: 8),
@@ -644,7 +644,7 @@ class _ExchangeFormState extends State<ExchangeForm> {
                     if (id != null) await _setSeller(id);
                   },
                   icon: const Icon(Icons.person_add_alt_1_rounded),
-                  label: const Text('New customer'),
+                  label: const Text('Add new'),
                 ),
               ),
             ])
