@@ -97,7 +97,13 @@ class Shop {
     final r = (await Books.query('SELECT * FROM repairs WHERE id = ?', [id])).first;
     final acc = accountId ?? asInt((await Books.query('SELECT id FROM accounts WHERE code = ?', [cashCode])).first['id']);
     await Books.trusted(() => Books.createPayment(
-        kind: 'receipt', partyId: asInt(r['customer_id']), amount: amount, accountId: acc, date: date, reference: '${r['number']}', note: 'Repair ${r['device']}'));
+        kind: 'receipt',
+        partyId: asInt(r['customer_id']),
+        amount: amount,
+        accountId: acc,
+        date: date,
+        reference: '${r['number']}',
+        note: 'Repair ${r['device']}'));
     await Books.execute('UPDATE repairs SET advance = advance + ? WHERE id = ?', [amount, id]);
   }
 
@@ -158,8 +164,13 @@ class Shop {
   /// Buys a used phone from a customer: it becomes a 'used' product in stock
   /// (bought through a purchase from the seller, paid from [accountId]).
   static Future<int> buyUsed({
-    required String sellerName,
+    String sellerName = '',
     String sellerPhone = '',
+    int? customerId, // the seller, already a customer
+    String? storage,
+    String? color,
+    List<String> checks = const [], // what was tested OK ("Screen", "Camera"…)
+    String? idPhoto,
     required String model,
     String? brand,
     String? imei,
@@ -178,16 +189,25 @@ class Shop {
     if (model.trim().isEmpty) throw AccountingError('Enter the phone model');
     if (price <= 0) throw AccountingError('Enter the price paid');
     final when = date ?? ymd(DateTime.now());
-    return Books.trusted(() => _buyUsed(sellerName, sellerPhone, model, brand, imei, price, resale, grade, battery, accessories, idProof, photo, note, accountId, when));
+    if (customerId == null && sellerName.trim().isEmpty && sellerPhone.trim().isEmpty) throw AccountingError('Choose who is selling the phone');
+    final i = (imei ?? '').replaceAll(RegExp(r'\s'), '');
+    if (i.isNotEmpty) {
+      final again = await Books.query('SELECT e.number FROM exchanges e JOIN products p ON p.id = e.product_id WHERE e.imei = ? AND p.stock > 0', [i]);
+      if (again.isNotEmpty) throw AccountingError('This IMEI is already in your used stock (${again.first['number']})');
+    }
+    return Books.trusted(() => _buyUsed(
+        sellerName, sellerPhone, model, brand, i, price, resale, grade, battery, accessories, idProof, photo, note, accountId, when,
+        customerId: customerId, storage: storage, color: color, checks: checks, idPhoto: idPhoto));
   }
 
   static Future<int> _buyUsed(String sellerName, String sellerPhone, String model, String? brand, String? imei, int price, int resale, String? grade,
-      int? battery, String? accessories, String? idProof, String? photo, String? note, int? accountId, String when) async {
-    final cid = await customerFor(sellerName, sellerPhone);
+      int? battery, String? accessories, String? idProof, String? photo, String? note, int? accountId, String when,
+      {int? customerId, String? storage, String? color, List<String> checks = const [], String? idPhoto}) async {
+    final cid = customerId ?? await customerFor(sellerName, sellerPhone);
     final cust = (await Books.query('SELECT * FROM customers WHERE id = ?', [cid])).first;
     // the seller as a supplier (same name and phone), for the purchase
-    var sid = asInt((await Books.query('SELECT id FROM suppliers WHERE name = ? COLLATE NOCASE AND IFNULL(phone, \'\') = ? LIMIT 1',
-            ['${cust['name']}', '${cust['phone'] ?? ''}']))
+    var sid = asInt((await Books.query(
+            'SELECT id FROM suppliers WHERE name = ? COLLATE NOCASE AND IFNULL(phone, \'\') = ? LIMIT 1', ['${cust['name']}', '${cust['phone'] ?? ''}']))
         .firstOrNull?['id']);
     if (sid == 0) {
       sid = await Books.saveParty('supplier', {'name': '${cust['name']}', 'phone': cust['phone'], 'notes': 'Exchange / used phone seller'});
@@ -195,6 +215,7 @@ class Shop {
     final cat = await Books.addCategory('Used Phones');
     final pid = await Books.saveProduct({
       'name': model.trim(),
+      'variant': [storage, color].where((v) => (v ?? '').trim().isNotEmpty).map((v) => v!.trim()).join(' · '),
       'brand': (brand ?? '').trim().isEmpty ? null : brand!.trim(),
       'category_id': cat,
       'condition': 'used',
@@ -231,6 +252,11 @@ class Shop {
         'price': price,
         'resale': resale,
         'note': t(note),
+        'brand': t(brand),
+        'storage': t(storage),
+        'color': t(color),
+        'checks': checks.isEmpty ? null : checks.join(','),
+        'id_photo': idPhoto,
         'created_at': Books._now(),
       });
     });
@@ -243,22 +269,42 @@ class Shop {
     return id;
   }
 
-  static Future<List<Rec>> exchanges() => Books.query(
-      'SELECT e.*, c.name AS customer, c.phone, p.stock, '
+  /// The new phone's bill for an exchange (the old phone was taken in part payment).
+  static Future<void> linkExchangeSale(int exchangeId, int saleId) async {
+    await Books.execute('UPDATE exchanges SET sale_id = ? WHERE id = ?', [saleId, exchangeId]);
+    Books.notifyChanged();
+  }
+
+  /// People who sold or exchanged phones: count and money paid.
+  static Future<List<Rec>> sellers() => Books.query('SELECT c.*, COUNT(e.id) AS phones, IFNULL(SUM(e.price), 0) AS paid, MAX(e.date) AS last '
+      'FROM exchanges e JOIN customers c ON c.id = e.customer_id GROUP BY c.id ORDER BY last DESC');
+
+  static Future<Rec?> exchange(int id) async => (await Books.query(
+          'SELECT e.*, c.name AS customer, c.phone, c.address, c.aadhaar, c.photo AS customer_photo, p.stock, p.price AS list_price, '
+          's.number AS new_bill, s.total AS new_total, s.date AS new_date, '
+          '(SELECT GROUP_CONCAT(i.name, \' + \') FROM sale_items i WHERE i.sale_id = e.sale_id) AS new_phone, '
+          '(SELECT s2.number FROM sale_items i2 JOIN sales s2 ON s2.id = i2.sale_id WHERE i2.product_id = e.product_id ORDER BY s2.id DESC LIMIT 1) AS sold_on, '
+          '(SELECT i3.rate FROM sale_items i3 WHERE i3.product_id = e.product_id ORDER BY i3.id DESC LIMIT 1) AS sold_for '
+          'FROM exchanges e LEFT JOIN customers c ON c.id = e.customer_id LEFT JOIN products p ON p.id = e.product_id '
+          'LEFT JOIN sales s ON s.id = e.sale_id WHERE e.id = ?',
+          [id]))
+      .firstOrNull;
+
+  static Future<List<Rec>> exchanges() => Books.query('SELECT e.*, c.name AS customer, c.phone, p.stock, s.number AS new_bill, '
+      '(SELECT GROUP_CONCAT(i.name, \' + \') FROM sale_items i WHERE i.sale_id = e.sale_id) AS new_phone, '
       '(SELECT s.number FROM sale_items i JOIN sales s ON s.id = i.sale_id WHERE i.product_id = e.product_id ORDER BY s.id DESC LIMIT 1) AS sold_on, '
       '(SELECT i.rate FROM sale_items i WHERE i.product_id = e.product_id ORDER BY i.id DESC LIMIT 1) AS sold_for '
-      'FROM exchanges e LEFT JOIN customers c ON c.id = e.customer_id LEFT JOIN products p ON p.id = e.product_id ORDER BY e.id DESC');
+      'FROM exchanges e LEFT JOIN customers c ON c.id = e.customer_id LEFT JOIN products p ON p.id = e.product_id '
+      'LEFT JOIN sales s ON s.id = e.sale_id ORDER BY e.id DESC');
 
   // ---------------------------------------------------------------- finance companies
   /// Finance-company sales still waiting for the payout, by company.
-  static Future<List<Rec>> financePending() => Books.query(
-      'SELECT e.*, c.name AS customer, c.phone, s.number AS sale_no, s.date AS sale_date, '
+  static Future<List<Rec>> financePending() => Books.query('SELECT e.*, c.name AS customer, c.phone, s.number AS sale_no, s.date AS sale_date, '
       '(e.price - e.down_payment) AS expected FROM emi_plans e JOIN customers c ON c.id = e.customer_id '
       'LEFT JOIN sales s ON s.id = e.sale_id '
       "WHERE e.kind = 'finance' AND e.disbursed = 0 AND e.status != 'cancelled' ORDER BY e.start_date, e.id");
 
-  static Future<List<Rec>> financeReceived() => Books.query(
-      'SELECT e.*, c.name AS customer FROM emi_plans e JOIN customers c ON c.id = e.customer_id '
+  static Future<List<Rec>> financeReceived() => Books.query('SELECT e.*, c.name AS customer FROM emi_plans e JOIN customers c ON c.id = e.customer_id '
       "WHERE e.kind = 'finance' AND e.disbursed = 1 ORDER BY e.disbursed_on DESC LIMIT 50");
 
   /// The finance company paid the shop. With [post] the money is booked as a
@@ -306,13 +352,18 @@ class Shop {
         final d = DateTime.parse('${r['date']}');
         final end = DateTime(d.year, d.month + m, d.day);
         final left = end.difference(DateTime.now()).inDays;
-        out.add(DeviceEvent(ymd(end), 'warranty', left >= 0 ? 'Warranty ends' : 'Warranty ended', '$m months from ${prettyDate('${r['date']}')}'
-            '${left >= 0 ? ' · $left days left' : ''}'));
+        out.add(DeviceEvent(
+            ymd(end),
+            'warranty',
+            left >= 0 ? 'Warranty ends' : 'Warranty ended',
+            '$m months from ${prettyDate('${r['date']}')}'
+                '${left >= 0 ? ' · $left days left' : ''}'));
       }
       for (final x in await Books.query(
           'SELECT r.number, r.date, r.reason, i.value FROM sale_return_items i JOIN sale_returns r ON r.id = i.return_id WHERE i.sale_item_id = ?',
           [r['item']])) {
-        out.add(DeviceEvent('${x['date']}', 'returned', 'Returned', '${x['number']} · ${Money.rs(asInt(x['value']))}${x['reason'] == null ? '' : ' · ${x['reason']}'}',
+        out.add(DeviceEvent(
+            '${x['date']}', 'returned', 'Returned', '${x['number']} · ${Money.rs(asInt(x['value']))}${x['reason'] == null ? '' : ' · ${x['reason']}'}',
             target: 'sale', targetId: asInt(r['id'])));
       }
     }
@@ -322,16 +373,14 @@ class Shop {
       out.add(DeviceEvent('${r['date']}', 'exchange', 'Bought back (exchange)',
           '${r['number']} from ${r['customer'] ?? '—'} at ${Money.rs(asInt(r['price']))}${r['grade'] == null ? '' : ' · grade ${r['grade']}'}'));
     }
-    for (final r in await Books.query(
-        'SELECT r.id, r.number, r.date, r.problem, r.status, r.charge FROM repairs r WHERE TRIM(r.imei) = ?', [c])) {
+    for (final r in await Books.query('SELECT r.id, r.number, r.date, r.problem, r.status, r.charge FROM repairs r WHERE TRIM(r.imei) = ?', [c])) {
       out.add(DeviceEvent('${r['date']}', 'repair', 'Repair · ${repairLabels[r['status']] ?? r['status']}',
           '${r['number']} · ${r['problem']}${asInt(r['charge']) > 0 ? ' · ${Money.rs(asInt(r['charge']))}' : ''}',
           target: 'repair', targetId: asInt(r['id'])));
     }
-    for (final r in await Books.query(
-        'SELECT e.id, e.kind, e.financer, e.emi, e.months, e.start_date, e.status FROM emi_plans e WHERE TRIM(e.imei) = ?', [c])) {
-      out.add(DeviceEvent('${r['start_date']}', 'emi',
-          r['kind'] == 'finance' ? 'Finance · ${r['financer'] ?? 'company'}' : 'Shop EMI',
+    for (final r
+        in await Books.query('SELECT e.id, e.kind, e.financer, e.emi, e.months, e.start_date, e.status FROM emi_plans e WHERE TRIM(e.imei) = ?', [c])) {
+      out.add(DeviceEvent('${r['start_date']}', 'emi', r['kind'] == 'finance' ? 'Finance · ${r['financer'] ?? 'company'}' : 'Shop EMI',
           '${Money.rs(asInt(r['emi']))} × ${r['months']} · ${r['status']}',
           target: 'emi', targetId: asInt(r['id'])));
     }

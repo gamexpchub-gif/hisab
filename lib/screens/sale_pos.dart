@@ -91,7 +91,8 @@ class SaleForm extends StatefulWidget {
   final int? customerId;
   final int? editSaleId; // edit an existing sale in place
   final int? repeatSaleId; // a new bill with the same items (one-tap repeat)
-  const SaleForm({super.key, this.customerId, this.editSaleId, this.repeatSaleId});
+  final int? exchangeId; // the new phone for an exchange (old phone already taken in)
+  const SaleForm({super.key, this.customerId, this.editSaleId, this.repeatSaleId, this.exchangeId});
   @override
   State<SaleForm> createState() => _SaleFormState();
 }
@@ -100,6 +101,7 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
   List<Rec> products = [], customers = [], accounts = [], quick = [];
   Map<int, int> dues = {};
   Map<String, String> settings = {};
+  Rec? exchange; // exchange: the old phone taken in
   final cart = <_Line>[];
   Rec? customer;
   int? account;
@@ -148,6 +150,13 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
     final last = int.tryParse(settings['last_pay_account'] ?? '');
     if (account == null && last != null && accounts.any((a) => asInt(a['id']) == last)) account = last;
     account ??= accounts.isNotEmpty ? asInt(accounts.first['id']) : null;
+    if (widget.exchangeId != null && exchange == null) {
+      exchange = await Shop.exchange(widget.exchangeId!);
+      final e = exchange;
+      if (e != null && note.text.trim().isEmpty) {
+        note.text = 'Exchange ${e['number']}: old ${e['model']}${'${e['imei'] ?? ''}'.isEmpty ? '' : ' (IMEI ${e['imei']})'} taken for ${Money.rs(asInt(e['price']))}';
+      }
+    }
     if (widget.customerId != null) {
       for (final c in customers) {
         if (asInt(c['id']) == widget.customerId) customer = c;
@@ -836,6 +845,7 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
         }
         id = r;
       }
+      if (widget.exchangeId != null && !editing) await Shop.linkExchangeSale(widget.exchangeId!, id);
       if (account != null) await Books.setSetting('last_pay_account', '$account');
       if (!editing && due > 0 && customer != null && promise != null && Sub.can('due_alarm')) {
         await saveDueWithAlarm(
@@ -1567,6 +1577,10 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
         ]),
         const Divider(color: Color(0xFFEEF0F8)),
         row('Total', Money.rs(total), color: _navy, bold: true),
+        if (exchange != null) ...[
+          row('Old phone taken (${exchange!['number']})', '− ${Money.rs(asInt(exchange!['price']))}', color: _green),
+          row('Customer pays now', Money.rs(math.max(0, total - asInt(exchange!['price']))), color: _navy, bold: true),
+        ],
         const SizedBox(height: 4),
         if (Books.can('profit'))
           GestureDetector(

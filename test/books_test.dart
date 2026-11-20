@@ -969,6 +969,45 @@ void main() {
     expect(g.sheets().length, 8);
   });
 
+  test('Exchange pro: seller as customer, phone details, checks, new phone bill linked, sellers list', () async {
+    final cash = asInt((await Books.moneyAccounts()).first['id']);
+    final seller = await Books.saveParty('customer', {'name': 'Exchange Seller', 'phone': '9830044444', 'aadhaar': '123412341234'});
+    final newPhone = await Books.saveProduct({'name': 'New Vivo X', 'gst_bp': 0, 'price': 3000000}, openingQty: 2, openingCost: 2500000);
+    final ex = await Shop.buyUsed(
+        customerId: seller,
+        model: 'Galaxy S21',
+        brand: 'Samsung',
+        imei: '356789012345671',
+        price: 1500000,
+        grade: 'A',
+        battery: 88,
+        storage: '8/128',
+        color: 'Phantom Grey',
+        checks: ['Screen OK', 'Camera OK'],
+        accessories: 'Box, Charger',
+        accountId: cash);
+    await expectLater(Shop.buyUsed(customerId: seller, model: 'Galaxy S21', imei: '356789012345671', price: 100000, accountId: cash),
+        throwsA(isA<AccountingError>())); // same IMEI already in used stock
+    final sale = await Books.createSale(items: [ItemIn(newPhone, 1, 3000000)], customerId: seller, paid: 3000000, accountId: cash);
+    await Shop.linkExchangeSale(ex, sale);
+    final e = (await Shop.exchange(ex))!;
+    expect(e['customer'], 'Exchange Seller');
+    expect(e['storage'], '8/128');
+    expect(e['color'], 'Phantom Grey');
+    expect(e['checks'], 'Screen OK,Camera OK');
+    expect(e['new_phone'], 'New Vivo X');
+    expect(asInt(e['new_total']), 3000000);
+    expect(asInt(e['stock']), 1);
+    final used = (await Books.query('SELECT * FROM products WHERE id = ?', [e['product_id']])).first;
+    expect(used['variant'], '8/128 · Phantom Grey');
+    expect(used['condition'], 'used');
+    final sellers = await Shop.sellers();
+    expect(sellers.any((c) => asInt(c['id']) == seller && asInt(c['phones']) == 1 && asInt(c['paid']) == 1500000), isTrue);
+    expect((await Shop.exchanges()).first['new_bill'], isNotNull);
+    await expectLater(Shop.buyUsed(model: 'X', price: 100, accountId: cash), throwsA(isA<AccountingError>())); // no seller
+    await expectBalanced();
+  });
+
   test('GST pro: discount lowers GST, IGST for other states, GSTIN check, set-off, portal JSON', () async {
     expect(Gst.check('27AAPFU0939F1ZV'), isNull); // a real-format GSTIN
     expect(Gst.check('27AAPFU0939F1ZA'), contains('check digit'));

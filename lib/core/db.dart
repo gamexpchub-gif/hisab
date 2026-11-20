@@ -86,7 +86,7 @@ class AppDb {
     );
   }
 
-  static const schemaVersion = 13;
+  static const schemaVersion = 14;
 
   static Future<void> upgrade(Database db, int from, int to) async {
     if (from < 2) {
@@ -154,6 +154,18 @@ class AppDb {
       await _addColumn(db, 'audit_log', 'staff TEXT');
       await db.execute("INSERT OR IGNORE INTO accounts (code, name, type, kind, is_system) VALUES ('4100', 'Service & Repair Income', 'income', NULL, 1)");
     }
+    if (from < 14) await _v14(db);
+  }
+
+  /// Version 14: exchange details (the new phone's bill, storage, colour,
+  /// checks, ID photo) and e-invoice / e-way bill numbers on sales.
+  static Future<void> _v14(Database db) async {
+    for (final c in ['sale_id INTEGER', 'brand TEXT', 'storage TEXT', 'color TEXT', 'checks TEXT', 'id_photo TEXT']) {
+      await _addColumn(db, 'exchanges', c);
+    }
+    for (final c in ['irn TEXT', 'ack_no TEXT', 'ack_date TEXT', 'signed_qr TEXT', 'ewb_no TEXT', 'ewb_date TEXT', 'ewb_valid TEXT', 'transport TEXT']) {
+      await _addColumn(db, 'sales', c);
+    }
   }
 
   /// ALTER TABLE … ADD COLUMN, skipped when the column is already there.
@@ -190,6 +202,7 @@ class AppDb {
       batch.execute(s);
     }
     await batch.commit(noResult: true);
+    await _v14(db);
     await seed(db);
   }
 
