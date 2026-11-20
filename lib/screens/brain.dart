@@ -69,13 +69,15 @@ class _BrainScreenState extends State<BrainScreen> {
           decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18)),
           child: Row(children: [
             _tab(0, Icons.auto_awesome_rounded, 'Assistant'),
-            _tab(1, Icons.insights_rounded, 'Forecast'),
-            _tab(2, Icons.gpp_maybe_rounded, 'Alerts'),
-            _tab(3, Icons.shield_rounded, 'Scores'),
+            if (Books.can('ai_insights')) ...[
+              _tab(1, Icons.insights_rounded, 'Forecast'),
+              _tab(2, Icons.gpp_maybe_rounded, 'Alerts'),
+              _tab(3, Icons.shield_rounded, 'Scores'),
+            ],
           ]),
         ),
         const SizedBox(height: 12),
-        switch (tab) { 0 => const AiAssistant(), 1 => const _ForecastTab(), 2 => const _AlertsTab(), _ => const _ScoresTab() },
+        switch (Books.can('ai_insights') ? tab : 0) { 0 => const AiAssistant(), 1 => const _ForecastTab(), 2 => const _AlertsTab(), _ => const _ScoresTab() },
       ],
     );
   }

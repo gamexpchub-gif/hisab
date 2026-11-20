@@ -16,7 +16,7 @@ class StaffMember {
 
   Map<String, Object?> toJson() => {'id': id, 'name': name, 'role': role, 'pin': pinHash, 'perms': perms.toList(), 'active': active};
   static StaffMember from(Map<String, dynamic> m) => StaffMember('${m['id']}', '${m['name']}', '${m['role'] ?? 'sales'}', '${m['pin'] ?? ''}',
-      {for (final p in (m['perms'] as List? ?? const [])) '$p'},
+      Staff._upgrade({for (final p in (m['perms'] as List? ?? const [])) '$p'}),
       active: m['active'] != false);
 }
 
@@ -25,21 +25,59 @@ class StaffMember {
 /// works with their own permissions. Every action in the activity log
 /// carries the name of who did it.
 class Staff {
-  static const perms = <String, (String, String)>{
-    'discount': ('Give discounts', 'Discount on a bill'),
-    'edit_bill': ('Edit bills', 'Change a saved sale or purchase'),
-    'delete': ('Delete', 'Delete bills, products, customers'),
-    'purchase': ('Purchases', 'Enter supplier bills'),
-    'expense': ('Expenses', 'Enter shop expenses'),
-    'reports': ('Reports & profit', 'Profit, ledgers, analytics, AI Brain, cash & bank'),
-    'settings': ('Settings', 'Shop settings, backup, stores, security, staff'),
+  /// Every permission: key → (name, what it allows, group).
+  static const perms = <String, (String, String, String)>{
+    // Selling
+    'sale': ('Make sales', 'New bills, scan, AI bills, add a customer while billing', 'Selling'),
+    'credit': ('Sell on credit', 'Bills left unpaid or part-paid (khata)', 'Selling'),
+    'discount': ('Give discounts', 'A discount on a bill', 'Selling'),
+    'collect': ('Receive payments', 'Money from customers against their dues', 'Selling'),
+    'returns': ('Sale returns', 'Take goods back and refund', 'Selling'),
+    'edit_bill': ('Edit bills', 'Change a saved sale or purchase', 'Selling'),
+    // Stock
+    'products': ('Add & edit products', 'Products, prices, categories', 'Stock'),
+    'purchase': ('Purchases', 'Supplier bills, stock in', 'Stock'),
+    'profit': ('See cost & profit', 'Purchase price, margin and profit everywhere', 'Stock'),
+    // Customers
+    'customers': ('Customers & suppliers', 'Open khata, edit or add parties', 'Customers'),
+    // Money
+    'expense': ('Expenses', 'Enter shop expenses', 'Money'),
+    'cash_bank': ('Cash, bank & loans', 'Balances, transfers, paying suppliers, loans', 'Money'),
+    // Reports
+    'dashboard': ('Dashboard & home figures', 'Today\'s sales, totals, charts on the home screens', 'Reports'),
+    'reports': ('Reports', 'P&L, ledgers, GST, Excel, analytics, daily report', 'Reports'),
+    'ai_insights': ('AI insights', 'Forecast, alerts, customer scores, Autopilot', 'Reports'),
+    // Mobile shop
+    'repairs': ('Repair jobs', 'Job cards, status, deliver & bill', 'Shop'),
+    'exchange': ('Exchange phones', 'Buy used phones from customers', 'Shop'),
+    // Admin
+    'delete': ('Delete', 'Delete bills, products, customers', 'Admin'),
+    'settings': ('Settings & data', 'Shop settings, backup, stores, security, staff, activity log', 'Admin'),
   };
 
-  static const roles = <String, (String, Set<String>)>{
-    'manager': ('Manager', {'discount', 'edit_bill', 'purchase', 'expense', 'reports'}),
-    'sales': ('Salesman', {}),
-    'custom': ('Custom', {}),
+  static const groups = ['Selling', 'Stock', 'Customers', 'Money', 'Reports', 'Shop', 'Admin'];
+
+  static const roles = <String, (String, Set<String>, String)>{
+    'sales': ('Salesman', {'sale', 'collect', 'repairs'}, 'Sells and collects — no profit, no dashboard, no reports'),
+    'cashier': ('Cashier', {'sale', 'credit', 'discount', 'collect', 'returns', 'customers', 'expense', 'repairs'}, 'Billing, credit, returns, khata — no profit'),
+    'stock': ('Stock keeper', {'products', 'purchase'}, 'Products and purchases only'),
+    'accountant': ('Accountant', {'dashboard', 'reports', 'profit', 'expense', 'cash_bank', 'customers', 'collect'}, 'Books and reports — no selling'),
+    'manager': (
+      'Manager',
+      {'sale', 'credit', 'discount', 'collect', 'returns', 'edit_bill', 'products', 'purchase', 'profit', 'customers', 'expense', 'cash_bank', 'dashboard', 'reports', 'ai_insights', 'repairs', 'exchange'},
+      'Everything except delete and settings'
+    ),
+    'custom': ('Custom', {}, 'Choose each permission'),
   };
+
+  /// Staff saved by an older version had fewer, wider permissions.
+  static Set<String> _upgrade(Set<String> p) {
+    if (p.contains('sale') || p.contains('dashboard') || p.contains('products') || p.contains('collect')) return p;
+    final out = {...p, 'sale', 'collect', 'credit', 'returns', 'customers', 'repairs', 'exchange'};
+    if (p.contains('reports')) out.addAll({'dashboard', 'profit', 'ai_insights', 'cash_bank'});
+    if (p.contains('purchase')) out.add('products');
+    return out;
+  }
 
   /// Who is using the app now (null = the owner).
   static final current = ValueNotifier<StaffMember?>(null);

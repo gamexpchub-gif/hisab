@@ -132,8 +132,7 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
   }
 
   Future<void> _load() async {
-    products = await Books.query(
-        'SELECT p.*, c.name AS category, (SELECT COALESCE(SUM(qty),0) FROM sale_items WHERE product_id = p.id) AS sold '
+    products = await Books.query('SELECT p.*, c.name AS category, (SELECT COALESCE(SUM(qty),0) FROM sale_items WHERE product_id = p.id) AS sold '
         'FROM products p LEFT JOIN categories c ON c.id = p.category_id ORDER BY p.name COLLATE NOCASE');
     quick = [...products.where((p) => asInt(p['stock']) > 0)]..sort((a, b) => asInt(b['sold']).compareTo(asInt(a['sold'])));
     if (quick.length > 10) quick = quick.sublist(0, 10);
@@ -230,8 +229,7 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
       if (o.customer != null) '${o.customer!['name']}',
       if (o.pay != null) o.pay == 'due' ? 'on credit' : o.pay!.toUpperCase(),
     ].join(' · ');
-    toast(context, o.unknown.isEmpty ? 'Bill ready: $got — check and save' : 'Added $got · not found: ${o.unknown.join(', ')}',
-        error: o.unknown.isNotEmpty);
+    toast(context, o.unknown.isEmpty ? 'Bill ready: $got — check and save' : 'Added $got · not found: ${o.unknown.join(', ')}', error: o.unknown.isNotEmpty);
   }
 
   // ---------------------------------------------------------------- draft
@@ -251,7 +249,9 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
         'lines': [
           for (final l in cart) {'p': l.id, 'qty': l.qty, 'rate': l.rate, 'serial': l.serial.text, 'opp': l.opp.text},
         ],
-        'splits': [for (final sp in splits) {'account': sp.account, 'amount': sp.ctrl.text}],
+        'splits': [
+          for (final sp in splits) {'account': sp.account, 'amount': sp.ctrl.text}
+        ],
       };
 
   void _saveDraft() {
@@ -492,7 +492,10 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
   /// In-stock IMEIs of a product not already on this bill.
   Future<List<String>> _freeSerials(int pid) async {
     final used = {for (final l in cart) SmartImei.clean(l.serial.text)};
-    return [for (final x in await SmartImei.inStock(pid)) if (!used.contains(SmartImei.clean(x))) x];
+    return [
+      for (final x in await SmartImei.inStock(pid))
+        if (!used.contains(SmartImei.clean(x))) x
+    ];
   }
 
   /// Lets the user pick which in-stock IMEI is being sold.
@@ -517,8 +520,7 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-              child: Text('${l.p['name']} · ${free.length} IMEI${free.length == 1 ? '' : 's'} in stock',
-                  style: _j(15, FontWeight.w800, _ink)),
+              child: Text('${l.p['name']} · ${free.length} IMEI${free.length == 1 ? '' : 's'} in stock', style: _j(15, FontWeight.w800, _ink)),
             ),
             Flexible(
               child: ListView(shrinkWrap: true, children: [
@@ -659,8 +661,7 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
             decoration: const InputDecoration(prefixText: '₹ ', labelText: 'Rate per unit (before GST)'),
           ),
           const SizedBox(height: 8),
-          Text('MRP ${Money.rs(asInt(l.p['mrp']))} · list price ${Money.rs(asInt(l.p['price']))}',
-              style: _j(12, FontWeight.w500, _muted)),
+          Text('MRP ${Money.rs(asInt(l.p['mrp']))} · list price ${Money.rs(asInt(l.p['price']))}', style: _j(12, FontWeight.w500, _muted)),
         ]),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
@@ -724,7 +725,13 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
     }
     // AI margin guard: below cost / almost no margin
     final issues = Brain.marginCheck([for (final l in cart) (l.p, l.rate)]);
-    if (issues.isNotEmpty) {
+    // staff who may not see cost: the price is checked, the cost stays hidden
+    if (issues.isNotEmpty && !Books.can('profit')) {
+      if (issues.any((i) => i.loss)) {
+        toast(context, 'Price too low for ${issues.firstWhere((i) => i.loss).name} — ask the owner', error: true);
+        return;
+      }
+    } else if (issues.isNotEmpty) {
       final ok = await showDialog<bool>(
         context: context,
         builder: (c) => AlertDialog(
@@ -750,7 +757,8 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
     }
     // AI credit score: warn before giving credit to a risky customer
     // the score of THIS customer, fresh (not one still loading for another)
-    final sc = customer != null && due > 0 ? await Brain.customerScore(asInt(customer!['id'])).catchError((_) => const CustomerScore(100, 0, 0, 0, 0, 0)) : null;
+    final sc =
+        customer != null && due > 0 ? await Brain.customerScore(asInt(customer!['id'])).catchError((_) => const CustomerScore(100, 0, 0, 0, 0, 0)) : null;
     if (!mounted) return;
     if (customer != null && due > 0 && sc != null && sc.score < 40) {
       final ok = await showDialog<bool>(
@@ -798,7 +806,10 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
         date: date,
         note: note.text.trim().isEmpty ? null : note.text.trim(),
         splits: payMode == 'split'
-            ? [for (final sp in splits) if (sp.account != null && _parse(sp.ctrl) > 0) MapEntry(sp.account!, _parse(sp.ctrl))]
+            ? [
+                for (final sp in splits)
+                  if (sp.account != null && _parse(sp.ctrl) > 0) MapEntry(sp.account!, _parse(sp.ctrl))
+              ]
             : null,
       );
       if (account != null) await Books.setSetting('last_pay_account', '$account');
@@ -962,14 +973,12 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
             height: 42,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(16),
-              gradient: LinearGradient(
-                  colors: c == null ? const [Color(0xFFE2E8F0), Color(0xFFCBD5E1)] : const [Color(0xFF4FD8E0), Color(0xFF139DB0)]),
+              gradient: LinearGradient(colors: c == null ? const [Color(0xFFE2E8F0), Color(0xFFCBD5E1)] : const [Color(0xFF4FD8E0), Color(0xFF139DB0)]),
             ),
             alignment: Alignment.center,
             child: c == null
                 ? const Icon(Icons.storefront_rounded, color: Color(0xFF475569))
-                : Text((c['name'] as String).isEmpty ? '?' : (c['name'] as String)[0].toUpperCase(),
-                    style: _j(20, FontWeight.w800, Colors.white)),
+                : Text((c['name'] as String).isEmpty ? '?' : (c['name'] as String)[0].toUpperCase(), style: _j(20, FontWeight.w800, Colors.white)),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -1027,8 +1036,7 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
                   ),
                 ),
               ),
-              if (search.text.isNotEmpty)
-                GestureDetector(onTap: search.clear, child: const Icon(Icons.close_rounded, color: _muted, size: 20)),
+              if (search.text.isNotEmpty) GestureDetector(onTap: search.clear, child: const Icon(Icons.close_rounded, color: _muted, size: 20)),
             ]),
           ),
         ),
@@ -1113,7 +1121,11 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
 
   /// Inline category chips + a sideways product strip (best sellers for "All").
   Widget _quickPicks() {
-    final cats = <String>{for (final p in products) if ((p['category'] as String?)?.isNotEmpty == true) p['category'] as String}.toList()..sort();
+    final cats = <String>{
+      for (final p in products)
+        if ((p['category'] as String?)?.isNotEmpty == true) p['category'] as String
+    }.toList()
+      ..sort();
     final list = cat == null
         ? (quick.isEmpty ? products.take(12).toList() : quick)
         : (products.where((p) => p['category'] == cat).toList()..sort((a, b) => asInt(b['stock']).compareTo(asInt(a['stock']))));
@@ -1191,7 +1203,11 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                                 decoration: BoxDecoration(
-                                  color: stock <= 0 ? _red : stock <= asInt(p['low_stock']) ? _amber : _green,
+                                  color: stock <= 0
+                                      ? _red
+                                      : stock <= asInt(p['low_stock'])
+                                          ? _amber
+                                          : _green,
                                   borderRadius: BorderRadius.circular(6),
                                 ),
                                 child: Text('$stock', style: _j(9, FontWeight.w800, Colors.white)),
@@ -1226,8 +1242,7 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
           ),
           const SizedBox(width: 10),
           Expanded(child: Text('Cart', style: _j(15, FontWeight.w800, _ink))),
-          if (cart.isNotEmpty)
-            Text('$qtyTotal item${qtyTotal == 1 ? '' : 's'}', style: _j(12, FontWeight.w700, _muted)),
+          if (cart.isNotEmpty) Text('$qtyTotal item${qtyTotal == 1 ? '' : 's'}', style: _j(12, FontWeight.w700, _muted)),
           if (cart.isNotEmpty)
             IconButton(
               tooltip: 'Clear cart',
@@ -1380,12 +1395,10 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
             Padding(
               padding: const EdgeInsets.only(top: 5, left: 4),
               child: Row(children: [
-                Icon(l.imeiWarn != null ? Icons.warning_amber_rounded : Icons.verified_rounded,
-                    size: 14, color: l.imeiWarn != null ? _red : _green),
+                Icon(l.imeiWarn != null ? Icons.warning_amber_rounded : Icons.verified_rounded, size: 14, color: l.imeiWarn != null ? _red : _green),
                 const SizedBox(width: 5),
                 Expanded(
-                  child: Text(l.imeiWarn ?? l.imeiInfo!,
-                      style: _j(11, FontWeight.w700, l.imeiWarn != null ? _red : _green)),
+                  child: Text(l.imeiWarn ?? l.imeiInfo!, style: _j(11, FontWeight.w700, l.imeiWarn != null ? _red : _green)),
                 ),
               ]),
             ),
@@ -1395,8 +1408,8 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
               child: Container(
                 height: 40,
                 padding: const EdgeInsets.symmetric(horizontal: 10),
-                decoration: BoxDecoration(
-                    color: const Color(0xFFF2FBF6), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFCDEEDB))),
+                decoration:
+                    BoxDecoration(color: const Color(0xFFF2FBF6), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFCDEEDB))),
                 child: Row(children: [
                   const Icon(Icons.badge_rounded, size: 18, color: _green),
                   const SizedBox(width: 8),
@@ -1493,15 +1506,16 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
         const Divider(color: Color(0xFFEEF0F8)),
         row('Total', Money.rs(total), color: _navy, bold: true),
         const SizedBox(height: 4),
-        GestureDetector(
-          onTap: () => setState(() => showProfit = !showProfit),
-          child: Row(children: [
-            Icon(showProfit ? Icons.visibility_rounded : Icons.visibility_off_rounded, size: 16, color: _muted),
-            const SizedBox(width: 6),
-            Text(showProfit ? 'Profit on this bill: ${Money.rs(profit)}' : 'Show profit (owner only)',
-                style: _j(11.5, FontWeight.w700, showProfit ? (profit >= 0 ? _green : _red) : _muted)),
-          ]),
-        ),
+        if (Books.can('profit'))
+          GestureDetector(
+            onTap: () => setState(() => showProfit = !showProfit),
+            child: Row(children: [
+              Icon(showProfit ? Icons.visibility_rounded : Icons.visibility_off_rounded, size: 16, color: _muted),
+              const SizedBox(width: 6),
+              Text(showProfit ? 'Profit on this bill: ${Money.rs(profit)}' : 'Show profit (owner only)',
+                  style: _j(11.5, FontWeight.w700, showProfit ? (profit >= 0 ? _green : _red) : _muted)),
+            ]),
+          ),
       ]),
     );
   }
@@ -1529,8 +1543,11 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
       );
 
   // ---------------------------------------------------------------- payment
-  IconData _accIcon(String? k) =>
-      k == 'cash' ? Icons.payments_rounded : k == 'upi' ? Icons.qr_code_2_rounded : Icons.account_balance_rounded;
+  IconData _accIcon(String? k) => k == 'cash'
+      ? Icons.payments_rounded
+      : k == 'upi'
+          ? Icons.qr_code_2_rounded
+          : Icons.account_balance_rounded;
 
   void _setMode(String m) {
     HapticFeedback.selectionClick();
@@ -1658,8 +1675,7 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
         const SizedBox(height: 12),
         Row(children: [
           Expanded(
-            child: _stat(change > 0 ? 'Change to return' : 'Collected now', Money.rs(change > 0 ? change : paid),
-                change > 0 ? _amber : _green),
+            child: _stat(change > 0 ? 'Change to return' : 'Collected now', Money.rs(change > 0 ? change : paid), change > 0 ? _amber : _green),
           ),
           const SizedBox(width: 10),
           Expanded(child: _stat(due > 0 ? 'Goes to due' : 'Balance due', Money.rs(due), due > 0 ? _red : _muted)),
@@ -1848,8 +1864,7 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
               const Icon(Icons.notifications_active_rounded, size: 16, color: _amber),
               const SizedBox(width: 6),
               Expanded(
-                child: Text('Alarm rings on ${prettyDate(promise!)} at ${fmtT(promiseAt)} · reminder the day before',
-                    style: _j(11.5, FontWeight.w600, _muted)),
+                child: Text('Alarm rings on ${prettyDate(promise!)} at ${fmtT(promiseAt)} · reminder the day before', style: _j(11.5, FontWeight.w600, _muted)),
               ),
               Text('Time', style: _j(12, FontWeight.w800, _purple)),
             ]),
@@ -1976,19 +1991,15 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
                           margin: const EdgeInsets.only(right: 6),
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
                           decoration: BoxDecoration(
-                            gradient: splits[i].account == asInt(a['id'])
-                                ? const LinearGradient(colors: [Color(0xFF6B35EE), Color(0xFF4318D2)])
-                                : null,
+                            gradient: splits[i].account == asInt(a['id']) ? const LinearGradient(colors: [Color(0xFF6B35EE), Color(0xFF4318D2)]) : null,
                             color: splits[i].account == asInt(a['id']) ? null : Colors.white,
                             borderRadius: BorderRadius.circular(12),
                             border: splits[i].account == asInt(a['id']) ? null : Border.all(color: _line),
                           ),
                           child: Row(mainAxisSize: MainAxisSize.min, children: [
-                            Icon(_accIcon(a['kind'] as String?), size: 15,
-                                color: splits[i].account == asInt(a['id']) ? Colors.white : _purple),
+                            Icon(_accIcon(a['kind'] as String?), size: 15, color: splits[i].account == asInt(a['id']) ? Colors.white : _purple),
                             const SizedBox(width: 4),
-                            Text(a['name'] as String,
-                                style: _j(11.5, FontWeight.w700, splits[i].account == asInt(a['id']) ? Colors.white : _ink)),
+                            Text(a['name'] as String, style: _j(11.5, FontWeight.w700, splits[i].account == asInt(a['id']) ? Colors.white : _ink)),
                           ]),
                         ),
                       ),
@@ -2031,12 +2042,26 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
       Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
         decoration: BoxDecoration(
-          color: diff == 0 ? const Color(0xFFE3F7EC) : diff > 0 ? const Color(0xFFFFF1DC) : const Color(0xFFFDE4EA),
+          color: diff == 0
+              ? const Color(0xFFE3F7EC)
+              : diff > 0
+                  ? const Color(0xFFFFF1DC)
+                  : const Color(0xFFFDE4EA),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Row(children: [
-          Icon(diff == 0 ? Icons.check_circle_rounded : diff > 0 ? Icons.info_rounded : Icons.error_rounded,
-              size: 17, color: diff == 0 ? _green : diff > 0 ? _amber : _red),
+          Icon(
+              diff == 0
+                  ? Icons.check_circle_rounded
+                  : diff > 0
+                      ? Icons.info_rounded
+                      : Icons.error_rounded,
+              size: 17,
+              color: diff == 0
+                  ? _green
+                  : diff > 0
+                      ? _amber
+                      : _red),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -2045,7 +2070,14 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
                   : diff > 0
                       ? '${Money.rs(diff)} left — it will go to the customer\'s due'
                       : '${Money.rs(-diff)} more than the bill — reduce an amount',
-              style: _j(12, FontWeight.w700, diff == 0 ? const Color(0xFF0E6E47) : diff > 0 ? const Color(0xFF9A5B00) : _red),
+              style: _j(
+                  12,
+                  FontWeight.w700,
+                  diff == 0
+                      ? const Color(0xFF0E6E47)
+                      : diff > 0
+                          ? const Color(0xFF9A5B00)
+                          : _red),
             ),
           ),
         ]),
@@ -2189,9 +2221,7 @@ class _CustomerSheetState extends State<_CustomerSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final list = widget.customers
-        .where((c) => q.isEmpty || '${c['name']} ${c['phone'] ?? ''}'.toLowerCase().contains(q.toLowerCase()))
-        .toList();
+    final list = widget.customers.where((c) => q.isEmpty || '${c['name']} ${c['phone'] ?? ''}'.toLowerCase().contains(q.toLowerCase())).toList();
     return DraggableScrollableSheet(
       initialChildSize: .75,
       maxChildSize: .95,
@@ -2245,8 +2275,7 @@ class _CustomerSheetState extends State<_CustomerSheet> {
     );
   }
 
-  Widget _tile({required Widget leading, required String title, required String sub, int due = 0, required VoidCallback onTap}) =>
-      Padding(
+  Widget _tile({required Widget leading, required String title, required String sub, int due = 0, required VoidCallback onTap}) => Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: Material(
           color: Colors.white,
@@ -2289,8 +2318,7 @@ class SaleSuccessScreen extends StatelessWidget {
 
   Future<(Rec, List<Rec>, Map<String, String>)> _load() async {
     final s = (await Books.query(
-            'SELECT s.*, c.name AS customer, c.phone AS phone FROM sales s LEFT JOIN customers c ON c.id = s.customer_id WHERE s.id = ?',
-            [saleId]))
+            'SELECT s.*, c.name AS customer, c.phone AS phone FROM sales s LEFT JOIN customers c ON c.id = s.customer_id WHERE s.id = ?', [saleId]))
         .first;
     return (s, await Books.query('SELECT * FROM sale_items WHERE sale_id = ?', [saleId]), await Books.settings());
   }
@@ -2345,8 +2373,7 @@ class SaleSuccessScreen extends StatelessWidget {
               Center(child: Text('Sale completed!', style: _j(22, FontWeight.w800, _navy))),
               const SizedBox(height: 4),
               Center(
-                child: Text('${s['number']} · ${(s['customer'] as String?) ?? 'Walk-in customer'}',
-                    style: _j(13, FontWeight.w600, _muted)),
+                child: Text('${s['number']} · ${(s['customer'] as String?) ?? 'Walk-in customer'}', style: _j(13, FontWeight.w600, _muted)),
               ),
               const SizedBox(height: 20),
               Container(
@@ -2369,8 +2396,7 @@ class SaleSuccessScreen extends StatelessWidget {
               const SizedBox(height: 18),
               Row(children: [
                 Expanded(
-                  child: _action(Icons.print_rounded, 'Print bill', const [Color(0xFF6B35EE), Color(0xFF4318D2)],
-                      () => quickPrint(context, saleId)),
+                  child: _action(Icons.print_rounded, 'Print bill', const [Color(0xFF6B35EE), Color(0xFF4318D2)], () => quickPrint(context, saleId)),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -2379,11 +2405,9 @@ class SaleSuccessScreen extends StatelessWidget {
                 ),
               ]),
               const SizedBox(height: 10),
-              _action(Icons.picture_as_pdf_rounded, 'Share PDF bill', const [Color(0xFF38BDF8), Color(0xFF0E7490)],
-                  () => shareInvoicePdf(context, saleId)),
+              _action(Icons.picture_as_pdf_rounded, 'Share PDF bill', const [Color(0xFF38BDF8), Color(0xFF0E7490)], () => shareInvoicePdf(context, saleId)),
               const SizedBox(height: 10),
-              _action(Icons.send_rounded, 'Send invoice on WhatsApp', const [Color(0xFF25D366), Color(0xFF128C7E)],
-                  () => _whatsApp(context, s, d.$2, d.$3)),
+              _action(Icons.send_rounded, 'Send invoice on WhatsApp', const [Color(0xFF25D366), Color(0xFF128C7E)], () => _whatsApp(context, s, d.$2, d.$3)),
               const SizedBox(height: 10),
               _action(Icons.receipt_long_rounded, 'View invoice', const [Color(0xFF1B2163), Color(0xFF3F5BEA)],
                   () => Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => SaleView(id: saleId)))),
@@ -2430,7 +2454,6 @@ class SaleSuccessScreen extends StatelessWidget {
         ),
       );
 }
-
 
 /// "Which product is this device?" — shown for an IMEI the app hasn't seen.
 class _PickProductSheet extends StatefulWidget {
@@ -2501,8 +2524,8 @@ class _PickProductSheetState extends State<_PickProductSheet> {
               ListTile(
                 leading: ProductThumb(p, width: 40, height: 44),
                 title: Text('${p['name']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(13.5, FontWeight.w700, _ink)),
-                subtitle: Text([p['variant'], 'Stock ${p['stock']}'].where((e) => e != null && '$e'.isNotEmpty).join(' · '),
-                    style: _j(11, FontWeight.w500, _muted)),
+                subtitle:
+                    Text([p['variant'], 'Stock ${p['stock']}'].where((e) => e != null && '$e'.isNotEmpty).join(' · '), style: _j(11, FontWeight.w500, _muted)),
                 trailing: Text(Money.rs(asInt(p['price'])), style: _j(13, FontWeight.w800, _purple)),
                 onTap: () => Navigator.pop(context, p),
               ),

@@ -74,9 +74,7 @@ class SaleView extends StatelessWidget {
           'LEFT JOIN products p ON p.id = i.product_id LEFT JOIN categories c ON c.id = p.category_id '
           'WHERE i.sale_id = ? ORDER BY i.id',
           [id]),
-      await Books.query(
-          'SELECT a.name AS name, p.amount AS amount FROM sale_payments p JOIN accounts a ON a.id = p.account_id WHERE p.sale_id = ?',
-          [id]),
+      await Books.query('SELECT a.name AS name, p.amount AS amount FROM sale_payments p JOIN accounts a ON a.id = p.account_id WHERE p.sale_id = ?', [id]),
       await Books.query('SELECT * FROM sale_returns WHERE sale_id = ? ORDER BY id', [id]),
       await Books.settings(),
     );
@@ -204,7 +202,11 @@ class SaleView extends StatelessWidget {
     final s = d.sale;
     final total = asInt(s['total']), paid = asInt(s['paid']);
     final due = total - paid;
-    final (label, color) = paid >= total ? ('FULLY PAID', const Color(0xFF9CF5C4)) : paid > 0 ? ('PART PAID', const Color(0xFFFFE08A)) : ('UNPAID', const Color(0xFFFFB4B4));
+    final (label, color) = paid >= total
+        ? ('FULLY PAID', const Color(0xFF9CF5C4))
+        : paid > 0
+            ? ('PART PAID', const Color(0xFFFFE08A))
+            : ('UNPAID', const Color(0xFFFFB4B4));
     final name = (s['customer'] as String?) ?? 'Walk-in customer';
     final phone = s['phone'] as String?;
     final time = DateTime.tryParse('${s['created_at']}');
@@ -212,8 +214,7 @@ class SaleView extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(28),
-        gradient: const LinearGradient(
-            begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF1B2163), Color(0xFF3A2BC9), Color(0xFF3F5BEA)]),
+        gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF1B2163), Color(0xFF3A2BC9), Color(0xFF3F5BEA)]),
         boxShadow: const [BoxShadow(color: Color(0x663A2BC9), blurRadius: 26, offset: Offset(0, 12), spreadRadius: -10)],
       ),
       child: Stack(children: [
@@ -247,7 +248,8 @@ class SaleView extends StatelessWidget {
               const Spacer(),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(color: color.withAlpha(0x33), borderRadius: BorderRadius.circular(10), border: Border.all(color: color.withAlpha(0x99))),
+                decoration:
+                    BoxDecoration(color: color.withAlpha(0x33), borderRadius: BorderRadius.circular(10), border: Border.all(color: color.withAlpha(0x99))),
                 child: Text(label, style: _j(10.5, FontWeight.w800, color, spacing: .8)),
               ),
             ]),
@@ -362,7 +364,8 @@ class SaleView extends StatelessWidget {
     return Row(children: [
       tile(Icons.print_rounded, 'Print', const [Color(0xFF6B35EE), Color(0xFF4318D2)], () => quickPrint(context, id)),
       const SizedBox(width: 8),
-      tile(Icons.tune_rounded, 'Custom', const [Color(0xFF38BDF8), Color(0xFF2563EB)], () => gate(context, 'custom_print') ? open(context, PrintStudio(saleId: id)) : null),
+      tile(Icons.tune_rounded, 'Custom', const [Color(0xFF38BDF8), Color(0xFF2563EB)],
+          () => gate(context, 'custom_print') ? open(context, PrintStudio(saleId: id)) : null),
       const SizedBox(width: 8),
       tile(Icons.picture_as_pdf_rounded, 'PDF', const [Color(0xFFFF6B8B), Color(0xFFE0245E)], () => shareInvoicePdf(context, id)),
       const SizedBox(width: 8),
@@ -446,20 +449,22 @@ class SaleView extends StatelessWidget {
         row('Total', Money.rs(total), bold: true),
         for (final p in d.payments) row('Paid · ${p['name']}', Money.rs(asInt(p['amount'])), color: _green),
         if (due > 0) row('Balance due', Money.rs(due), color: _red, bold: true),
-        const Divider(height: 16),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: (profit >= 0 ? _green : _red).withAlpha(0x14),
-            borderRadius: BorderRadius.circular(14),
+        if (Books.can('profit')) ...[
+          const Divider(height: 16),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: (profit >= 0 ? _green : _red).withAlpha(0x14),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Row(children: [
+              Icon(profit >= 0 ? Icons.trending_up_rounded : Icons.trending_down_rounded, color: profit >= 0 ? _green : _red),
+              const SizedBox(width: 8),
+              Expanded(child: Text('Profit on this invoice', style: _j(13, FontWeight.w700, _ink))),
+              Text(Money.rs(profit), style: _j(14.5, FontWeight.w800, profit >= 0 ? _green : _red)),
+            ]),
           ),
-          child: Row(children: [
-            Icon(profit >= 0 ? Icons.trending_up_rounded : Icons.trending_down_rounded, color: profit >= 0 ? _green : _red),
-            const SizedBox(width: 8),
-            Expanded(child: Text('Profit on this invoice', style: _j(13, FontWeight.w700, _ink))),
-            Text(Money.rs(profit), style: _j(14.5, FontWeight.w800, profit >= 0 ? _green : _red)),
-          ]),
-        ),
+        ],
       ]),
     );
   }
@@ -477,7 +482,8 @@ class SaleView extends StatelessWidget {
                 const Icon(Icons.assignment_return_rounded, color: Color(0xFFE0245E), size: 20),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text('${r['number']} · ${prettyDate('${r['date']}')}'
+                  child: Text(
+                      '${r['number']} · ${prettyDate('${r['date']}')}'
                       '${asInt(r['deduction']) > 0 ? ' · kept ${Money.rs(asInt(r['deduction']))}' : ''}',
                       style: _j(12, FontWeight.w600, _muted)),
                 ),

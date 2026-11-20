@@ -78,7 +78,7 @@ class _StaffScreenState extends State<StaffScreen> {
     final name = TextEditingController(text: s?.name ?? '');
     final pin = TextEditingController();
     var role = s?.role ?? 'sales';
-    var perms = {...?s?.perms};
+    var perms = s == null ? {...Staff.roles['sales']!.$2} : {...s.perms};
     var active = s?.active ?? true;
     final ok = await showModalBottomSheet<bool>(
       context: context,
@@ -101,30 +101,54 @@ class _StaffScreenState extends State<StaffScreen> {
               ),
               Text('Role', style: _j(13, FontWeight.w800, _ink)),
               const SizedBox(height: 6),
-              Wrap(spacing: 6, children: [
-                for (final r in Staff.roles.entries)
-                  ChoiceChip(
-                    label: Text(r.value.$1),
-                    selected: role == r.key,
-                    onSelected: (_) => set(() {
-                      role = r.key;
-                      if (r.key != 'custom') perms = {...r.value.$2};
+              SizedBox(
+                height: 92,
+                child: ListView(scrollDirection: Axis.horizontal, children: [
+                  for (final r in Staff.roles.entries)
+                    GestureDetector(
+                      onTap: () => set(() {
+                        role = r.key;
+                        if (r.key != 'custom') perms = {...r.value.$2};
+                      }),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 180),
+                        width: 150,
+                        margin: const EdgeInsets.only(right: 8),
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(16),
+                          gradient: role == r.key ? const LinearGradient(colors: [Color(0xFF6B35EE), Color(0xFF4318D2)]) : null,
+                          color: role == r.key ? null : const Color(0xFFF4F5FB),
+                        ),
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(r.value.$1, style: _j(13.5, FontWeight.w800, role == r.key ? Colors.white : _ink)),
+                          const SizedBox(height: 3),
+                          Text(r.value.$3, maxLines: 3, overflow: TextOverflow.ellipsis,
+                              style: _j(10.5, FontWeight.w600, role == r.key ? const Color(0xD9FFFFFF) : _muted)),
+                        ]),
+                      ),
+                    ),
+                ]),
+              ),
+              const SizedBox(height: 6),
+              for (final g in Staff.groups) ...[
+                Padding(
+                  padding: const EdgeInsets.only(top: 10, bottom: 2),
+                  child: Text(g.toUpperCase(), style: _j(11, FontWeight.w800, _purple).copyWith(letterSpacing: 1.1)),
+                ),
+                for (final p in Staff.perms.entries.where((e) => e.value.$3 == g))
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    value: perms.contains(p.key),
+                    title: Text(p.value.$1, style: _j(13.5, FontWeight.w700, _ink)),
+                    subtitle: Text(p.value.$2, style: _j(11.5, FontWeight.w500, _muted)),
+                    onChanged: (v) => set(() {
+                      v ? perms.add(p.key) : perms.remove(p.key);
+                      role = 'custom';
                     }),
                   ),
-              ]),
-              const SizedBox(height: 8),
-              for (final p in Staff.perms.entries)
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  value: perms.contains(p.key),
-                  title: Text(p.value.$1, style: _j(13.5, FontWeight.w700, _ink)),
-                  subtitle: Text(p.value.$2, style: _j(11.5, FontWeight.w500, _muted)),
-                  onChanged: (v) => set(() {
-                    v ? perms.add(p.key) : perms.remove(p.key);
-                    role = 'custom';
-                  }),
-                ),
+              ],
               if (s != null)
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
@@ -228,7 +252,8 @@ class _StaffScreenState extends State<StaffScreen> {
               ),
               title: Text('${s.name}${s.active ? '' : ' (inactive)'}', style: _j(14, FontWeight.w800, _ink)),
               subtitle: Text(
-                '${Staff.roles[s.role]?.$1 ?? s.role} · ${s.perms.isEmpty ? 'sales only' : s.perms.map((p) => Staff.perms[p]?.$1 ?? p).join(', ')}',
+                '${Staff.roles[s.role]?.$1 ?? s.role} · ${s.perms.length} of ${Staff.perms.length} permissions'
+                '${s.perms.contains('profit') ? '' : ' · no profit'}${s.perms.contains('dashboard') ? '' : ' · no dashboard'}',
                 style: _j(11.5, FontWeight.w500, _muted),
               ),
               trailing: IconButton(
@@ -407,6 +432,128 @@ class _WhoIsWorkingState extends State<_WhoIsWorking> {
           ),
           const SizedBox(height: 6),
           Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(12, FontWeight.w700, Colors.white)),
+        ]),
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// What a staff member sees instead of the owner's screens
+// =============================================================================
+
+/// Shown in place of a screen the person may not open.
+class LockedView extends StatelessWidget {
+  final String what;
+  const LockedView(this.what, {super.key});
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        backgroundColor: const Color(0xFFF2F3FA),
+        body: SafeArea(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(28),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Container(
+                  width: 86,
+                  height: 86,
+                  decoration: const BoxDecoration(shape: BoxShape.circle, gradient: LinearGradient(colors: [Color(0xFF6B35EE), Color(0xFF1B1F6B)])),
+                  child: const Icon(Icons.lock_rounded, color: Colors.white, size: 40),
+                ),
+                const SizedBox(height: 18),
+                Text('$what is for the owner', textAlign: TextAlign.center, style: _j(19, FontWeight.w800, _ink)),
+                const SizedBox(height: 6),
+                Text('${Staff.who}, ask the owner to give you this permission (Menu → Staff & permissions).',
+                    textAlign: TextAlign.center, style: _j(13, FontWeight.w500, _muted)),
+                const SizedBox(height: 18),
+                OutlinedButton.icon(onPressed: Staff.signOut, icon: const Icon(Icons.switch_account_rounded), label: const Text('Switch user')),
+              ]),
+            ),
+          ),
+        ),
+      );
+}
+
+/// Home for staff without the dashboard: their work, nothing else.
+class StaffHome extends StatelessWidget {
+  final void Function(BuildContext context, String action) onAction;
+  const StaffHome({super.key, required this.onAction});
+
+  @override
+  Widget build(BuildContext context) {
+    final who = Staff.who;
+    final tiles = <(String, String, IconData, List<Color>, String)>[
+      if (Staff.can('sale')) ('New sale', 'Bill, scan, IMEI', Icons.point_of_sale_rounded, const [Color(0xFF6B35EE), Color(0xFF4318D2)], 'sale'),
+      if (Staff.can('sale')) ('AI bill', 'Type or say the bill', Icons.auto_awesome_rounded, const [Color(0xFFFFB84D), Color(0xFFE0245E)], 'ai'),
+      if (Staff.can('collect')) ('Receive money', 'From a customer', Icons.payments_rounded, const [Color(0xFF34D399), Color(0xFF0E7490)], 'collect'),
+      if (Staff.can('repairs')) ('Repair jobs', 'Job cards & delivery', Icons.build_circle_rounded, const [Color(0xFF38BDF8), Color(0xFF2563EB)], 'repairs'),
+      if (Staff.can('returns')) ('Sale return', 'Take goods back', Icons.undo_rounded, const [Color(0xFFFF7A9A), Color(0xFFD81E4A)], 'returns'),
+      if (Staff.can('purchase')) ('Purchase', 'Supplier bill', Icons.shopping_bag_rounded, const [Color(0xFFB58CFF), Color(0xFF7B3FF2)], 'purchase'),
+      if (Staff.can('products')) ('Products', 'Stock & prices', Icons.inventory_2_rounded, const [Color(0xFF818CF8), Color(0xFF4338CA)], 'products'),
+      if (Staff.can('customers')) ('Customers', 'Khata & phones', Icons.people_alt_rounded, const [Color(0xFF2DD4BF), Color(0xFF0D9488)], 'customers'),
+    ];
+    return Scaffold(
+      backgroundColor: const Color(0xFFF2F3FA),
+      body: SafeArea(
+        child: ListView(padding: const EdgeInsets.fromLTRB(16, 12, 16, 140), children: [
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(26),
+              gradient: const LinearGradient(colors: [Color(0xFF12164A), Color(0xFF3B1CC8), Color(0xFF7B3FF2)]),
+            ),
+            child: Row(children: [
+              CircleAvatar(
+                radius: 26,
+                backgroundColor: const Color(0x33FFFFFF),
+                child: Text(who.isEmpty ? '?' : who[0].toUpperCase(), style: _j(22, FontWeight.w800, Colors.white)),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Hi $who 👋', style: _j(20, FontWeight.w800, Colors.white)),
+                  FutureBuilder<int>(
+                    future: Books.query(
+                            "SELECT COUNT(*) AS c FROM audit_log WHERE kind = 'sale' AND staff = ? AND message LIKE 'New sale%' AND substr(created_at, 1, 10) = ?",
+                            [who, DateTime.now().toIso8601String().substring(0, 10)])
+                        .then((r) => asInt(r.first['c'])),
+                    builder: (_, s) => Text(s.hasData ? 'Your bills today: ${s.data}' : ' ', style: _j(12.5, FontWeight.w600, const Color(0xD9FFFFFF))),
+                  ),
+                ]),
+              ),
+              IconButton(onPressed: Staff.signOut, tooltip: 'Switch user', icon: const Icon(Icons.switch_account_rounded, color: Colors.white)),
+            ]),
+          ),
+          const SizedBox(height: 14),
+          GridView.count(
+            crossAxisCount: 2,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            mainAxisSpacing: 12,
+            crossAxisSpacing: 12,
+            childAspectRatio: 1.25,
+            children: [
+              for (final (t, sub, icon, colors, action) in tiles)
+                GestureDetector(
+                  onTap: () => onAction(context, action),
+                  child: Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(22),
+                      gradient: LinearGradient(colors: colors, begin: Alignment.topLeft, end: Alignment.bottomRight),
+                      boxShadow: [BoxShadow(color: colors.last.withAlpha(0x55), blurRadius: 18, offset: const Offset(0, 8), spreadRadius: -8)],
+                    ),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Icon(icon, color: Colors.white, size: 30),
+                      const Spacer(),
+                      Text(t, style: _j(15.5, FontWeight.w800, Colors.white)),
+                      Text(sub, style: _j(11.5, FontWeight.w600, const Color(0xD9FFFFFF))),
+                    ]),
+                  ),
+                ),
+            ],
+          ),
+          if (tiles.isEmpty) const Padding(padding: EdgeInsets.only(top: 30), child: EmptyState('No permissions yet — ask the owner')),
         ]),
       ),
     );

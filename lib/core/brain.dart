@@ -412,8 +412,13 @@ class Brain {
     const join = 'FROM sale_items i JOIN sales s ON s.id = i.sale_id JOIN products p ON p.id = i.product_id '
         'LEFT JOIN categories c ON c.id = p.category_id WHERE s.date BETWEEN ? AND ?';
 
+    // staff see only what their permissions allow
+    Answer locked(String what) => Answer('🔒 $what is for the owner', detail: 'Ask the owner for this permission (Menu → Staff & permissions)');
+    final figures = Books.can('dashboard') || Books.can('reports');
+
     // ---- intents
     if (has(['owe', 'owes', 'due', 'dues', 'baki', 'udhar', 'pabo', 'pawna', 'receivable'])) {
+      if (!Books.can('customers') && !figures) return locked('The dues list');
       final bal = await Books.partyBalances('customer');
       final names = {for (final c in await Books.query('SELECT id, name FROM customers')) asInt(c['id']): '${c['name']}'};
       final list = bal.entries.where((e) => e.value > 0).toList()..sort((a, b) => b.value.compareTo(a.value));
@@ -432,7 +437,11 @@ class Brain {
       final units = list.fold<int>(0, (a, p) => a + asInt(p['stock']));
       final value = list.fold<int>(0, (a, p) => a + asInt(p['stock']) * asInt(p['cost']));
       list.sort((a, b) => asInt(b['stock']).compareTo(asInt(a['stock'])));
-      return Answer('$units in stock$what · worth ${Money.rs(value)}', rows: [for (final p in list.take(8)) ('${p['name']}', '${p['stock']}')]);
+      return Answer('$units in stock$what${Books.can('profit') ? ' · worth ${Money.rs(value)}' : ''}',
+          rows: [for (final p in list.take(8)) ('${p['name']}', '${p['stock']}')]);
+    }
+    if (!figures && has(['best', 'top', 'beshi', 'sobcheye', 'most sold', 'popular', 'hit', 'expense', 'expenses', 'khoroch', 'khorch', 'purchase', 'purchases', 'kena', 'kinechi', 'bought', 'kinlam'])) {
+      return locked('Sales figures');
     }
     if (has(['best', 'top', 'beshi', 'sobcheye', 'most sold', 'popular', 'hit'])) {
       final r = await Books.query(
@@ -460,6 +469,7 @@ class Brain {
     final v = asInt(r['v']), profit = asInt(r['profit']);
     final margin = v == 0 ? 0 : (profit * 100 / v).round();
     if (has(['profit', 'labh', 'lav', 'munafa', 'income', 'margin', 'earn', 'kamai', 'lābh'])) {
+      if (!Books.can('profit')) return locked('Profit');
       return Answer('Profit $label$what: ${Money.rs(profit)}', detail: 'On sales of ${Money.rs(v)} · margin $margin% · ${r['q']} items', rows: [
         ('Sales (before GST)', Money.rs(v)),
         ('Cost of goods', Money.rs(v - profit)),
@@ -468,10 +478,12 @@ class Brain {
       ]);
     }
     // default: sales
+    if (!figures) return locked('Sales figures');
     final total = what.isEmpty
         ? asInt((await Books.query('SELECT IFNULL(SUM(total), 0) AS v FROM sales WHERE date BETWEEN ? AND ?', [from, to])).first['v'])
         : v;
-    return Answer('Sales $label$what: ${Money.rs(total)}', detail: '${r['bills']} bill${asInt(r['bills']) == 1 ? '' : 's'} · ${r['q']} items · profit ${Money.rs(profit)}');
+    return Answer('Sales $label$what: ${Money.rs(total)}',
+        detail: '${r['bills']} bill${asInt(r['bills']) == 1 ? '' : 's'} · ${r['q']} items${Books.can('profit') ? ' · profit ${Money.rs(profit)}' : ''}');
   }
 
   static const _stop = {

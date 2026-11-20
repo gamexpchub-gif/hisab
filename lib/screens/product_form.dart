@@ -791,7 +791,8 @@ class _ProductFormState extends State<ProductForm> {
           const SizedBox(width: 8),
           Expanded(child: _field(mrp, 'MRP', number: true, prefix: '₹')),
           const SizedBox(width: 8),
-          Expanded(child: _field(cost, isNew ? 'Purchase cost' : _costEditable ? 'Purchase cost' : 'Avg cost', number: true, prefix: '₹', enabled: _costEditable)),
+          if (Books.can('profit'))
+            Expanded(child: _field(cost, isNew ? 'Purchase cost' : _costEditable ? 'Purchase cost' : 'Avg cost', number: true, prefix: '₹', enabled: _costEditable)),
         ]),
         _inline('GST', [
           for (final g in _gstRates) _pill('${g ~/ 100}%', gstBp == g, () => setState(() => gstBp = g)),
@@ -803,8 +804,10 @@ class _ProductFormState extends State<ProductForm> {
             gradient: const LinearGradient(colors: [Color(0xFF14164A), Color(0xFF26238A)]),
           ),
           child: Row(children: [
-            metric('Profit', Money.rs(margin), margin >= 0 ? const Color(0xFF6EE7B7) : const Color(0xFFFF8A8A)),
-            metric('Margin', '${marginPct.toStringAsFixed(1)}%', Colors.white),
+            if (Books.can('profit')) ...[
+              metric('Profit', Money.rs(margin), margin >= 0 ? const Color(0xFF6EE7B7) : const Color(0xFFFF8A8A)),
+              metric('Margin', '${marginPct.toStringAsFixed(1)}%', Colors.white),
+            ],
             metric('With GST', Money.rs(p + gst), Colors.white),
             metric('Off MRP', '${off.toStringAsFixed(0)}%', const Color(0xFFFFD66B)),
           ]),

@@ -140,8 +140,25 @@ class Books {
   static String? Function()? actor;
 
   static void need(String perm, String what) {
+    if (_trusted > 0) return;
     final a = allow;
     if (a != null && !a(perm)) throw AccountingError('$what needs the owner\'s permission');
+  }
+
+  /// Is [perm] allowed for whoever is using the app?
+  static bool can(String perm) => allow?.call(perm) ?? true;
+
+  static int _trusted = 0;
+
+  /// Runs a step that is part of an allowed action (a repair advance is a
+  /// receipt, an exchange phone is a purchase) without its own check.
+  static Future<T> trusted<T>(Future<T> Function() body) async {
+    _trusted++;
+    try {
+      return await body();
+    } finally {
+      _trusted--;
+    }
   }
 
   /// Adds a line to the activity log.
@@ -190,6 +207,7 @@ class Books {
     List<MapEntry<int, int>>? splits, // account id → amount, for split payments
     int? editId, // re-saves an existing sale in place (same number)
   }) async {
+    need('sale', 'Making a sale');
     if (editId != null) need('edit_bill', 'Editing a bill');
     if (discount > 0) need('discount', 'Giving a discount');
     if (editId == null) await guard?.call('sale');
@@ -245,6 +263,7 @@ class Books {
       final parts = (splits ?? const <MapEntry<int, int>>[]).where((e) => e.value != 0).toList();
       if (parts.any((e) => e.value < 0)) throw AccountingError('Split amounts cannot be negative');
       final paidAmt = parts.isNotEmpty ? parts.fold<int>(0, (a, e) => a + e.value) : (paid ?? (customerId == null ? total : 0));
+      if (paidAmt < total) Books.need('credit', 'Selling on credit');
       if (paidAmt < 0 || paidAmt > total) throw AccountingError('Paid amount must be between 0 and the total');
       if (customerId == null && paidAmt != total) {
         throw AccountingError('Walk-in sales must be fully paid — select a customer for credit sales');
@@ -546,8 +565,10 @@ class Books {
     String? date,
     String? reference,
     String? note,
-  }) =>
-      _write((x) => _payment(x, kind: kind, partyId: partyId, amount: amount, accountId: accountId, date: date, reference: reference, note: note));
+  }) {
+    need(kind == 'receipt' ? 'collect' : 'cash_bank', kind == 'receipt' ? 'Receiving a payment' : 'Paying a supplier');
+    return _write((x) => _payment(x, kind: kind, partyId: partyId, amount: amount, accountId: accountId, date: date, reference: reference, note: note));
+  }
 
   static Future<int> _payment(
     DatabaseExecutor x, {
@@ -836,6 +857,7 @@ class Books {
     String? note,
     String? date,
   }) async {
+    need('returns', 'A sale return');
     final lines = await returnable(saleId);
     return _write((x) async {
       final when = date ?? ymd(DateTime.now());
@@ -921,6 +943,7 @@ class Books {
     String? date,
     String? note,
   }) {
+    need('cash_bank', 'Moving money between accounts');
     return _write((x) async {
       if (amount <= 0) throw AccountingError('Amount must be greater than zero');
       if (fromId == toId) throw AccountingError('Choose two different accounts');
@@ -943,6 +966,7 @@ class Books {
 
   // ------------------------------------------------------------ masters
   static Future<int> saveProduct(Rec data, {int? id, int openingQty = 0, int openingCost = 0}) async {
+    need('products', id == null ? 'Adding a product' : 'Editing a product');
     if (id == null) await guard?.call('product');
     return _write((x) async {
       final name = (data['name'] as String? ?? '').trim();
@@ -1006,6 +1030,8 @@ class Books {
   }
 
   static Future<int> saveParty(String type, Rec data, {int? id, int opening = 0}) {
+    // a salesman may add a customer while billing; editing needs 'customers'
+    if (id != null || type != 'customer' || !can('sale')) need('customers', id == null ? 'Adding a party' : 'Editing a party');
     return _write((x) async {
       final table = type == 'customer' ? 'customers' : 'suppliers';
       final name = (data['name'] as String? ?? '').trim();
@@ -1042,6 +1068,7 @@ class Books {
   /// A credit card is a liability (its balance is what you owe); an opening
   /// balance is posted against Opening Balance Equity.
   static Future<int> saveMoneyAccount(Rec data, {int? id, int opening = 0}) {
+    need('cash_bank', 'Changing cash & bank accounts');
     return _write((x) async {
       final name = '${data['name'] ?? ''}'.trim();
       if (name.isEmpty) throw AccountingError('Account name is required');

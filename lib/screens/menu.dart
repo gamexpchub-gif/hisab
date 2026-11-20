@@ -122,18 +122,26 @@ class _MenuScreenState extends State<MenuScreen> {
     );
   }
 
-  /// Menu items a staff member may not open.
+  /// Menu items and the permission each one needs (staff only).
   static const _needs = {
+    'dashboard': {'Analytics dashboard', 'Notifications'},
     'reports': {
-      'AI Brain', 'Pro Analytics', 'Daily AI Report', 'Analytics dashboard', 'Ledgers', 'Profit & Loss', 'Balance Sheet', 'GST Report',
-      'Trial Balance', 'Day Book', 'Excel Export', 'Cash & Bank', 'Loans & Investment', 'Hisab Sheets', 'AI Autopilot', 'Finance payouts',
+      'Pro Analytics', 'Daily AI Report', 'Ledgers', 'Profit & Loss', 'Balance Sheet', 'GST Report', 'Trial Balance', 'Day Book', 'Excel Export',
+      'Hisab Sheets',
     },
+    'ai_insights': {'Smart Business AI', 'AI Autopilot'},
+    'cash_bank': {'Cash & Bank', 'Loans & Investment', 'Finance payouts'},
     'settings': {
       'Plans & Subscription', 'My Stores', 'Admin Panel', 'Account & Cloud', 'Backup & Restore', 'Security', 'Business settings',
       'Staff & permissions', 'Activity log',
     },
-    'purchase': {'Purchases'},
+    'purchase': {'Purchases', 'Suppliers'},
     'expense': {'Expenses'},
+    'customers': {'Customers'},
+    'sale': {'Sales invoices', 'AI Brain', 'EMI / Instalments'},
+    'repairs': {'Repair jobs'},
+    'exchange': {'Exchange & used phones'},
+    'products': {'Low stock'},
   };
 
   List<(String, List<_Item>)> _groups(_MenuData d) {

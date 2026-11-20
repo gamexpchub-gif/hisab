@@ -723,8 +723,10 @@ class _ProductCard extends StatelessWidget {
                   stat(Icons.bar_chart_rounded, 'Sold: ${asInt(p['sold'])}'),
                   sep(),
                   stat(Icons.view_in_ar_rounded, 'Stock: $stock'),
-                  sep(),
-                  stat(Icons.sell_rounded, 'Profit: ₹${Money.inr(asInt(p['profit']))}'),
+                  if (Books.can('profit')) ...[
+                    sep(),
+                    stat(Icons.sell_rounded, 'Profit: ₹${Money.inr(asInt(p['profit']))}'),
+                  ],
                 ]),
               ),
             ),
@@ -900,10 +902,12 @@ class ProductView extends StatelessWidget {
             Center(child: ProductThumb(p, width: 170, height: 196)),
             KpiGrid([
               Kpi('Selling price', asInt(p['price']), accent: true),
-              Kpi('Avg. cost', asInt(p['cost'])),
-              Kpi('Margin / unit', margin, color: margin >= 0 ? C.green : C.red),
-              Kpi('Stock value', stock > 0 ? stock * asInt(p['cost']) : 0),
-              Kpi('Profit earned', profit, color: profit >= 0 ? C.green : C.red),
+              if (Books.can('profit')) ...[
+                Kpi('Avg. cost', asInt(p['cost'])),
+                Kpi('Margin / unit', margin, color: margin >= 0 ? C.green : C.red),
+                Kpi('Stock value', stock > 0 ? stock * asInt(p['cost']) : 0),
+                Kpi('Profit earned', profit, color: profit >= 0 ? C.green : C.red),
+              ],
               if (asInt(p['mrp']) > 0) Kpi('MRP', asInt(p['mrp'])),
             ]),
             CardBox(

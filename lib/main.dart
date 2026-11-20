@@ -12,6 +12,11 @@ import 'core/widget_sync.dart';
 import 'core/autopilot.dart';
 import 'core/staff.dart';
 import 'screens/staff_screen.dart';
+import 'screens/purchases_book.dart';
+import 'screens/sale_return.dart';
+import 'screens/shop_work.dart';
+import 'screens/parties_list.dart';
+import 'screens/brain.dart';
 import 'screens/plans.dart';
 import 'screens/dashboard.dart';
 import 'screens/home.dart';
@@ -99,6 +104,26 @@ class _ShellState extends State<Shell> {
     setState(() => index = i);
   }
 
+  void _staffAction(BuildContext context, String a) {
+    switch (a) {
+      case 'sale':
+        open(context, const SaleForm());
+      case 'ai':
+        open(context, const BrainScreen());
+      case 'collect':
+      case 'customers':
+        open(context, const PartiesScreen());
+      case 'repairs':
+        open(context, const RepairsScreen());
+      case 'returns':
+        open(context, const SaleReturnsScreen());
+      case 'purchase':
+        open(context, const PurchasesScreen());
+      case 'products':
+        select(2);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final mq = MediaQuery.of(context);
@@ -113,12 +138,16 @@ class _ShellState extends State<Shell> {
         extendBody: true,
         body: Stack(children: [
           Positioned.fill(
-            child: IndexedStack(index: index, children: const [
-              HomeScreen(),
-              DashboardScreen(),
-              ProductsScreen(),
-              MenuScreen(),
-            ]),
+            // staff see only what they may: no home figures / dashboard without permission
+            child: ValueListenableBuilder<StaffMember?>(
+              valueListenable: Staff.current,
+              builder: (context, _, __) => IndexedStack(index: index, children: [
+                Staff.can('dashboard') ? const HomeScreen() : StaffHome(onAction: _staffAction),
+                Staff.can('dashboard') ? const DashboardScreen() : const LockedView('The dashboard'),
+                const ProductsScreen(),
+                const MenuScreen(),
+              ]),
+            ),
           ),
           if (index <= 1)
             Positioned(

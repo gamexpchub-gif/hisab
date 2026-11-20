@@ -574,40 +574,54 @@ void main() {
 
   test('Staff: PIN sign-in, permissions enforced by the books, actions logged by name', () async {
     await Staff.load();
-    await expectLater(Staff.setMode(true), throwsA(isA<AccountingError>())); // owner PIN first
-    await Staff.setOwnerPin('9999');
-    await Staff.setMode(true);
-    final sales = await Staff.add('Rafiq', '1234', 'sales', {});
-    await Staff.add('Mina', '5678', 'manager', Staff.roles['manager']!.$2);
-    await expectLater(Staff.add('Copy', '1234', 'sales', {}), throwsA(isA<AccountingError>())); // PIN taken
-    await expectLater(Staff.signIn('0000'), throwsA(isA<AccountingError>()));
+    try {
+      await expectLater(Staff.setMode(true), throwsA(isA<AccountingError>())); // owner PIN first
+      await Staff.setOwnerPin('9999');
+      await Staff.setMode(true);
+      // the owner sets up stock and a supplier first
+      final p = await Books.saveProduct({'name': 'Staff Phone', 'gst_bp': 0, 'price': 100000}, openingQty: 5, openingCost: 80000);
+      final sup = await Books.saveParty('supplier', {'name': 'Staff Supplier'});
+      final c = await Books.saveParty('customer', {'name': 'Staff Customer'});
+      final cash = asInt((await Books.moneyAccounts()).first['id']);
+      final sales = await Staff.add('Rafiq', '1234', 'sales', Staff.roles['sales']!.$2);
+      await Staff.add('Mina', '5678', 'manager', Staff.roles['manager']!.$2);
+      await expectLater(Staff.add('Copy', '1234', 'sales', {}), throwsA(isA<AccountingError>())); // PIN taken
+      await expectLater(Staff.signIn('0000'), throwsA(isA<AccountingError>()));
 
-    // salesman: can sell, cannot discount, delete or buy
-    expect((await Staff.signIn('1234'))!.id, sales.id);
-    final p = await Books.saveProduct({'name': 'Staff Phone', 'gst_bp': 0, 'price': 100000}, openingQty: 5, openingCost: 80000);
-    final cash = asInt((await Books.moneyAccounts()).first['id']);
-    final sale = await Books.createSale(items: [ItemIn(p, 1, 100000)], paid: 100000, accountId: cash);
-    await expectLater(Books.createSale(items: [ItemIn(p, 1, 100000)], paid: 90000, accountId: cash, discount: 10000), throwsA(isA<AccountingError>()));
-    expect(() => Books.deleteSale(sale), throwsA(isA<AccountingError>()));
-    final sup = await Books.saveParty('supplier', {'name': 'Staff Supplier'});
-    expect(() => Books.createPurchase(items: [ItemIn(p, 1, 80000)], supplierId: sup), throwsA(isA<AccountingError>()));
-    final log = await Books.activity(5);
-    expect(log.any((a) => a['staff'] == 'Rafiq'), isTrue);
+      // salesman: sells, collects, adds a customer while billing — nothing else
+      expect((await Staff.signIn('1234'))!.id, sales.id);
+      expect(Staff.can('profit'), isFalse);
+      expect(Staff.can('dashboard'), isFalse);
+      final sale = await Books.createSale(items: [ItemIn(p, 1, 100000)], paid: 100000, accountId: cash);
+      await Books.saveParty('customer', {'name': 'Walk-in Added By Salesman'});
+      await expectLater(Books.createSale(items: [ItemIn(p, 1, 100000)], paid: 90000, accountId: cash, discount: 10000), throwsA(isA<AccountingError>()));
+      await expectLater(Books.createSale(items: [ItemIn(p, 1, 100000)], customerId: c, paid: 0, accountId: cash), throwsA(isA<AccountingError>())); // no credit
+      expect(() => Books.deleteSale(sale), throwsA(isA<AccountingError>()));
+      expect(() => Books.createPurchase(items: [ItemIn(p, 1, 80000)], supplierId: sup), throwsA(isA<AccountingError>()));
+      await expectLater(Books.saveProduct({'name': 'Not allowed', 'gst_bp': 0, 'price': 1}), throwsA(isA<AccountingError>()));
+      expect(() => Books.saveParty('customer', {'name': 'Edit Try'}, id: c), throwsA(isA<AccountingError>()));
+      expect(() => Books.createPayment(kind: 'payment', partyId: sup, amount: 100, accountId: cash), throwsA(isA<AccountingError>()));
+      final log = await Books.activity(5);
+      expect(log.any((a) => a['staff'] == 'Rafiq'), isTrue);
 
-    // manager: discounts and purchases, but no delete
-    await Staff.signIn('5678');
-    await Books.createSale(items: [ItemIn(p, 1, 100000)], paid: 90000, accountId: cash, discount: 10000);
-    await Books.createPurchase(items: [ItemIn(p, 1, 80000)], supplierId: sup);
-    expect(() => Books.deleteSale(sale), throwsA(isA<AccountingError>()));
+      // manager: discounts, credit and purchases, but no delete
+      await Staff.signIn('5678');
+      await Books.createSale(items: [ItemIn(p, 1, 100000)], paid: 90000, accountId: cash, discount: 10000);
+      await Books.createSale(items: [ItemIn(p, 1, 100000)], customerId: c, paid: 0, accountId: cash);
+      await Books.createPurchase(items: [ItemIn(p, 1, 80000)], supplierId: sup);
+      expect(() => Books.deleteSale(sale), throwsA(isA<AccountingError>()));
 
-    // owner: everything
-    expect(await Staff.signIn('9999'), isNull);
-    await Books.deleteSale(sale);
-    Staff.signOut();
-    expect(Staff.picking.value, isTrue);
-    await Staff.setMode(false);
+      // owner: everything
+      expect(await Staff.signIn('9999'), isNull);
+      await Books.deleteSale(sale);
+      Staff.signOut();
+      expect(Staff.picking.value, isTrue);
+      await expectBalanced();
+    } finally {
+      Staff.current.value = null;
+      await Staff.setMode(false).catchError((_) {});
+    }
     expect(Staff.picking.value, isFalse);
-    await expectBalanced();
   });
 
   test('Review fixes: buy-back IMEI back in stock, links block delete, repair dues age', () async {

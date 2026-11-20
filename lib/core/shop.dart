@@ -60,6 +60,7 @@ class Shop {
     String? note,
     String? date,
   }) async {
+    Books.need('repairs', 'Repair jobs');
     if (device.trim().isEmpty) throw AccountingError('Enter the device');
     if (problem.trim().isEmpty) throw AccountingError('Describe the problem');
     final id = await Books._write((x) async {
@@ -95,8 +96,8 @@ class Shop {
     if (amount <= 0) return;
     final r = (await Books.query('SELECT * FROM repairs WHERE id = ?', [id])).first;
     final acc = accountId ?? asInt((await Books.query('SELECT id FROM accounts WHERE code = ?', [cashCode])).first['id']);
-    await Books.createPayment(
-        kind: 'receipt', partyId: asInt(r['customer_id']), amount: amount, accountId: acc, date: date, reference: '${r['number']}', note: 'Repair ${r['device']}');
+    await Books.trusted(() => Books.createPayment(
+        kind: 'receipt', partyId: asInt(r['customer_id']), amount: amount, accountId: acc, date: date, reference: '${r['number']}', note: 'Repair ${r['device']}'));
     await Books.execute('UPDATE repairs SET advance = advance + ? WHERE id = ?', [amount, id]);
   }
 
@@ -111,6 +112,7 @@ class Shop {
   /// Hands the device back: books the repair charge as income (owed by the
   /// customer) and takes [paidNow]. Returns what is still due.
   static Future<int> deliverRepair(int id, {required int charge, int partsCost = 0, int paidNow = 0, int? accountId, String? date}) async {
+    Books.need('repairs', 'Repair jobs');
     final r = (await Books.query('SELECT * FROM repairs WHERE id = ?', [id])).first;
     if (r['status'] == 'delivered') throw AccountingError('Already delivered');
     if (charge < 0) throw AccountingError('Charge cannot be negative');
@@ -172,9 +174,15 @@ class Shop {
     int? accountId,
     String? date,
   }) async {
+    Books.need('exchange', 'Buying a used phone');
     if (model.trim().isEmpty) throw AccountingError('Enter the phone model');
     if (price <= 0) throw AccountingError('Enter the price paid');
     final when = date ?? ymd(DateTime.now());
+    return Books.trusted(() => _buyUsed(sellerName, sellerPhone, model, brand, imei, price, resale, grade, battery, accessories, idProof, photo, note, accountId, when));
+  }
+
+  static Future<int> _buyUsed(String sellerName, String sellerPhone, String model, String? brand, String? imei, int price, int resale, String? grade,
+      int? battery, String? accessories, String? idProof, String? photo, String? note, int? accountId, String when) async {
     final cid = await customerFor(sellerName, sellerPhone);
     final cust = (await Books.query('SELECT * FROM customers WHERE id = ?', [cid])).first;
     // the seller as a supplier (same name and phone), for the purchase
