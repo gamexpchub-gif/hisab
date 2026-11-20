@@ -117,6 +117,7 @@ class LendSheet extends StatefulWidget {
 class _LendSheetState extends State<LendSheet> {
   final amount = TextEditingController();
   final reason = TextEditingController();
+  final search = TextEditingController();
   late String partyType = widget.partyType ?? 'customer';
   int? partyId;
   List<Rec> customers = [], suppliers = [], accounts = [];
@@ -151,7 +152,54 @@ class _LendSheetState extends State<LendSheet> {
   void dispose() {
     amount.dispose();
     reason.dispose();
+    search.dispose();
     super.dispose();
+  }
+
+  /// Quick add: name + mobile; an existing one with the same name and number
+  /// is picked instead of making a copy.
+  Future<void> _addParty() async {
+    final isC = partyType == 'customer';
+    final name = TextEditingController(text: RegExp(r'\d').hasMatch(q) ? '' : q);
+    final phone = TextEditingController(text: RegExp(r'^[\d\s+]+$').hasMatch(q) ? q : '');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text(isC ? 'New customer' : 'New supplier'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(controller: name, autofocus: true, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Name')),
+          const SizedBox(height: 8),
+          TextField(controller: phone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Mobile (optional)')),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Save')),
+        ],
+      ),
+    );
+    final n = name.text.trim(), ph = phone.text.replaceAll(RegExp(r'[^\d+]'), '');
+    name.dispose();
+    phone.dispose();
+    if (ok != true || !mounted) return;
+    if (n.isEmpty) {
+      toast(context, 'Enter the name', error: true);
+      return;
+    }
+    try {
+      final dup = await Books.findDuplicateParty(partyType, n, ph);
+      final id = dup != null ? asInt(dup['id']) : await Books.saveParty(partyType, {'name': n, 'phone': ph.isEmpty ? null : ph});
+      await _load();
+      if (!mounted) return;
+      final shown = dup != null ? '${dup['name']}' : n;
+      setState(() {
+        partyId = id;
+        q = shown; // the new one shows, selected
+        search.text = shown;
+      });
+      toast(context, dup != null ? '${dup['name']} is already added — selected' : '$n added');
+    } catch (e) {
+      if (mounted) toast(context, '$e', error: true);
+    }
   }
 
   Rec? get _party {
@@ -239,8 +287,7 @@ class _LendSheetState extends State<LendSheet> {
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(gave ? 'You gave' : 'You got', style: _j(19, FontWeight.w800, _navy)),
-                  Text(gave ? 'Cash given on credit — they will owe you' : 'Cash received — their due goes down',
-                      style: _j(11.5, FontWeight.w500, _muted)),
+                  Text(gave ? 'Cash given on credit — they will owe you' : 'Cash received — their due goes down', style: _j(11.5, FontWeight.w500, _muted)),
                 ]),
               ),
             ]),
@@ -274,30 +321,54 @@ class _LendSheetState extends State<LendSheet> {
                 ],
               ]),
               const SizedBox(height: 10),
-              Container(
-                height: 44,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                decoration: _card(r: 22),
-                child: Row(children: [
-                  const Icon(Icons.search_rounded, color: _muted, size: 20),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextField(
-                      onChanged: (v) => setState(() => q = v.trim()),
-                      style: _j(13.5, FontWeight.w600, _ink),
-                      decoration: InputDecoration(
-                        isCollapsed: true,
-                        filled: false,
-                        border: InputBorder.none,
-                        enabledBorder: InputBorder.none,
-                        focusedBorder: InputBorder.none,
-                        hintText: 'Search name or phone',
-                        hintStyle: _j(13, FontWeight.w400, const Color(0xFF8A8FAD)),
+              Row(children: [
+                Expanded(
+                  child: Container(
+                    height: 44,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: _card(r: 22),
+                    child: Row(children: [
+                      const Icon(Icons.search_rounded, color: _muted, size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: search,
+                          onChanged: (v) => setState(() => q = v.trim()),
+                          style: _j(13.5, FontWeight.w600, _ink),
+                          decoration: InputDecoration(
+                            isCollapsed: true,
+                            filled: false,
+                            border: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                            hintText: 'Search name or phone',
+                            hintStyle: _j(13, FontWeight.w400, const Color(0xFF8A8FAD)),
+                          ),
+                        ),
                       ),
-                    ),
+                    ]),
                   ),
-                ]),
-              ),
+                ),
+                const SizedBox(width: 8),
+                // add a new customer / supplier without leaving this sheet
+                GestureDetector(
+                  onTap: _addParty,
+                  child: Container(
+                    height: 44,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(22),
+                      gradient: const LinearGradient(colors: [Color(0xFF6B35EE), Color(0xFF4318D2)]),
+                      boxShadow: const [BoxShadow(color: Color(0x554318D2), blurRadius: 14, offset: Offset(0, 6), spreadRadius: -6)],
+                    ),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      const Icon(Icons.person_add_alt_1_rounded, color: Colors.white, size: 18),
+                      const SizedBox(width: 5),
+                      Text('Add', style: _j(12.5, FontWeight.w800, Colors.white)),
+                    ]),
+                  ),
+                ),
+              ]),
               const SizedBox(height: 10),
               SizedBox(
                 height: 92,
@@ -408,7 +479,8 @@ class _LendSheetState extends State<LendSheet> {
             ]),
             const SizedBox(height: 14),
             Row(children: [
-              Expanded(child: _dateChip(Icons.event_rounded, date == ymd(DateTime.now()) ? 'Today' : prettyDate(date), () async {
+              Expanded(
+                  child: _dateChip(Icons.event_rounded, date == ymd(DateTime.now()) ? 'Today' : prettyDate(date), () async {
                 final d = await _pickDate(context, date);
                 if (d != null) setState(() => date = d);
               })),
