@@ -68,8 +68,8 @@ class _PartyFormState extends State<PartyForm> {
   late final c = <String, TextEditingController>{
     for (final k in ['name', 'phone', 'alt_phone', 'email', 'address', 'gstin', 'aadhaar', 'pan', 'notes'])
       k: TextEditingController(text: '${widget.party?[k] ?? ''}'),
-    'credit_limit': TextEditingController(
-        text: widget.party == null || asInt(widget.party!['credit_limit']) == 0 ? '' : Money.edit(asInt(widget.party!['credit_limit']))),
+    'credit_limit':
+        TextEditingController(text: widget.party == null || asInt(widget.party!['credit_limit']) == 0 ? '' : Money.edit(asInt(widget.party!['credit_limit']))),
     'opening': TextEditingController(),
   };
   late String? photo = widget.party?['photo'] as String?;
@@ -85,11 +85,11 @@ class _PartyFormState extends State<PartyForm> {
   void _checkDuplicate() {
     _dupWait?.cancel();
     _dupWait = Timer(const Duration(milliseconds: 350), () async {
-      final d = await Books.findDuplicateParty(widget.type, c['name']!.text, c['phone']!.text,
-          exceptId: isNew ? null : asInt(widget.party!['id']));
+      final d = await Books.findDuplicateParty(widget.type, c['name']!.text, c['phone']!.text, exceptId: isNew ? null : asInt(widget.party!['id']));
       if (mounted && (d?['id'] != duplicate?['id'])) setState(() => duplicate = d);
     });
   }
+
   bool get isNew => widget.party == null;
 
   @override
@@ -134,7 +134,7 @@ class _PartyFormState extends State<PartyForm> {
     }
 
     try {
-      await Books.saveParty(
+      final id = await Books.saveParty(
         widget.type,
         {
           'name': c['name']!.text,
@@ -157,7 +157,7 @@ class _PartyFormState extends State<PartyForm> {
       if (!mounted) return;
       HapticFeedback.mediumImpact();
       toast(context, isNew ? '${isC ? 'Customer' : 'Supplier'} added' : 'Saved');
-      Navigator.of(context).pop();
+      Navigator.of(context).pop(id); // the caller can pick the new one
     } catch (e) {
       toast(context, '$e', error: true);
       setState(() => saving = false);
@@ -228,7 +228,8 @@ class _PartyFormState extends State<PartyForm> {
             const SizedBox(height: 14),
             _section(Icons.account_balance_wallet_rounded, 'Credit & tax', [
               _field('gstin', 'GSTIN (optional)', Icons.receipt_long_rounded, caps: TextCapitalization.characters),
-              if (isC) _field('credit_limit', 'Credit limit ₹ (0 = no limit)', Icons.speed_rounded, keyboard: const TextInputType.numberWithOptions(decimal: true)),
+              if (isC)
+                _field('credit_limit', 'Credit limit ₹ (0 = no limit)', Icons.speed_rounded, keyboard: const TextInputType.numberWithOptions(decimal: true)),
               if (isNew)
                 _field('opening', isC ? 'Old due — they already owe you ₹' : 'Old due — you already owe them ₹', Icons.history_rounded,
                     keyboard: const TextInputType.numberWithOptions(decimal: true)),
@@ -361,9 +362,7 @@ class _PartyFormState extends State<PartyForm> {
               border: Border.all(color: const Color(0xFFD6CCFF), width: 1.4),
             ),
             clipBehavior: Clip.antiAlias,
-            child: img == null
-                ? const Icon(Icons.add_photo_alternate_rounded, color: _purple)
-                : storedImage(img),
+            child: img == null ? const Icon(Icons.add_photo_alternate_rounded, color: _purple) : storedImage(img),
           ),
         ),
         const SizedBox(width: 12),
@@ -437,8 +436,7 @@ class _PartyFormState extends State<PartyForm> {
             contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: const BorderSide(color: _line)),
             enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: const BorderSide(color: _line)),
-            focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16), borderSide: const BorderSide(color: Color(0xFF8B5CF6), width: 1.6)),
+            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: const BorderSide(color: Color(0xFF8B5CF6), width: 1.6)),
           ),
         ),
       );

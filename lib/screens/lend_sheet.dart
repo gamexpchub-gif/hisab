@@ -6,6 +6,7 @@ import '../core/books.dart';
 import '../core/money.dart';
 import '../ui/photo.dart';
 import '../ui/widgets.dart';
+import 'party_form.dart';
 
 // =============================================================================
 // Khata entry sheets:
@@ -156,16 +157,17 @@ class _LendSheetState extends State<LendSheet> {
     super.dispose();
   }
 
-  /// Add a customer / supplier without leaving this sheet; it is selected.
+  /// The full customer / supplier page; the new one comes back selected.
   Future<void> _addParty() async {
-    final r = await quickAddParty(context, partyType, typed: q);
-    if (r == null || !mounted) return;
+    final id = await open<int>(context, PartyForm(type: partyType));
+    if (id == null || !mounted) return;
     await _load();
     if (!mounted) return;
+    final p = (partyType == 'customer' ? customers : suppliers).where((x) => asInt(x['id']) == id).firstOrNull;
     setState(() {
-      partyId = r.$1;
-      q = r.$2; // the new one shows, selected
-      search.text = r.$2;
+      partyId = id;
+      q = '${p?['name'] ?? ''}'; // the new one shows, selected
+      search.text = q;
     });
   }
 
@@ -640,7 +642,7 @@ class _DueSheetState extends State<DueSheet> {
 }
 
 /// A small round "add customer" button for page and sheet headers. Without
-/// [onTap] it adds a customer (quick form) from anywhere.
+/// [onTap] it opens the full Add customer page.
 class AddCustomerButton extends StatelessWidget {
   final VoidCallback? onTap;
   final String tooltip;
@@ -655,7 +657,7 @@ class AddCustomerButton extends StatelessWidget {
             if (onTap != null) {
               onTap!();
             } else {
-              quickAddParty(context, 'customer');
+              open(context, const PartyForm(type: 'customer'));
             }
           },
           child: Container(
@@ -670,43 +672,4 @@ class AddCustomerButton extends StatelessWidget {
           ),
         ),
       );
-}
-
-/// Quick add: name + mobile. An existing one with the same name and number is
-/// used instead of a copy. Returns (id, name), or null when cancelled.
-Future<(int, String)?> quickAddParty(BuildContext context, String type, {String typed = ''}) async {
-  final isC = type == 'customer';
-  final name = TextEditingController(text: RegExp(r'\d').hasMatch(typed) ? '' : typed);
-  final phone = TextEditingController(text: RegExp(r'^[\d\s+]+$').hasMatch(typed) ? typed : '');
-  final ok = await showDialog<bool>(
-    context: context,
-    builder: (c) => AlertDialog(
-      title: Text(isC ? 'New customer' : 'New supplier'),
-      content: Column(mainAxisSize: MainAxisSize.min, children: [
-        TextField(controller: name, autofocus: true, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Name')),
-        const SizedBox(height: 8),
-        TextField(controller: phone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Mobile (optional)')),
-      ]),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
-        FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Save')),
-      ],
-    ),
-  );
-  final n = name.text.trim(), ph = phone.text.replaceAll(RegExp(r'[^\d+]'), '');
-  if (ok != true || !context.mounted) return null;
-  if (n.isEmpty) {
-    toast(context, 'Enter the name', error: true);
-    return null;
-  }
-  try {
-    final dup = await Books.findDuplicateParty(type, n, ph);
-    final id = dup != null ? asInt(dup['id']) : await Books.saveParty(type, {'name': n, 'phone': ph.isEmpty ? null : ph});
-    final shown = dup != null ? '${dup['name']}' : n;
-    if (context.mounted) toast(context, dup != null ? '$shown is already added' : '$shown added');
-    return (id, shown);
-  } catch (e) {
-    if (context.mounted) toast(context, '$e', error: true);
-    return null;
-  }
 }
