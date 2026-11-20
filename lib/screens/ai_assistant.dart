@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../cloud/cloud.dart';
 import '../core/ai_command.dart';
 import '../core/books.dart';
 import '../core/brain.dart';
@@ -10,6 +9,7 @@ import '../core/money.dart';
 import '../ui/voice.dart';
 import '../ui/widgets.dart';
 import 'products.dart' show ProductThumb;
+import '../core/quick.dart' show SmartSearch;
 import 'sale_pos.dart';
 import 'sale_view.dart';
 
@@ -51,9 +51,12 @@ class _AiAssistantState extends State<AiAssistant> {
   final focus = FocusNode();
   final msgs = <_Msg>[];
   bool thinking = false;
+  GlobalKey<_BillCardState>? _lastBill; // the bill a follow-up changes
 
   static const _examples = [
     (Icons.receipt_long_rounded, 'Karim 9830012345 ke Vivo T3 ekta 18 hajar cash'),
+    (Icons.discount_rounded, 'Rahim ke duita charger sare 4 sho kore, 50 discount, upi'),
+    (Icons.playlist_add_rounded, 'Aro ekta cover 199  ·  dam 17500  ·  baki te (after a bill)'),
     (Icons.payments_rounded, 'Rahim 5000 joma'),
     (Icons.person_add_alt_1_rounded, 'New customer Bablu 9830077777'),
     (Icons.today_rounded, 'Aj koto bikri?'),
@@ -82,33 +85,32 @@ class _AiAssistantState extends State<AiAssistant> {
     Widget card;
     String reply;
     try {
-      // 1 · Claude on your server: any language, any wording
-      (String, List<Object>)? cloud;
-      String? cloudError;
-      try {
-        cloud = await CloudAi.ask(text, [for (final m in msgs.skip(1).take(6)) (m.mine, m.text)]);
-      } catch (e) {
-        cloudError = '$e';
-      }
-      if (cloud != null) {
-        final (said, actions) = cloud;
-        reply = said.isEmpty ? 'Done' : said;
-        final cards = <Widget>[];
-        for (final a in actions) {
-          cards.add(await _cardFor(a));
-        }
-        card = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          if (said.isNotEmpty) Padding(padding: const EdgeInsets.only(bottom: 8), child: _AnswerCard(Answer(said), via: 'Claude AI')),
-          for (final c in cards) Padding(padding: const EdgeInsets.only(bottom: 8), child: c),
-          if (said.isEmpty && cards.isEmpty) _AnswerCard(const Answer('I could not find what to do — try naming the product or customer'), via: 'Claude AI'),
-        ]);
+      await AiMemory.load();
+      final products = await Books.query('SELECT p.*, c.name AS category FROM products p LEFT JOIN categories c ON c.id = p.category_id');
+      final customers = await Books.query('SELECT * FROM customers');
+      // a follow-up to the bill on screen: "aro ekta charger", "dam 17500", "upi te"
+      final open = _lastBill?.currentState;
+      final changed =
+          open == null || !open.mounted || open.saved != null || open.replaced ? null : AiCommands.refine(open.current(), text, products, customers);
+      if (changed != null) {
+        open!.markReplaced();
+        reply = 'Bill updated';
+        card = _billCard(changed);
       } else {
-        // 2 · the phone's own engine (offline)
-        final products = await Books.query('SELECT p.*, c.name AS category FROM products p LEFT JOIN categories c ON c.id = p.category_id');
-        final customers = await Books.query('SELECT * FROM customers');
-        final cmd = AiCommands.parse(text, products, customers);
-        reply = switch (cmd) { BillCommand() => 'Bill ready — check and save', null => '', _ => 'Confirm' };
-        card = await _cardFor(cmd ?? AskBooks(text), offlineNote: cloudError);
+        final cmds = AiCommands.parseAll(text, products, customers);
+        if (cmds.isEmpty) {
+          reply = '';
+          card = await _cardFor(AskBooks(text));
+        } else if (cmds.length == 1) {
+          reply = cmds.first is BillCommand ? 'Bill ready — check and save' : 'Confirm';
+          card = await _cardFor(cmds.first);
+        } else {
+          reply = '${cmds.length} things to save';
+          card = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            _AnswerCard(Answer('Found ${cmds.length} things in your message — check each and save')),
+            for (final c in cmds) Padding(padding: const EdgeInsets.only(top: 8), child: await _cardFor(c)),
+          ]);
+        }
       }
     } catch (e) {
       reply = 'Sorry, something went wrong';
@@ -122,10 +124,16 @@ class _AiAssistantState extends State<AiAssistant> {
   }
 
   /// The card for one command (bill, payment, customer, expense, question).
-  Future<Widget> _cardFor(Object cmd, {String? offlineNote}) async {
+  Widget _billCard(BillCommand c) {
+    final k = GlobalKey<_BillCardState>();
+    _lastBill = k;
+    return _BillCard(cmd: c, key: k);
+  }
+
+  Future<Widget> _cardFor(Object cmd) async {
     switch (cmd) {
       case BillCommand c:
-        return _BillCard(cmd: c, key: UniqueKey());
+        return _billCard(c);
       case ReceiptCommand r:
         return _ReceiptCard(cmd: r, key: UniqueKey());
       case ExpenseCommand x:
@@ -135,7 +143,7 @@ class _AiAssistantState extends State<AiAssistant> {
       case AskBooks q:
         final a = await Brain.ask(q.question);
         await Brain.remember(q.question);
-        return _AnswerCard(a, onAsk: _send, via: offlineNote == null ? null : 'Offline AI');
+        return _AnswerCard(a, onAsk: _send);
     }
     return _AnswerCard(const Answer('…'));
   }
@@ -153,7 +161,8 @@ class _AiAssistantState extends State<AiAssistant> {
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(26),
-          gradient: const LinearGradient(colors: [Color(0xFF12164A), Color(0xFF3B1CC8), Color(0xFF7B3FF2)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+          gradient:
+              const LinearGradient(colors: [Color(0xFF12164A), Color(0xFF3B1CC8), Color(0xFF7B3FF2)], begin: Alignment.topLeft, end: Alignment.bottomRight),
           boxShadow: const [BoxShadow(color: Color(0x664318D2), blurRadius: 30, offset: Offset(0, 14), spreadRadius: -12)],
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -175,7 +184,7 @@ class _AiAssistantState extends State<AiAssistant> {
                 Text('Bills, customers, payments — or any question', style: _j(11.5, FontWeight.w600, const Color(0xCCFFFFFF))),
               ]),
             ),
-            const _AiMode(),
+            const _Learnt(),
           ]),
           const SizedBox(height: 14),
           Container(
@@ -210,7 +219,8 @@ class _AiAssistantState extends State<AiAssistant> {
               _round(Icons.mic_rounded, _voice, const [Color(0xFFFF6B8B), Color(0xFFE0245E)]),
               const SizedBox(width: 6),
               _round(thinking ? Icons.hourglass_top_rounded : Icons.arrow_upward_rounded, thinking ? null : () => _send(),
-                  const [Color(0xFFFFFFFF), Color(0xFFEDE7FF)], dark: true),
+                  const [Color(0xFFFFFFFF), Color(0xFFEDE7FF)],
+                  dark: true),
             ]),
           ),
         ]),
@@ -274,7 +284,8 @@ class _AiAssistantState extends State<AiAssistant> {
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
           decoration: const BoxDecoration(
             gradient: LinearGradient(colors: [Color(0xFF6B35EE), Color(0xFF4318D2)]),
-            borderRadius: BorderRadius.only(topLeft: Radius.circular(20), topRight: Radius.circular(20), bottomLeft: Radius.circular(20), bottomRight: Radius.circular(6)),
+            borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(20), topRight: Radius.circular(20), bottomLeft: Radius.circular(20), bottomRight: Radius.circular(6)),
           ),
           child: Text(m.text, style: _j(13.5, FontWeight.w700, Colors.white)),
         ),
@@ -337,22 +348,12 @@ class _TypingState extends State<_Typing> with SingleTickerProviderStateMixin {
 class _AnswerCard extends StatelessWidget {
   final Answer a;
   final void Function(String)? onAsk;
-  final String? via; // "Claude AI" / "Offline AI"
-  const _AnswerCard(this.a, {this.onAsk, this.via});
+  const _AnswerCard(this.a, {this.onAsk});
   @override
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.all(14),
         decoration: _card(),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          if (via != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: Row(children: [
-                Icon(via == 'Claude AI' ? Icons.cloud_done_rounded : Icons.phone_android_rounded, size: 13, color: _muted),
-                const SizedBox(width: 4),
-                Text(via!, style: _j(10.5, FontWeight.w800, _muted)),
-              ]),
-            ),
           Text(a.text, style: _j(15, FontWeight.w800, _ink)),
           if (a.detail != null) ...[const SizedBox(height: 4), Text(a.detail!, style: _j(12, FontWeight.w600, _muted))],
           if (a.rows.isNotEmpty) ...[
@@ -400,7 +401,9 @@ class _Briefing extends StatelessWidget {
         return Padding(
           padding: const EdgeInsets.only(bottom: 14),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            Text('  ${h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'} · today at a glance', style: _j(12.5, FontWeight.w800, _muted)),
+            Text(
+                '  ${h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'} · today at a glance',
+                style: _j(12.5, FontWeight.w800, _muted)),
             const SizedBox(height: 6),
             SizedBox(
               height: 86,
@@ -425,12 +428,15 @@ class _Briefing extends StatelessWidget {
                         Text(b.value,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: _j(15, FontWeight.w800, switch (b.tone) {
-                              'good' => _green,
-                              'bad' => _red,
-                              'warn' => const Color(0xFFF97316),
-                              _ => _ink,
-                            })),
+                            style: _j(
+                                15,
+                                FontWeight.w800,
+                                switch (b.tone) {
+                                  'good' => _green,
+                                  'bad' => _red,
+                                  'warn' => const Color(0xFFF97316),
+                                  _ => _ink,
+                                })),
                       ]),
                     ),
                   ),
@@ -519,24 +525,56 @@ class _BillCardState extends State<_BillCard> {
   late final name = TextEditingController(text: widget.cmd.customer?['name'] as String? ?? widget.cmd.newName ?? '');
   late final phone = TextEditingController(text: widget.cmd.customer?['phone'] as String? ?? widget.cmd.newPhone ?? '');
   late final advance = TextEditingController(text: widget.cmd.paidNow == null ? '' : Money.edit(widget.cmd.paidNow!));
-  bool saving = false;
+  late final discount = TextEditingController(
+      text: widget.cmd.discountPct > 0
+          ? ''
+          : widget.cmd.discount == 0
+              ? ''
+              : Money.edit(widget.cmd.discount));
+  late int discountPct = widget.cmd.discountPct;
+  bool saving = false, replaced = false;
   (int, String, int, int)? saved;
 
   bool get existing => widget.cmd.customer != null;
+
+  /// The bill as it is on screen now (for a follow-up).
+  BillCommand current() => BillCommand(lines,
+      customer: widget.cmd.customer,
+      newName: existing ? null : name.text.trim(),
+      newPhone: existing ? null : phone.text.replaceAll(RegExp(r'\D'), ''),
+      pay: pay,
+      paidNow: Money.tryParse(advance.text),
+      unknown: widget.cmd.unknown,
+      discount: discountPct > 0 ? 0 : (Money.tryParse(discount.text) ?? 0),
+      discountPct: discountPct,
+      said: widget.cmd.said);
+
+  void markReplaced() => setState(() => replaced = true);
+
+  /// Another product for a line; Hisab AI remembers the correction.
+  Future<void> _change(CmdLine l) async {
+    final p = await _pickProduct(context, l.said);
+    if (p == null || !mounted) return;
+    setState(() {
+      l.product = p;
+      l.rate = null;
+    });
+    if (l.said.trim().isNotEmpty) {
+      await AiMemory.learnProduct(l.said, asInt(p['id']));
+      if (mounted) toast(context, 'Learnt: "${l.said}" = ${p['name']}');
+    }
+  }
 
   @override
   void dispose() {
     name.dispose();
     phone.dispose();
     advance.dispose();
+    discount.dispose();
     super.dispose();
   }
 
-  BillCommand _cmd() => BillCommand(lines,
-      customer: widget.cmd.customer,
-      newName: existing ? null : name.text.trim(),
-      newPhone: existing ? null : phone.text.replaceAll(RegExp(r'\D'), ''),
-      pay: pay);
+  BillCommand _cmd() => current();
 
   Future<void> _save() async {
     if (saving) return;
@@ -563,6 +601,7 @@ class _BillCardState extends State<_BillCard> {
       }
       await Drafts.save('sale', {
         'customer': cid,
+        'discount': AiActions.discountOf(current()) == 0 ? '' : Money.edit(AiActions.discountOf(current())),
         'payMode': pay == 'due' ? 'due' : 'full',
         'account': await AiActions.account(pay == 'due' ? 'cash' : pay),
         'lines': [
@@ -594,8 +633,21 @@ class _BillCardState extends State<_BillCard> {
 
   @override
   Widget build(BuildContext context) {
-    final total = AiActions.total(lines);
+    final gross = AiActions.total(lines);
+    final off = AiActions.discountOf(current(), gross);
+    final total = gross - off;
     if (saved != null) return _done(saved!);
+    if (replaced) {
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: _card(),
+        child: Row(children: [
+          const Icon(Icons.update_rounded, color: _muted, size: 18),
+          const SizedBox(width: 8),
+          Expanded(child: Text('Changed — the new bill is above', style: _j(12.5, FontWeight.w700, _muted))),
+        ]),
+      );
+    }
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: _card(border: const Color(0xFFE4DCFF)),
@@ -655,7 +707,14 @@ class _BillCardState extends State<_BillCard> {
               const SizedBox(width: 10),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('${l.product['name']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(13.5, FontWeight.w800, _ink)),
+                  GestureDetector(
+                    onTap: () => _change(l),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Flexible(child: Text('${l.product['name']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(13.5, FontWeight.w800, _ink))),
+                      const SizedBox(width: 3),
+                      const Icon(Icons.swap_horiz_rounded, size: 14, color: _muted),
+                    ]),
+                  ),
                   GestureDetector(
                     onTap: () => _editPrice(l),
                     child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -675,6 +734,19 @@ class _BillCardState extends State<_BillCard> {
             padding: const EdgeInsets.only(top: 4),
             child: Text('Not found: ${widget.cmd.unknown.join(', ')} — add it in billing', style: _j(11.5, FontWeight.w700, _red)),
           ),
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Row(children: [
+            const Icon(Icons.discount_rounded, size: 16, color: _muted),
+            const SizedBox(width: 6),
+            Expanded(child: Text(discountPct > 0 ? 'Discount ${discountPct / 100}%' : 'Discount', style: _j(12.5, FontWeight.w700, _ink))),
+            SizedBox(
+              width: 110,
+              child: _input(discount, discountPct > 0 ? Money.rs(off) : '₹ 0', number: true, prefix: '₹ ', onChanged: () => setState(() => discountPct = 0)),
+            ),
+          ]),
+        ),
+        if (off > 0) Align(alignment: Alignment.centerRight, child: Text('${Money.rs(gross)} − ${Money.rs(off)}', style: _j(11.5, FontWeight.w700, _muted))),
         const Divider(height: 18),
         // payment
         Row(children: [
@@ -727,7 +799,9 @@ class _BillCardState extends State<_BillCard> {
               style: FilledButton.styleFrom(
                   minimumSize: const Size.fromHeight(48), backgroundColor: _green, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
               onPressed: saving || lines.isEmpty ? null : _save,
-              icon: saving ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.check_rounded),
+              icon: saving
+                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Icon(Icons.check_rounded),
               label: Text(saving ? 'Saving…' : 'Save bill'),
             ),
           ),
@@ -774,7 +848,8 @@ class _BillCardState extends State<_BillCard> {
           Expanded(child: Text('Bill $number saved', style: _j(16, FontWeight.w800, Colors.white))),
         ]),
         const SizedBox(height: 6),
-        Text('${Money.rs(total)} · ${due > 0 ? 'paid ${Money.rs(paid)}, due ${Money.rs(due)}' : 'paid in full'}'
+        Text(
+            '${Money.rs(total)} · ${due > 0 ? 'paid ${Money.rs(paid)}, due ${Money.rs(due)}' : 'paid in full'}'
             '${name.text.isNotEmpty ? ' · ${name.text}' : ''}',
             style: _j(12.5, FontWeight.w600, const Color(0xE6FFFFFF))),
         const SizedBox(height: 12),
@@ -857,7 +932,8 @@ class _ReceiptCardState extends State<_ReceiptCard> {
   Widget build(BuildContext context) {
     final c = widget.cmd.customer;
     if (c == null) {
-      return _AnswerCard(Answer('No customer "${widget.cmd.name ?? ''}" found', detail: 'Say the full name or the mobile number, e.g. "Rahim Sheikh 5000 joma"'));
+      return _AnswerCard(
+          Answer('No customer "${widget.cmd.name ?? ''}" found', detail: 'Say the full name or the mobile number, e.g. "Rahim Sheikh 5000 joma"'));
     }
     if (done) {
       return _AnswerCard(Answer('✓ ${Money.rs(widget.cmd.amount)} received from ${c['name']}',
@@ -941,51 +1017,94 @@ class _CustomerCardState extends State<_CustomerCard> {
   }
 }
 
-/// "Claude AI" / "Offline AI" chip: tap to turn the cloud AI on or off.
-class _AiMode extends StatefulWidget {
-  const _AiMode();
-  @override
-  State<_AiMode> createState() => _AiModeState();
+/// Search and choose a product (to correct what Hisab AI picked).
+Future<Rec?> _pickProduct(BuildContext context, String said) async {
+  final all = await Books.query('SELECT * FROM products ORDER BY name');
+  if (!context.mounted) return null;
+  final q = TextEditingController(text: said);
+  return showModalBottomSheet<Rec>(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (c) => StatefulBuilder(builder: (c, set) {
+      final list = q.text.trim().isEmpty ? all.take(60).toList() : SmartSearch.rank(all, q.text, limit: 60);
+      return Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(c).viewInsets.bottom),
+        child: SizedBox(
+          height: MediaQuery.of(c).size.height * 0.7,
+          child: Column(children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: TextField(
+                controller: q,
+                autofocus: true,
+                onChanged: (_) => set(() {}),
+                decoration: const InputDecoration(prefixIcon: Icon(Icons.search_rounded), hintText: 'Search product'),
+              ),
+            ),
+            Expanded(
+              child: ListView(children: [
+                for (final p in list)
+                  ListTile(
+                    leading: ProductThumb(p, width: 38, height: 40),
+                    title: Text('${p['name']}', maxLines: 1, overflow: TextOverflow.ellipsis),
+                    subtitle: Text('${Money.rs(AiActions.listPrice(p))} · stock ${p['stock']}'),
+                    onTap: () => Navigator.pop(c, p),
+                  ),
+              ]),
+            ),
+          ]),
+        ),
+      );
+    }),
+  );
 }
 
-class _AiModeState extends State<_AiMode> {
-  bool on = true, ready = false;
+/// How much Hisab AI has learnt in this shop (tap: forget).
+class _Learnt extends StatefulWidget {
+  const _Learnt();
+  @override
+  State<_Learnt> createState() => _LearntState();
+}
 
+class _LearntState extends State<_Learnt> {
   @override
   void initState() {
     super.initState();
-    _check();
-  }
-
-  Future<void> _check() async {
-    final enabled = await CloudAi.enabled();
-    final up = await Vps.available();
-    if (mounted) {
-      setState(() {
-        on = enabled;
-        ready = up && Vps.aiReady;
-      });
-    }
+    AiMemory.load().then((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    final live = on && ready;
     return GestureDetector(
       onTap: () async {
-        await Books.setSetting('ai_cloud', on ? '0' : '1');
-        await _check();
-        if (context.mounted) {
-          toast(context, !on ? 'Offline AI — works without internet' : ready ? 'Claude AI on' : 'Claude AI is not set up on your server yet');
-        }
+        await AiMemory.load(force: true);
+        if (!context.mounted) return;
+        final forget = await showDialog<bool>(
+          context: context,
+          builder: (c) => AlertDialog(
+            title: const Text('Hisab AI memory'),
+            content: Text('Runs fully on this phone — no internet, no outside AI.\n\n'
+                'It has learnt ${AiMemory.size} words your shop uses for products and customers. '
+                'Every saved bill and every correction (tap a product name in a bill) teaches it more.'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Forget all')),
+              FilledButton(onPressed: () => Navigator.pop(c, false), child: const Text('OK')),
+            ],
+          ),
+        );
+        if (forget == true) await AiMemory.forget();
+        if (mounted) setState(() {});
       },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-        decoration: BoxDecoration(color: live ? const Color(0xFFFFE08A) : const Color(0x26FFFFFF), borderRadius: BorderRadius.circular(12)),
+        decoration: BoxDecoration(color: const Color(0x26FFFFFF), borderRadius: BorderRadius.circular(12)),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(live ? Icons.cloud_done_rounded : Icons.phone_android_rounded, size: 14, color: live ? const Color(0xFF3B1CC8) : Colors.white),
+          const Icon(Icons.psychology_rounded, size: 14, color: Color(0xFFFFE08A)),
           const SizedBox(width: 4),
-          Text(live ? 'Claude AI' : 'Offline', style: _j(11, FontWeight.w800, live ? const Color(0xFF3B1CC8) : Colors.white)),
+          Text(AiMemory.size == 0 ? 'Learning' : 'Learnt ${AiMemory.size}', style: _j(11, FontWeight.w800, Colors.white)),
         ]),
       ),
     );

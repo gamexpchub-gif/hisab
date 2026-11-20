@@ -20,6 +20,7 @@ import 'package:hisab/core/stores.dart';
 import 'package:hisab/core/gst_report.dart';
 import 'package:hisab/core/xlsx.dart';
 import 'package:hisab/core/smart.dart';
+import 'package:hisab/core/quick.dart';
 import 'package:hisab/print/invoice_pdf.dart' show amountInWords;
 import 'package:hisab/screens/sales_book.dart' show matchSale, matchDoc;
 
@@ -724,6 +725,73 @@ void main() {
     expect(await Books.findDuplicateParty('customer', 'RAHIM SHEIKH', '09830055555'), isNotNull);
     // suppliers are checked separately
     await Books.saveParty('supplier', {'name': 'Rahim Sheikh', 'phone': '9830055555'});
+  });
+
+  test('Own AI: Bangla amounts, discount, several commands, follow-ups, learning, typos', () async {
+    await AiMemory.load(force: true);
+    await AiMemory.forget();
+    final phone = await Books.saveProduct({'name': 'Redmi Note 13 Pro', 'brand': 'Xiaomi', 'gst_bp': 0, 'price': 2500000}, openingQty: 5, openingCost: 2000000);
+    final charger = await Books.saveProduct({'name': 'Fast Charger 33W', 'gst_bp': 0, 'price': 50000}, openingQty: 20, openingCost: 20000);
+    final glass = await Books.saveProduct({'name': 'Tempered Glass', 'gst_bp': 0, 'price': 20000}, openingQty: 20, openingCost: 5000);
+    final rahim = await Books.saveParty('customer', {'name': 'Rahim Sheikh', 'phone': '9830011122'});
+    var products = await Books.query('SELECT * FROM products');
+    final customers = await Books.query('SELECT * FROM customers');
+
+    expect(AiCommands.spoken('dera lakh'), '1.5 lakh');
+    expect(VoiceBill.normalise(AiCommands.spoken('sare 18 hajar')), '18500');
+    expect(VoiceBill.normalise(AiCommands.spoken('arai hajar')), '2500');
+
+    // typo in the name, amount in words, discount, UPI
+    final b = AiCommands.parse('Rahim Sekh ke redmi note 13 pro sare 24 hajar, 500 discount upi', products, customers) as BillCommand;
+    expect(asInt(b.customer!['id']), rahim);
+    expect(asInt(b.lines.single.product['id']), phone);
+    expect(b.lines.single.rate, 2450000);
+    expect(b.discount, 50000);
+    expect(b.pay, 'upi');
+    expect(AiActions.total(b.lines) - AiActions.discountOf(b), 2400000);
+    expect(AiCommands.parse('charger 10% discount', products, customers) is BillCommand, isTrue);
+    expect((AiCommands.parse('charger 10% discount', products, customers) as BillCommand).discountPct, 1000);
+
+    // follow-ups change the same bill
+    var f = AiCommands.refine(b, 'aro duita charger 450 kore', products, customers)!;
+    expect(f.lines.length, 2);
+    expect(f.lines.last.qty, 2);
+    expect(f.lines.last.rate, 45000);
+    f = AiCommands.refine(f, 'dam 24000', products, customers)!;
+    expect(f.lines.last.rate, 2400000); // the last line's price changed
+    f = AiCommands.refine(f, 'charger bad dao', products, customers)!;
+    expect(f.lines.map((l) => asInt(l.product['id'])), [phone]);
+    f = AiCommands.refine(f, 'baki te', products, customers)!;
+    expect(f.pay, 'due');
+    f = AiCommands.refine(f, 'advance 10000', products, customers)!;
+    expect(f.paidNow, 1000000);
+    expect(AiCommands.refine(f, 'aj koto bikri?', products, customers), isNull);
+
+    // several things in one message
+    final many = AiCommands.parseAll('Rahim ke tempered glass ekta 200 cash\nRahim 5000 joma\ncha 120 khoroch', products, customers);
+    expect(many.length, 3);
+    expect(many[0], isA<BillCommand>());
+    expect(many[1], isA<ReceiptCommand>());
+    expect(many[2], isA<ExpenseCommand>());
+
+    // learning: the shop calls the glass "screen guard"
+    expect(AiCommands.parse('screen guard 250 cash', products, customers), isNull);
+    final sold = BillCommand([CmdLine(products.firstWhere((p) => asInt(p['id']) == glass), 1, 25000, 'screen guard')], pay: 'cash');
+    await AiActions.saveBill(sold, pay: 'cash');
+    await AiMemory.load(force: true);
+    products = await Books.query('SELECT * FROM products');
+    final learnt = AiCommands.parse('ekta screen guard 250 cash', products, customers) as BillCommand;
+    expect(asInt(learnt.lines.single.product['id']), glass);
+    expect(AiMemory.size, greaterThan(0));
+    expect(charger, isPositive);
+
+    // a discount is saved on the bill
+    final (sale, _, total, paid) = await AiActions.saveBill(b, pay: 'upi');
+    expect(total, 2400000);
+    expect(paid, 2400000);
+    expect(asInt((await Books.query('SELECT discount FROM sales WHERE id = ?', [sale])).first['discount']), 50000);
+    await AiMemory.forget();
+    await expectBalanced();
   });
 
   test('AI command: one sentence makes the customer and the bill', () async {
