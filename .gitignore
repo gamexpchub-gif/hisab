@@ -14,3 +14,4 @@ android/key.properties
 *.jks
 *.keystore
 *.whl
+__pycache__/
