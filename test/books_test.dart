@@ -18,6 +18,7 @@ import 'package:hisab/core/staff.dart';
 import 'package:hisab/core/plan.dart';
 import 'package:hisab/core/stores.dart';
 import 'package:hisab/core/gst_report.dart';
+import 'package:hisab/core/gst.dart';
 import 'package:hisab/core/xlsx.dart';
 import 'package:hisab/core/smart.dart';
 import 'package:hisab/core/quick.dart';
@@ -261,7 +262,7 @@ void main() {
   });
 
   test('purchases book and stock supplied by a supplier', () async {
-    final sup = await Books.saveParty('supplier', {'name': 'Kolkata Mobile Dist', 'phone': '033 2222 1111', 'gstin': '19ABCDE1234F1Z5'});
+    final sup = await Books.saveParty('supplier', {'name': 'Kolkata Mobile Dist', 'phone': '033 2222 1111', 'gstin': '19ABCDE1234F1ZX'});
     final p = await Books.saveProduct({'name': 'Redmi Note 13', 'gst_bp': 0, 'price': 1500000});
     final bank = asInt((await Books.moneyAccounts())[1]['id']);
     await Books.createPurchase(
@@ -954,18 +955,63 @@ void main() {
   test('GST report: output, ITC, credit notes and B2B', () async {
     final today = ymd(DateTime.now());
     final before = await GstReport.load(today, today);
-    final b2b = await Books.saveParty('customer', {'name': 'GST Firm', 'gstin': '19ABCDE1234F1Z5'});
+    final b2b = await Books.saveParty('customer', {'name': 'GST Firm', 'gstin': '19ABCDE1234F1ZX'});
     final p = await Books.saveProduct({'name': 'GST Laptop', 'gst_bp': 1800, 'price': 5000000, 'hsn': '8471'});
-    final sup = await Books.saveParty('supplier', {'name': 'GST Supplier'});
+    final sup = await Books.saveParty('supplier', {'name': 'GST Supplier', 'gstin': '19AAACG1234K1ZQ'});
     await Books.createPurchase(items: [ItemIn(p, 2, 4000000)], supplierId: sup);
     await Books.createSale(items: [ItemIn(p, 1, 5000000)], customerId: b2b, paid: 0);
     final g = await GstReport.load(today, today);
     expect(g.outTax - before.outTax, 900000);
     expect(g.itc - before.itc, 1440000);
-    expect(g.b2b.any((b) => b['gstin'] == '19ABCDE1234F1Z5'), isTrue);
+    expect(g.b2b.any((b) => b['gstin'] == '19ABCDE1234F1ZX'), isTrue);
     expect(g.hsn.keys.any((k) => k.startsWith('8471|')), isTrue);
     expect(g.payable, g.netOutTax - g.itc);
-    expect(g.sheets().length, 6);
+    expect(g.sheets().length, 8);
+  });
+
+  test('GST pro: discount lowers GST, IGST for other states, GSTIN check, set-off, portal JSON', () async {
+    expect(Gst.check('27AAPFU0939F1ZV'), isNull); // a real-format GSTIN
+    expect(Gst.check('27AAPFU0939F1ZA'), contains('check digit'));
+    expect(Gst.check('19ABC'), contains('15'));
+    final settings = await Books.settings();
+    await Books.setSetting('gstin', '19FGHIJ5678K1ZY'); // the shop is in West Bengal
+    try {
+      final s = await Books.settings();
+      expect(Gst.shopState(s), '19');
+      expect(Gst.interState(s, '27AABCU9603R1ZN'), isTrue);
+      expect(Gst.interState(s, '19ABCDE1234F1ZX'), isFalse);
+      expect(Gst.interState(s, null), isFalse);
+
+      final today = ymd(DateTime.now());
+      final before = await GstReport.load(today, today);
+      final p = await Books.saveProduct({'name': 'GST Pro Phone', 'gst_bp': 1800, 'price': 1000000, 'hsn': '8517'}, openingQty: 5, openingCost: 800000);
+      // ₹1,180 off a ₹11,800 bill: GST is charged on ₹9,000 → ₹1,620
+      final local = await Books.createSale(items: [ItemIn(p, 1, 1000000)], discount: 118000, paid: 1062000);
+      final sale = (await Books.query('SELECT * FROM sales WHERE id = ?', [local])).first;
+      expect(asInt(sale['total']), 1062000);
+      expect(asInt(sale['tax']), 162000);
+      expect(asInt(sale['discount']), 100000); // before GST
+      // a customer in Maharashtra: IGST
+      final mh = await Books.saveParty('customer', {'name': 'Mumbai Traders', 'gstin': '27AABCU9603R1ZN'});
+      await Books.createSale(items: [ItemIn(p, 1, 1000000)], customerId: mh, paid: 1180000);
+      final g = await GstReport.load(today, today);
+      final (i, c, sg) = g.outHeads;
+      final (i0, c0, s0) = before.outHeads;
+      expect(i - i0, 180000);
+      expect((c - c0) + (sg - s0), 162000);
+      expect(g.b2bDocs.any((d) => d.pos == '27' && d.igst == 180000), isTrue);
+      expect(g.hsn.values.any((h) => h.hsn == '8517' && h.b2b), isTrue);
+      // ITC set-off never pays more than the output tax
+      final so = g.setOff;
+      expect(so.cash.$1 + so.cash.$2 + so.cash.$3, lessThanOrEqualTo(g.netOutTax.clamp(0, 1 << 40)));
+      final j = jsonDecode(g.gstr1Json()) as Map;
+      expect(j['gstin'], '19FGHIJ5678K1ZY');
+      expect((j['b2b'] as List).any((x) => x['ctin'] == '27AABCU9603R1ZN'), isTrue);
+      expect(j['hsn'], isA<Map>());
+      await expectBalanced();
+    } finally {
+      await Books.setSetting('gstin', settings['gstin'] ?? '');
+    }
   });
 
   test('xlsx writer makes a valid zip with sheets', () {

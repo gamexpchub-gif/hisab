@@ -5,6 +5,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import '../core/books.dart';
+import '../core/gst.dart';
 import '../core/money.dart';
 
 // =============================================================================
@@ -20,7 +21,7 @@ class PrintOptions {
   String paper; // a4 | a5 | letter | legal | 80mm | 58mm
   String title; // TAX INVOICE | BILL OF SUPPLY | CASH MEMO | ESTIMATE
   String copy; // ORIGINAL FOR RECIPIENT | DUPLICATE … | TRIPLICATE …
-  String tax; // igst | cgst
+  String tax; // auto (by the customer's state) | igst | cgst
   bool brands, banner, qr, bank, terms, imei, hsn, signature, color;
   String margin; // narrow | normal | wide
 
@@ -28,7 +29,7 @@ class PrintOptions {
     this.paper = 'a4',
     this.title = 'TAX INVOICE',
     this.copy = 'ORIGINAL FOR RECIPIENT',
-    this.tax = 'igst',
+    this.tax = 'auto',
     this.brands = true,
     this.banner = true,
     this.qr = true,
@@ -55,7 +56,7 @@ class PrintOptions {
   Map<String, String> toSettings() => {
         'print_paper': paper,
         'print_title': title,
-        'print_tax': tax,
+        'print_tax2': tax,
         'print_margin': margin,
         'print_flags': [
           if (brands) 'brands',
@@ -76,7 +77,7 @@ class PrintOptions {
     return PrintOptions(
       paper: s['print_paper'] ?? 'a4',
       title: s['print_title'] ?? 'TAX INVOICE',
-      tax: s['print_tax'] ?? 'igst',
+      tax: s['print_tax2'] ?? 'auto',
       margin: s['print_margin'] ?? 'normal',
       brands: on('brands'),
       banner: on('banner'),
@@ -458,8 +459,7 @@ class _Builder {
           ]),
         );
     final gstin = '${sale['gstin'] ?? ''}'.trim();
-    final state = setting('state', 'West Bengal');
-    final stateCode = gstin.length >= 2 ? gstin.substring(0, 2) : setting('state_code', '19');
+    final supply = Gst.placeOfSupply(d.settings, gstin);
     return pw.Container(
       decoration: pw.BoxDecoration(border: pw.Border(bottom: pw.BorderSide(color: line, width: .8))),
       padding: pw.EdgeInsets.symmetric(vertical: 8 * s),
@@ -483,7 +483,7 @@ class _Builder {
               row('PHONE', '${sale['phone'] ?? '—'}'),
               if ('${sale['address'] ?? ''}'.trim().isNotEmpty) row('ADDRESS', '${sale['address']}'),
               row('GSTIN', gstin.isEmpty ? '—' : gstin),
-              row('PLACE OF SUPPLY', '$state ($stateCode)'),
+              row('PLACE OF SUPPLY', Gst.stateName(supply)),
             ]),
           ),
         ),
@@ -504,7 +504,8 @@ class _Builder {
     );
   }
 
-  bool get _cgst => o.tax == 'cgst';
+  /// CGST + SGST inside the state, IGST to a customer registered elsewhere.
+  bool get _cgst => o.tax == 'cgst' || (o.tax == 'auto' && !Gst.interState(d.settings, d.sale['gstin'] as String?));
 
   pw.Widget _itemsTable() {
     final sale = d.sale;
@@ -867,7 +868,9 @@ class _Builder {
         dash(),
         line2('Subtotal', rs(asInt(sale['subtotal']))),
         if (discount > 0) line2('Discount', '- ${rs(discount)}'),
-        if (tax > 0) line2('GST', rs(tax)),
+        if (discount > 0) line2('Taxable value', rs(asInt(sale['subtotal']) - discount)),
+        if (tax > 0 && _cgst) ...[line2('CGST', rs(tax ~/ 2)), line2('SGST', rs(tax - tax ~/ 2))],
+        if (tax > 0 && !_cgst) line2('IGST', rs(tax)),
         line2('TOTAL', '₹${rs(total)}', font: f.black, size: 11),
         for (final p in d.payments) line2('Paid (${p.$1})', rs(p.$2)),
         if (due > 0) line2('BALANCE DUE', '₹${rs(due)}', font: f.heavy, size: 9),

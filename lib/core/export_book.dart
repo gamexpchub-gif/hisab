@@ -182,4 +182,15 @@ class ExportBook {
     await NativeFiles.share(f, mime: xlsxMime, subject: 'Hisab AI — $label', text: '$label · ${prettyDate(from)} – ${prettyDate(to)}');
     return f;
   }
+
+  /// GSTR-1 as JSON for the GST portal's offline tool.
+  static Future<File> shareGstr1Json(String from, String to) async {
+    final g = await GstReport.load(from, to);
+    final dir = Directory(p.join((await getApplicationSupportDirectory()).path, 'exports'));
+    await dir.create(recursive: true);
+    final f = File(p.join(dir.path, 'GSTR1-${g.gstin.isEmpty ? 'shop' : g.gstin}-${to.substring(5, 7)}${to.substring(0, 4)}.json'));
+    await f.writeAsString(g.gstr1Json(), flush: true);
+    await NativeFiles.share(f, mime: 'application/json', subject: 'GSTR-1 JSON', text: 'GSTR-1 · ${prettyDate(from)} – ${prettyDate(to)}');
+    return f;
+  }
 }

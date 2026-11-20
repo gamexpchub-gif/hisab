@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/books.dart';
+import '../core/gst.dart';
 import '../ui/theme.dart';
 import '../ui/widgets.dart';
 import 'forms.dart';
@@ -210,8 +211,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
         expand: true,
         fontSize: 16,
         onTap: () async {
+          final g = (ctrls['gstin']?.text ?? '').trim().toUpperCase();
+          final bad = g.isEmpty ? null : Gst.check(g);
+          if (bad != null) {
+            toast(context, bad, error: true);
+            return;
+          }
+          if (ctrls['gstin'] != null) ctrls['gstin']!.text = g;
           for (final k in keys.keys) {
             await Books.setSetting(k, ctrls[k]!.text.trim());
+          }
+          // the shop's state follows its GSTIN
+          final st = Gst.stateOf(g);
+          if (st != null) {
+            await Books.setSetting('state_code', st);
+            await Books.setSetting('state', Gst.states[st]!);
           }
           if (!context.mounted) return;
           toast(context, 'Settings saved');

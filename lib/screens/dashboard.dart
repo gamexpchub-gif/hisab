@@ -601,7 +601,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final items = <(String, IconData, Color, Widget)>[
       ('Profit & Loss', Icons.trending_up_rounded, _green, ProfitLossScreen(from: ymd(from), to: ymd(to))),
       ('Balance Sheet', Icons.account_balance_rounded, _blue, const BalanceSheetScreen()),
-      ('GST Summary', Icons.receipt_long_rounded, const Color(0xFFEC4899), GstScreen(from: ymd(from), to: ymd(to))),
+      ('GST Returns', Icons.receipt_long_rounded, const Color(0xFFEC4899), GstScreen(from: ymd(from), to: ymd(to))),
       ('Day Book', Icons.menu_book_rounded, _amber, DayBookScreen(from: ymd(from), to: ymd(to))),
       ('Trial Balance', Icons.balance_rounded, _purple, const TrialBalanceScreen()),
       ('Ledgers', Icons.library_books_rounded, const Color(0xFF14B8A6), const LedgersScreen()),

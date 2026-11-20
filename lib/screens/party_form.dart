@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../core/books.dart';
+import '../core/gst.dart';
 import '../core/money.dart';
 import '../ui/photo.dart';
 import '../ui/widgets.dart';
@@ -113,7 +114,10 @@ class _PartyFormState extends State<PartyForm> {
     final p = c['pan']!.text.trim().toUpperCase();
     if (p.isNotEmpty && !RegExp(r'^[A-Z]{5}[0-9]{4}[A-Z]$').hasMatch(p)) return 'PAN format is ABCDE1234F';
     final g = c['gstin']!.text.trim().toUpperCase();
-    if (g.isNotEmpty && g.length != 15) return 'GSTIN must have 15 characters';
+    if (g.isNotEmpty) {
+      final bad = Gst.check(g);
+      if (bad != null) return bad;
+    }
     return null;
   }
 

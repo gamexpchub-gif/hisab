@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 
 import 'db.dart';
+import 'gst.dart';
 import 'imei_smart.dart';
 import 'money.dart';
 
@@ -263,8 +264,18 @@ class Books {
         tax += lineTax;
         cogs += unitCost * i.qty;
       }
-      if (discount < 0 || discount > subtotal) throw AccountingError('Discount must be between 0 and the subtotal');
+      if (discount < 0 || discount > subtotal + tax) throw AccountingError('Discount must be between 0 and the bill total');
+      // [discount] is money off the final bill; GST is charged on the value
+      // after it, so the bill's taxable value and GST both come down
       final total = subtotal + tax - discount;
+      if (discount > 0) {
+        final (_, net) = Gst.afterDiscount([for (final r in rows) (asInt(r['amount']), asInt(r['gst_bp']))], discount);
+        for (var k = 0; k < rows.length; k++) {
+          rows[k]['tax'] = net[k];
+        }
+        tax = net.fold<int>(0, (a, t) => a + t);
+        discount = subtotal + tax - total; // the discount before GST (what the books and invoice use)
+      }
       final parts = (splits ?? const <MapEntry<int, int>>[]).where((e) => e.value != 0).toList();
       if (parts.any((e) => e.value < 0)) throw AccountingError('Split amounts cannot be negative');
       final paidAmt = parts.isNotEmpty ? parts.fold<int>(0, (a, e) => a + e.value) : (paid ?? (customerId == null ? total : 0));
@@ -272,7 +283,7 @@ class Books {
       // the person's own limits (staff): discount % and credit per bill
       if (_trusted == 0) {
         final maxDisc = limits?.call().$1;
-        if (discount > 0 && maxDisc != null && discount * 100 > (subtotal) * maxDisc) {
+        if (discount > 0 && maxDisc != null && discount * 100 > subtotal * maxDisc) {
           throw AccountingError('Discount above $maxDisc% needs the owner\'s permission');
         }
         final maxCredit = limits?.call().$2;
@@ -2129,7 +2140,7 @@ class Books {
         'image': s[8],
       }, openingQty: s[5] as int, openingCost: s[3] as int));
     }
-    final sup = await saveParty('supplier', {'name': 'Kolkata Mobile Distributors', 'phone': '9830000001'});
+    final sup = await saveParty('supplier', {'name': 'Kolkata Mobile Distributors', 'phone': '9830000001', 'gstin': '19AAACG1234K1ZQ'});
     final rahul = await saveParty('customer', {
       'name': 'Rahul Das',
       'phone': '9800000011',

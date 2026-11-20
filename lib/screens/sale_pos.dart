@@ -6,6 +6,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../core/books.dart';
+import '../core/gst.dart';
 import '../core/drafts.dart';
 import '../core/imei_smart.dart';
 import '../core/quick.dart';
@@ -335,7 +336,6 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
     note.text = '${sale['note'] ?? ''}';
     roundOff = false;
     discountPct = false;
-    discountCtrl.text = asInt(sale['discount']) > 0 ? Money.edit(asInt(sale['discount'])) : '';
     final cid = sale['customer_id'];
     customer = cid == null ? null : customers.where((c) => asInt(c['id']) == asInt(cid)).firstOrNull;
     final items = await Books.query('SELECT * FROM sale_items WHERE sale_id = ? ORDER BY id', [id]);
@@ -354,6 +354,10 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
       l.opp.text = '${i['opp_id'] ?? ''}';
       cart.add(l);
     }
+    // the discount as money off the bill (before: GST was charged in full)
+    final fullTax = items.fold<int>(0, (a, i) => a + Money.percent(asInt(i['amount']), asInt(i['gst_bp'])));
+    final off = asInt(sale['subtotal']) + fullTax - asInt(sale['total']);
+    discountCtrl.text = off > 0 ? Money.edit(off) : '';
     final pays = await Books.query('SELECT account_id, amount FROM sale_payments WHERE sale_id = ? ORDER BY id', [id]);
     final total = asInt(sale['total']), paid = asInt(sale['paid']);
     if (pays.length > 1) {
@@ -409,12 +413,17 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
     }
   }
 
-  int get _disc => math.min(math.max(_discountInput, 0), subtotal);
+  int get _disc => math.min(math.max(_discountInput, 0), subtotal + tax);
   int get _gross => subtotal + tax - _disc;
   int get roundAmount => roundOff ? _gross % 100 : 0; // drop the paise
-  int get discount => _disc + roundAmount;
+  int get discount => _disc + roundAmount; // money off the final bill
   int get total => subtotal + tax - discount;
-  int get profit => subtotal - discount - cart.fold(0, (a, l) => a + l.cost);
+
+  /// GST after the discount (the discount lowers the taxable value).
+  int get netTax => Gst.afterDiscount([for (final l in cart) (l.amount, l.gstBp)], discount).$2.fold(0, (a, t) => a + t);
+  int get taxable => total - netTax;
+  bool get interState => Gst.interState(settings, customer?['gstin'] as String?);
+  int get profit => taxable - cart.fold(0, (a, l) => a + l.cost);
   int get qtyTotal => cart.fold(0, (a, l) => a + l.qty);
 
   int _parse(TextEditingController c) {
@@ -1544,8 +1553,13 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
         const SizedBox(height: 10),
         row('Subtotal ($qtyTotal item${qtyTotal == 1 ? '' : 's'})', Money.rs(subtotal)),
         if (_disc > 0) row('Discount', '− ${Money.rs(_disc)}', color: _green),
-        row('CGST', Money.rs(tax ~/ 2)),
-        row('SGST', Money.rs(tax - tax ~/ 2)),
+        if (discount > 0) row('Taxable value', Money.rs(taxable)),
+        if (interState)
+          row('IGST', Money.rs(netTax))
+        else ...[
+          row('CGST', Money.rs(netTax ~/ 2)),
+          row('SGST', Money.rs(netTax - netTax ~/ 2)),
+        ],
         Row(children: [
           Expanded(child: Text('Round off', style: _j(13, FontWeight.w500, const Color(0xFF3A4155)))),
           if (roundOff && roundAmount > 0) Text('− ${Money.rs(roundAmount)}  ', style: _j(12.5, FontWeight.w700, _muted)),

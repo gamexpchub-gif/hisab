@@ -196,6 +196,7 @@ class _PrintStudioState extends State<PrintStudio> {
               _chip(c.$2, o.copy == c.$1, () => _set(() => o.copy = c.$1)),
           ]),
           _row('GST', [
+            _chip('Auto', o.tax == 'auto', () => _set(() => o.tax = 'auto')),
             _chip('IGST', o.tax == 'igst', () => _set(() => o.tax = 'igst')),
             _chip('CGST + SGST', o.tax == 'cgst', () => _set(() => o.tax = 'cgst')),
           ]),

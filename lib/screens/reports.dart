@@ -19,7 +19,7 @@ class ReportsScreen extends StatelessWidget {
       ('Balance Sheet', 'Assets = Liabilities + Equity', Icons.account_balance_rounded, Palette.blue, const BalanceSheetScreen()),
       ('Trial Balance', 'Debit / credit check of every account', Icons.balance_rounded, Palette.purple, const TrialBalanceScreen()),
       ('Day Book', 'Every journal entry by date', Icons.menu_book_rounded, Palette.orange, const DayBookScreen()),
-      ('GST Summary', 'Output GST, input credit, net payable', Icons.receipt_long_rounded, Palette.pink, const GstScreen()),
+      ('GST Returns', 'GSTR-1, GSTR-3B, GSTR-2, HSN, portal JSON', Icons.receipt_long_rounded, Palette.pink, const GstScreen()),
     ];
     return PageShell(title: 'Reports', subtitle: 'Generated live from your double-entry books', children: [
       CardBox(

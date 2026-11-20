@@ -111,7 +111,9 @@ Widget _table(List<String> head, List<List<String>> rows) => SingleChildScrollVi
         headingTextStyle: _j(11.5, FontWeight.w800, _muted),
         dataTextStyle: _j(12.5, FontWeight.w600, _ink),
         columns: [for (final h in head) DataColumn(label: Text(h))],
-        rows: [for (final r in rows) DataRow(cells: [for (final c in r) DataCell(Text(c))])],
+        rows: [
+          for (final r in rows) DataRow(cells: [for (final c in r) DataCell(Text(c))])
+        ],
       ),
     );
 
@@ -136,6 +138,19 @@ class GstScreen extends StatefulWidget {
 class _GstScreenState extends State<GstScreen> {
   late String from = widget.from ?? periods().first.$2;
   late String to = widget.to ?? periods().first.$3;
+  int tab = 0;
+  bool busy = false;
+
+  Future<void> _json() async {
+    if (busy) return;
+    setState(() => busy = true);
+    try {
+      await ExportBook.shareGstr1Json(from, to);
+    } catch (e) {
+      if (mounted) toast(context, 'Could not make the JSON: $e', error: true);
+    }
+    if (mounted) setState(() => busy = false);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -144,80 +159,214 @@ class _GstScreenState extends State<GstScreen> {
       load: () => GstReport.load(from, to),
       builder: (context, g) {
         final rs = Money.rs;
+        final so = g.setOff;
+        final (oi, oc, os) = g.outHeads;
+        final (ci, cc, cs) = g.itcHeads;
+        final noHsn = g.hsn.values.where((h) => h.hsn == '—').fold<int>(0, (a, h) => a + h.qty);
+        final oneMonth = from.substring(0, 7) == to.substring(0, 7);
         return PageShell(
-          title: 'GST Report',
-          subtitle: 'GSTR-1 · GSTR-3B · HSN — send Excel to your CA',
+          title: 'GST Returns',
+          subtitle: 'GSTR-1 · GSTR-3B · GSTR-2 · HSN',
           children: [
-            _PeriodBar(from, to, (f, t) => setState(() {
-                  from = f;
-                  to = t;
-                })),
+            _PeriodBar(
+                from,
+                to,
+                (f, t) => setState(() {
+                      from = f;
+                      to = t;
+                    })),
             Container(
               margin: const EdgeInsets.only(top: 6),
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(22),
-                gradient: LinearGradient(
-                    colors: g.payable > 0 ? const [Color(0xFFFF5C7A), Color(0xFFB4123E)] : const [Color(0xFF3EE08F), Color(0xFF0E7F4C)]),
+                gradient:
+                    LinearGradient(colors: g.cashPayable > 0 ? const [Color(0xFFFF5C7A), Color(0xFFB4123E)] : const [Color(0xFF3EE08F), Color(0xFF0E7F4C)]),
               ),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(g.payable >= 0 ? 'Net GST payable' : 'ITC carried forward', style: _j(13, FontWeight.w600, const Color(0xE6FFFFFF))),
+                Text(g.cashPayable > 0 ? 'GST to pay in cash' : 'Nothing to pay', style: _j(13, FontWeight.w600, const Color(0xE6FFFFFF))),
                 const SizedBox(height: 4),
-                Text(rs(g.payable.abs()), style: _j(30, FontWeight.w800, Colors.white)),
+                Text(rs(g.cashPayable), style: _j(30, FontWeight.w800, Colors.white)),
                 const SizedBox(height: 4),
-                Text('Output ${rs(g.netOutTax)} − ITC ${rs(g.itc)} · ${g.invoices} invoice', style: _j(12, FontWeight.w600, const Color(0xE6FFFFFF))),
+                Text('Output ${rs(g.netOutTax)} − ITC ${rs(g.itc)} · ${g.invoices} invoices', style: _j(12, FontWeight.w600, const Color(0xE6FFFFFF))),
               ]),
             ),
-            _card('GSTR-3B summary', [
-              _row('3.1(a) Outward taxable value', rs(g.outTaxable)),
-              _row('Output tax (CGST + SGST)', rs(g.outTax)),
-              if (g.creditTax > 0) _row('Less: credit notes (${g.creditNotes.length} return)', '− ${rs(g.creditTax)}', color: _green),
-              _row('CGST', rs(g.netOutTax ~/ 2)),
-              _row('SGST', rs(g.netOutTax - g.netOutTax ~/ 2)),
-              const Divider(color: _line),
-              _row('4(A) Input tax credit (purchases ${rs(g.itcTaxable)})', rs(g.itc), color: _green),
-              const Divider(color: _line),
-              _row(g.payable >= 0 ? 'Net payable' : 'ITC carried forward', rs(g.payable.abs()), bold: true, color: g.payable > 0 ? _red : _green),
-              if (g.discount > 0)
-                Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Text('Bill discounts of ${rs(g.discount)} are not deducted from taxable value — tell your CA.',
-                      style: _j(11, FontWeight.w500, _muted)),
-                ),
-            ]),
-            _card('Rate-wise outward (GSTR-1)', [
-              _table(['Rate', 'Qty', 'Taxable', 'CGST', 'SGST'], [
-                for (final r in g.sorted(g.outward)) [r.rate, '${r.qty}', rs(r.taxable), rs(r.cgst), rs(r.sgst)],
-              ]),
-            ]),
-            _card('B2B invoices · ${g.b2b.length}', [
-              if (g.b2b.isEmpty)
-                Text('No bills to customers with a GSTIN. Add a GSTIN to a customer to see B2B invoices.', style: _j(12, FontWeight.w500, _muted))
-              else
-                _table(['Invoice', 'Date', 'Customer', 'GSTIN', 'Taxable', 'Tax'], [
-                  for (final b in g.b2b)
-                    ['${b['number']}', prettyDate('${b['date']}'), '${b['customer']}', '${b['gstin']}', rs(asInt(b['taxable'])), rs(asInt(b['tax']))],
+            if (g.gstin.isEmpty || noHsn > 0)
+              Container(
+                margin: const EdgeInsets.only(top: 10),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(color: const Color(0xFFFFF6E5), borderRadius: BorderRadius.circular(14)),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  if (g.gstin.isEmpty) Text('• Add your shop GSTIN in Settings', style: _j(12, FontWeight.w700, const Color(0xFF8A5300))),
+                  if (noHsn > 0)
+                    Text('• $noHsn items sold without an HSN code — add HSN to those products', style: _j(12, FontWeight.w700, const Color(0xFF8A5300))),
                 ]),
-            ]),
-            _card('HSN summary', [
-              _table(['HSN', 'Rate', 'Qty', 'Taxable', 'Tax'], [
-                for (final h in (g.hsn.values.toList()..sort((a, b) => a.hsn.compareTo(b.hsn))))
-                  [h.hsn, GstRateRow(h.rateBp).rate, '${h.qty}', rs(h.taxable), rs(h.tax)],
+              ),
+            const SizedBox(height: 12),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(children: [
+                for (final (k, l) in const [(0, 'GSTR-1'), (1, 'GSTR-3B'), (2, 'GSTR-2'), (3, 'HSN')])
+                  GestureDetector(
+                    onTap: () => setState(() => tab = k),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 160),
+                      margin: const EdgeInsets.only(right: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+                      decoration: BoxDecoration(
+                        gradient: tab == k ? const LinearGradient(colors: [Color(0xFFF472B6), Color(0xFFDB2777)]) : null,
+                        color: tab == k ? null : Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        border: tab == k ? null : Border.all(color: _line),
+                      ),
+                      child: Text(l, style: _j(13, FontWeight.w800, tab == k ? Colors.white : _ink)),
+                    ),
+                  ),
               ]),
-            ]),
-            _card('Input tax credit by rate', [
-              _table(['Rate', 'Qty', 'Taxable', 'ITC'], [
-                for (final r in g.sorted(g.inward)) [r.rate, '${r.qty}', rs(r.taxable), rs(r.tax)],
+            ),
+            if (tab == 0) ...[
+              _card('B2B invoices · ${g.b2bDocs.length}', [
+                if (g.b2bDocs.isEmpty)
+                  Text('No bills to customers with a GSTIN.', style: _j(12, FontWeight.w500, _muted))
+                else
+                  _table([
+                    'Invoice',
+                    'Date',
+                    'Customer',
+                    'GSTIN',
+                    'POS',
+                    'Taxable',
+                    'IGST',
+                    'CGST+SGST'
+                  ], [
+                    for (final d in g.b2bDocs) [d.number, prettyDate(d.date), d.party, d.gstin, d.pos, rs(d.taxable), rs(d.igst), rs(d.tax - d.igst)],
+                  ]),
               ]),
-            ]),
+              _card('B2C small (by rate)', [
+                _table([
+                  'State',
+                  'Rate',
+                  'Taxable',
+                  'IGST',
+                  'CGST',
+                  'SGST'
+                ], [
+                  for (final e in g.b2cs.entries)
+                    if (e.value.taxable != 0) [e.key.split('|').first, e.value.rate, rs(e.value.taxable), rs(e.value.igst), rs(e.value.cgst), rs(e.value.sgst)],
+                ]),
+              ]),
+              _card('Credit notes · ${g.creditNotes.length}', [
+                if (g.creditNotes.isEmpty)
+                  Text('No sale returns in this period.', style: _j(12, FontWeight.w500, _muted))
+                else
+                  _table([
+                    'Note',
+                    'Date',
+                    'Invoice',
+                    'Customer',
+                    'Taxable',
+                    'Tax'
+                  ], [
+                    for (final c in g.creditNotes)
+                      [
+                        '${c['number']}',
+                        prettyDate('${c['date']}'),
+                        '${c['invoice']}',
+                        '${c['customer'] ?? 'Walk-in'}',
+                        rs(asInt(c['taxable'])),
+                        rs(asInt(c['tax']))
+                      ],
+                  ]),
+              ]),
+              _card('Documents issued', [
+                _row('Invoices', g.invoices == 0 ? '—' : '${g.firstInvoice} → ${g.lastInvoice} (${g.invoices})'),
+                _row('Credit notes', g.creditNotes.isEmpty ? '—' : '${g.firstCn} → ${g.lastCn} (${g.creditNotes.length})'),
+              ]),
+            ],
+            if (tab == 1) ...[
+              _card('3.1 Outward supplies', [
+                _row('(a) Taxable value', rs(g.outTaxable - g.creditTaxable - g.nilRated)),
+                _row('IGST', rs(oi)),
+                _row('CGST', rs(oc)),
+                _row('SGST', rs(os)),
+                if (g.nilRated > 0) _row('(c) Nil rated / exempt', rs(g.nilRated)),
+                if (g.creditTax > 0) _row('Credit notes taken off', '− ${rs(g.creditTax)}', color: _green),
+              ]),
+              _card('4 Input tax credit', [
+                _row('Purchases (taxable)', rs(g.itcTaxable)),
+                _row('IGST', rs(ci), color: _green),
+                _row('CGST', rs(cc), color: _green),
+                _row('SGST', rs(cs), color: _green),
+                if (g.itcBlocked > 0) _row('No ITC (supplier without GSTIN)', rs(g.itcBlocked), color: _red),
+              ]),
+              _card('6.1 Payment of tax', [
+                _row('IGST in cash', rs(so.cash.$1)),
+                _row('CGST in cash', rs(so.cash.$2)),
+                _row('SGST in cash', rs(so.cash.$3)),
+                const Divider(color: _line),
+                _row('Total to pay', rs(g.cashPayable), bold: true, color: g.cashPayable > 0 ? _red : _green),
+                _row('ITC carried forward', rs(so.left.$1 + so.left.$2 + so.left.$3), color: _green),
+              ]),
+            ],
+            if (tab == 2)
+              _card('Purchases with ITC · ${g.purchaseDocs.length}', [
+                if (g.purchaseDocs.isEmpty)
+                  Text('No purchases from suppliers with a GSTIN.', style: _j(12, FontWeight.w500, _muted))
+                else
+                  _table([
+                    'Bill',
+                    'Date',
+                    'Supplier',
+                    'GSTIN',
+                    'Taxable',
+                    'ITC'
+                  ], [
+                    for (final d in g.purchaseDocs) [d.number, prettyDate(d.date), d.party, d.gstin, rs(d.taxable), rs(d.tax)],
+                  ]),
+                if (g.itcBlocked > 0)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text('GST of ${rs(g.itcBlocked)} on bills from suppliers without a GSTIN cannot be claimed — add their GSTIN.',
+                        style: _j(11.5, FontWeight.w600, _red)),
+                  ),
+              ]),
+            if (tab == 3)
+              _card('HSN summary', [
+                _table([
+                  'HSN',
+                  'Type',
+                  'Rate',
+                  'Qty',
+                  'Taxable',
+                  'IGST',
+                  'CGST',
+                  'SGST'
+                ], [
+                  for (final h in (g.hsn.values.toList()..sort((a, b) => a.hsn.compareTo(b.hsn))))
+                    [h.hsn, h.b2b ? 'B2B' : 'B2C', GstRateRow(h.rateBp).rate, '${h.qty}', rs(h.taxable), rs(h.igst), rs(h.cgst), rs(h.sgst)],
+                ]),
+              ]),
             const SizedBox(height: 14),
             _BigButton(
               icon: Icons.table_view_rounded,
-              label: 'Download Excel · GSTR-1 + 3B + HSN',
+              label: 'Excel · all returns',
               onTap: () => _export(context, 'gst', from, to),
             ),
             const SizedBox(height: 8),
-            Text('All supplies are treated as intra-state (CGST + SGST). Check with your CA before filing.',
+            _BigButton(
+              icon: Icons.data_object_rounded,
+              label: busy ? 'Making JSON…' : 'GSTR-1 JSON (portal)',
+              colors: const [Color(0xFF6B35EE), Color(0xFF4318D2)],
+              onTap: () {
+                if (!oneMonth) {
+                  toast(context, 'Choose one month for the GSTR-1 JSON', error: true);
+                  return;
+                }
+                _json();
+              },
+            ),
+            const SizedBox(height: 8),
+            Text('Import the JSON in the GST offline tool, check, then upload. Check with your CA before filing.',
                 textAlign: TextAlign.center, style: _j(11, FontWeight.w500, _muted)),
           ],
         );
@@ -230,7 +379,8 @@ class _BigButton extends StatelessWidget {
   final IconData icon;
   final String label;
   final VoidCallback onTap;
-  const _BigButton({required this.icon, required this.label, required this.onTap});
+  final List<Color> colors;
+  const _BigButton({required this.icon, required this.label, required this.onTap, this.colors = const [Color(0xFF21A366), Color(0xFF107C41)]});
 
   @override
   Widget build(BuildContext context) => GestureDetector(
@@ -239,8 +389,8 @@ class _BigButton extends StatelessWidget {
           height: 54,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(27),
-            gradient: const LinearGradient(colors: [Color(0xFF21A366), Color(0xFF107C41)]),
-            boxShadow: const [BoxShadow(color: Color(0x40107C41), blurRadius: 16, offset: Offset(0, 8), spreadRadius: -6)],
+            gradient: LinearGradient(colors: colors),
+            boxShadow: [BoxShadow(color: colors.last.withAlpha(0x40), blurRadius: 16, offset: const Offset(0, 8), spreadRadius: -6)],
           ),
           child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
             Icon(icon, color: Colors.white),
@@ -271,7 +421,7 @@ class _ExportScreenState extends State<ExportScreen> {
     'parties': (Icons.groups_rounded, [Color(0xFF4FD8E0), Color(0xFF139DB0)], 'Customer dues and supplier payables'),
     'expenses': (Icons.sell_rounded, [Color(0xFFFF7A7A), Color(0xFFDC4545)], 'Expenses by category'),
     'daybook': (Icons.event_note_rounded, [Color(0xFF5EEAD4), Color(0xFF0D9488)], 'Tally-style journal: debit / credit'),
-    'gst': (Icons.request_quote_rounded, [Color(0xFFF472B6), Color(0xFFDB2777)], 'GSTR-1, GSTR-3B, HSN, credit note'),
+    'gst': (Icons.request_quote_rounded, [Color(0xFFF472B6), Color(0xFFDB2777)], 'GSTR-1, GSTR-3B, GSTR-2, HSN, credit notes'),
   };
 
   Future<void> _go(String kind) async {
@@ -287,10 +437,13 @@ class _ExportScreenState extends State<ExportScreen> {
       title: 'Excel Export',
       subtitle: 'Real .xlsx files · open in Excel, Google Sheets or WPS',
       children: [
-        _PeriodBar(from, to, (f, t) => setState(() {
-              from = f;
-              to = t;
-            })),
+        _PeriodBar(
+            from,
+            to,
+            (f, t) => setState(() {
+                  from = f;
+                  to = t;
+                })),
         const SizedBox(height: 6),
         for (final k in ExportBook.kinds)
           Container(
