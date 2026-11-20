@@ -10,6 +10,8 @@ import '../core/drafts.dart';
 import '../core/imei_smart.dart';
 import '../core/quick.dart';
 import '../core/brain.dart';
+import '../core/staff.dart';
+import 'staff_screen.dart' show ownerOverride;
 import 'brain.dart' show ScoreBadge;
 import '../ui/voice.dart';
 import '../core/money.dart';
@@ -796,7 +798,7 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
     }
     setState(() => saving = true);
     try {
-      final id = await Books.createSale(
+      Future<int> save() => Books.createSale(
         editId: widget.editSaleId,
         items: [for (final l in cart) ItemIn(l.id, l.qty, l.rate, l.serial.text, oppEnabled ? l.opp.text : null)],
         customerId: customer == null ? null : asInt(customer!['id']),
@@ -812,6 +814,19 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
               ]
             : null,
       );
+      int id;
+      try {
+        id = await save();
+      } on AccountingError catch (e) {
+        // a staff limit: the owner can allow this bill once with their PIN
+        if (Staff.current.value == null || !'$e'.contains("owner's permission")) rethrow;
+        final r = await ownerOverride<int>(context, e, save);
+        if (r == null) {
+          if (mounted) setState(() => saving = false);
+          return;
+        }
+        id = r;
+      }
       if (account != null) await Books.setSetting('last_pay_account', '$account');
       if (!editing && due > 0 && customer != null && promise != null && Sub.can('due_alarm')) {
         await saveDueWithAlarm(
@@ -988,7 +1003,7 @@ class _SaleFormState extends State<SaleForm> with WidgetsBindingObserver {
               Text(
                 c == null
                     ? 'Cash sale · tap to choose a customer'
-                    : [c['phone'] ?? '', if (limit > 0) 'limit ${Money.compact(limit)}'].where((e) => '$e'.isNotEmpty).join(' · '),
+                    : [Staff.phone(c['phone']), if (limit > 0) 'limit ${Money.compact(limit)}'].where((e) => '$e'.isNotEmpty).join(' · '),
                 style: _j(11.5, FontWeight.w500, _muted),
               ),
             ]),
@@ -2264,7 +2279,7 @@ class _CustomerSheetState extends State<_CustomerSheet> {
                   leading: Text((c['name'] as String).isEmpty ? '?' : (c['name'] as String)[0].toUpperCase(),
                       style: _j(17, FontWeight.w800, const Color(0xFF139DB0))),
                   title: c['name'] as String,
-                  sub: '${c['phone'] ?? ''}',
+                  sub: Staff.phone(c['phone']),
                   due: widget.dues[asInt(c['id'])] ?? 0,
                   onTap: () => Navigator.pop(context, c),
                 ),

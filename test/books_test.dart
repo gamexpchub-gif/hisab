@@ -624,6 +624,52 @@ void main() {
     expect(Staff.picking.value, isFalse);
   });
 
+  test('Staff limits: price floor, discount %, credit cap, own bills, hidden phones, hours, owner override', () async {
+    await Staff.load();
+    try {
+      await Staff.setOwnerPin('4321');
+      await Staff.setMode(true);
+      final p = await Books.saveProduct({'name': 'Limit Phone', 'gst_bp': 0, 'price': 100000}, openingQty: 10, openingCost: 80000);
+      final c = await Books.saveParty('customer', {'name': 'Limit Customer', 'phone': '9876543210'});
+      final cash = asInt((await Books.moneyAccounts()).first['id']);
+      await Staff.add('Joy', '2468', 'cashier', {...Staff.roles['cashier']!.$2}..removeAll({'see_phones', 'all_bills'}),
+          limits: const StaffLimits(maxDiscount: 5, maxCredit: 20000));
+      await Staff.add('Owl', '1357', 'cashier', Staff.roles['cashier']!.$2, limits: StaffLimits(fromHour: (DateTime.now().hour + 2) % 24, toHour: (DateTime.now().hour + 3) % 24));
+      await expectLater(Staff.signIn('1357'), throwsA(isA<AccountingError>())); // outside working hours
+
+      await Staff.signIn('2468');
+      // below the list price: needs 'price_edit'
+      await expectLater(Books.createSale(items: [ItemIn(p, 1, 90000)], paid: 90000, accountId: cash), throwsA(isA<AccountingError>()));
+      // 5% discount ok, 6% blocked
+      await Books.createSale(items: [ItemIn(p, 1, 100000)], paid: 95000, accountId: cash, discount: 5000);
+      await expectLater(Books.createSale(items: [ItemIn(p, 1, 100000)], paid: 94000, accountId: cash, discount: 6000), throwsA(isA<AccountingError>()));
+      // credit up to ₹200 on one bill
+      await Books.createSale(items: [ItemIn(p, 1, 100000)], customerId: c, paid: 80000, accountId: cash);
+      await expectLater(Books.createSale(items: [ItemIn(p, 1, 100000)], customerId: c, paid: 70000, accountId: cash), throwsA(isA<AccountingError>()));
+      // the owner's PIN allows it once
+      await expectLater(Staff.withOwner('0000', () => Books.createSale(items: [ItemIn(p, 1, 90000)], paid: 90000, accountId: cash)),
+          throwsA(isA<AccountingError>()));
+      await Staff.withOwner('4321', () => Books.createSale(items: [ItemIn(p, 1, 90000)], customerId: c, paid: 0, accountId: cash));
+      // phones hidden, only own bills
+      expect(Staff.phone('9876543210'), '98•••••210');
+      Staff.signOut();
+      expect(await Staff.signIn('4321'), isNull); // owner
+      await Books.createSale(items: [ItemIn(p, 1, 100000)], paid: 100000, accountId: cash);
+      expect((await Books.salesBook()).length, 4);
+      await Staff.signIn('2468');
+      expect((await Books.salesBook()).length, 3);
+      expect((await Staff.sales())['Joy']?.$1, 3);
+      // idle auto-lock
+      Staff.current.value!.lockMinutes = 1;
+      Staff.checkIdle();
+      expect(Staff.current.value, isNotNull);
+      await expectBalanced();
+    } finally {
+      Staff.current.value = null;
+      await Staff.setMode(false).catchError((_) {});
+    }
+  });
+
   test('Review fixes: buy-back IMEI back in stock, links block delete, repair dues age', () async {
     final cash = asInt((await Books.moneyAccounts()).first['id']);
     final sup = await Books.saveParty('supplier', {'name': 'RF Supplier'});

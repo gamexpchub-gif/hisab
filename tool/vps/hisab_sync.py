@@ -20,6 +20,7 @@ API (all under /hisab/api/, JSON unless noted):
   PUT    manifest/<store>/<slot> (JSON) → {"ok": true}
   GET    manifests                      → [{"store","slot","created",...}]
   GET    manifest/<store>/<slot>        → the manifest JSON
+  POST   ai                 (JSON)      → Hisab AI: {text, actions} (hisab_ai.py)
   GET    wait/<store>?after=<created>   → waits (up to 25 s) until a copy newer
                                           than <created> arrives; returns the
                                           newest {"created","slot","device"}
@@ -37,6 +38,9 @@ import time
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hisab_ai  # noqa: E402  (the AI part; the sync works without its key)
 
 API_KEY = os.environ.get('HISAB_API_KEY', 'AIzaSyAk1N6Aw3BJk50Tsw2Z_KPDfQzJlC-5GIU')
 DATA = os.environ.get('HISAB_DATA', '/var/lib/hisab-sync')
@@ -170,7 +174,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parts = self.path_parts()
         if parts == ['health']:
-            return self.send(200, {'ok': True, 'time': int(time.time())})
+            return self.send(200, {'ok': True, 'time': int(time.time()), 'ai': hisab_ai.available()})
         uid = self.auth()
         if not uid:
             return
@@ -262,6 +266,20 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, {'ok': True})
         except (ValueError, UnicodeDecodeError) as e:
             return self.send(400, {'error': str(e)})
+        self.send(404, {'error': 'unknown'})
+
+    def do_POST(self):
+        parts = self.path_parts()
+        uid = self.auth()
+        if not uid:
+            return
+        if parts == ['ai']:
+            try:
+                req = json.loads(self.body().decode() or '{}')
+            except (ValueError, UnicodeDecodeError):
+                return self.send(400, {'error': 'bad request'})
+            code, out = hisab_ai.handle(uid, req if isinstance(req, dict) else {})
+            return self.send(code, out)
         self.send(404, {'error': 'unknown'})
 
     def do_DELETE(self):

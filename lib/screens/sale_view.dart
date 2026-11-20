@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../cloud/cloud.dart';
 import '../core/books.dart';
+import '../core/staff.dart';
 import '../core/money.dart';
 import '../print/print_screen.dart';
 import '../ui/contact.dart';
@@ -14,6 +15,7 @@ import 'emi.dart';
 import 'sale_form.dart';
 import 'sale_return.dart';
 import 'sales.dart' show invoiceText;
+import 'staff_screen.dart' show askOwnerPin;
 import 'plans.dart';
 
 // =============================================================================
@@ -292,7 +294,7 @@ class SaleView extends StatelessWidget {
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(14, FontWeight.w800, Colors.white)),
                       Text(
-                        [if (phone != null && phone.isNotEmpty) phone, if ('${s['address'] ?? ''}'.isNotEmpty) '${s['address']}'].join(' · '),
+                        [if (phone != null && phone.isNotEmpty) Staff.phone(phone), if ('${s['address'] ?? ''}'.isNotEmpty) '${s['address']}'].join(' · '),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: _j(11, FontWeight.w600, const Color(0xCCFFFFFF)),
@@ -509,7 +511,19 @@ Future<void> deleteSaleFlow(BuildContext context, Rec sale, {bool popAfter = tru
     message: 'The items go back to stock'
         '${paid > 0 ? ', the ${Money.rs(paid)} received is taken out of your accounts' : ''}'
         ' and the customer\'s due is corrected. This cannot be undone.',
-    action: () => Books.deleteSale(asInt(sale['id'])),
+    action: () => _withOwner(context, () => Books.deleteSale(asInt(sale['id']))),
     popAfter: popAfter,
   );
+}
+
+/// Runs [action]; when a staff member is blocked, the owner's PIN allows it once.
+Future<void> _withOwner(BuildContext context, Future<void> Function() action) async {
+  try {
+    await action();
+  } on AccountingError catch (e) {
+    if (Staff.current.value == null || !'$e'.contains("owner's permission") || !context.mounted) rethrow;
+    final pin = await askOwnerPin(context, '$e');
+    if (pin == null) throw AccountingError('Cancelled');
+    await Staff.withOwner(pin, action);
+  }
 }

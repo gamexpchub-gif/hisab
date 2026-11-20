@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../core/books.dart';
+import '../core/staff.dart';
 import '../core/money.dart';
 import '../ui/contact.dart';
 import '../ui/photo.dart';
@@ -260,7 +261,7 @@ class _PartyViewState extends State<PartyView> {
                       Row(children: [
                         const Icon(Icons.phone_rounded, size: 13, color: Color(0xCCFFFFFF)),
                         const SizedBox(width: 4),
-                        Text(phone, style: _j(12.5, FontWeight.w600, const Color(0xE6FFFFFF))),
+                        Text(Staff.phone(phone), style: _j(12.5, FontWeight.w600, const Color(0xE6FFFFFF))),
                       ]),
                     const SizedBox(height: 6),
                     Wrap(spacing: 6, runSpacing: 4, children: [
@@ -760,9 +761,9 @@ class _PartyViewState extends State<PartyView> {
             child: const Text('Edit'),
           ),
         ]),
-        if (v('phone') != null) row(Icons.phone_rounded, 'Mobile', v('phone')!, onTap: () => Contact.call(v('phone')), action: Icons.call_rounded),
+        if (v('phone') != null) row(Icons.phone_rounded, 'Mobile', Staff.phone(v('phone')), onTap: () => Contact.call(v('phone')), action: Icons.call_rounded),
         if (v('alt_phone') != null)
-          row(Icons.phone_forwarded_rounded, 'Alternate number', v('alt_phone')!, onTap: () => Contact.call(v('alt_phone')), action: Icons.call_rounded),
+          row(Icons.phone_forwarded_rounded, 'Alternate number', Staff.phone(v('alt_phone')), onTap: () => Contact.call(v('alt_phone')), action: Icons.call_rounded),
         if (v('email') != null) row(Icons.alternate_email_rounded, 'Email', v('email')!),
         if (v('address') != null) row(Icons.location_on_rounded, 'Address', v('address')!),
         if (v('gstin') != null) row(Icons.receipt_long_rounded, 'GSTIN', v('gstin')!),

@@ -18,12 +18,20 @@ class Vps {
   static bool? _up;
   static DateTime? _checked;
 
+  /// The server has the AI (Claude) set up.
+  static bool aiReady = false;
+
   /// Is the server reachable? (checked at most once a minute)
   static Future<bool> available({bool fresh = false}) async {
     if (!fresh && _checked != null && DateTime.now().difference(_checked!) < const Duration(minutes: 1) && _up != null) return _up!;
     try {
       final r = await _send('GET', 'health', auth: false, timeout: const Duration(seconds: 6));
       _up = r.$1 == 200;
+      try {
+        aiReady = _up! && (jsonDecode(utf8.decode(r.$2)) as Map)['ai'] == true;
+      } catch (_) {
+        aiReady = false;
+      }
     } catch (_) {
       _up = false;
     }
@@ -85,6 +93,15 @@ class Vps {
         timeout: Duration(seconds: hold + 15));
     if (code != 200) throw VpsError(code, 'wait failed');
     return (jsonDecode(utf8.decode(bytes)) as Map).cast<String, dynamic>();
+  }
+
+  /// Hisab AI on the server: what the person said + the shop's lists →
+  /// {text, actions: [{tool, input}]}.
+  static Future<Map<String, dynamic>> ai(Map<String, Object?> request) async {
+    final (code, bytes) = await _send('POST', 'ai', body: utf8.encode(jsonEncode(request)), type: 'application/json', timeout: const Duration(seconds: 60));
+    final m = (jsonDecode(utf8.decode(bytes)) as Map).cast<String, dynamic>();
+    if (code != 200) throw VpsError(code, '${m['error'] ?? 'AI request failed'}');
+    return m;
   }
 
   static Future<List<Map<String, dynamic>>> manifests() async =>

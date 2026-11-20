@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../core/books.dart';
+import '../core/money.dart';
 import '../core/staff.dart';
 import '../ui/widgets.dart';
 
@@ -49,6 +52,7 @@ class StaffScreen extends StatefulWidget {
 
 class _StaffScreenState extends State<StaffScreen> {
   bool ownerPin = false;
+  Map<String, (int, int)> today = {}, month = {};
 
   @override
   void initState() {
@@ -59,6 +63,12 @@ class _StaffScreenState extends State<StaffScreen> {
   Future<void> _refresh() async {
     await Staff.load();
     ownerPin = await Staff.ownerPinSet();
+    final now = DateTime.now();
+    String d(DateTime t) => '${t.year}-${t.month.toString().padLeft(2, '0')}-${t.day.toString().padLeft(2, '0')}';
+    try {
+      today = await Staff.sales(from: d(now));
+      month = await Staff.sales(from: d(DateTime(now.year, now.month, 1)));
+    } catch (_) {}
     if (mounted) setState(() {});
   }
 
@@ -80,6 +90,11 @@ class _StaffScreenState extends State<StaffScreen> {
     var role = s?.role ?? 'sales';
     var perms = s == null ? {...Staff.roles['sales']!.$2} : {...s.perms};
     var active = s?.active ?? true;
+    var maxDisc = (s?.maxDiscount ?? 10).toDouble();
+    final credit = TextEditingController(text: s == null || s.maxCredit == 0 ? '' : '${s.maxCredit ~/ 100}');
+    int? from = s?.fromHour, to = s?.toHour;
+    var lock = s?.lockMinutes ?? 0;
+    String hr(int? h) => h == null ? 'Any' : '${h % 12 == 0 ? 12 : h % 12} ${h < 12 ? 'AM' : 'PM'}';
     final ok = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -149,6 +164,43 @@ class _StaffScreenState extends State<StaffScreen> {
                     }),
                   ),
               ],
+              Padding(
+                padding: const EdgeInsets.only(top: 14, bottom: 2),
+                child: Text('LIMITS', style: _j(11, FontWeight.w800, _purple).copyWith(letterSpacing: 1.1)),
+              ),
+              if (perms.contains('discount')) ...[
+                Text('Max discount on a bill: ${maxDisc.round()}%', style: _j(13.5, FontWeight.w700, _ink)),
+                Slider(value: maxDisc, min: 0, max: 50, divisions: 50, label: '${maxDisc.round()}%', onChanged: (v) => set(() => maxDisc = v)),
+              ],
+              if (perms.contains('credit'))
+                TextField(
+                  controller: credit,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Max credit (baki) on one bill ₹', helperText: 'Empty = no limit'),
+                ),
+              const SizedBox(height: 8),
+              Row(children: [
+                Expanded(child: Text('Working hours', style: _j(13.5, FontWeight.w700, _ink))),
+                DropdownButton<int?>(
+                  value: from,
+                  items: [const DropdownMenuItem(value: null, child: Text('Any')), for (var h = 0; h < 24; h++) DropdownMenuItem(value: h, child: Text(hr(h)))],
+                  onChanged: (v) => set(() => from = v),
+                ),
+                const Text('  to  '),
+                DropdownButton<int?>(
+                  value: to,
+                  items: [const DropdownMenuItem(value: null, child: Text('Any')), for (var h = 0; h < 24; h++) DropdownMenuItem(value: h, child: Text(hr(h)))],
+                  onChanged: (v) => set(() => to = v),
+                ),
+              ]),
+              Row(children: [
+                Expanded(child: Text('Auto-lock when idle', style: _j(13.5, FontWeight.w700, _ink))),
+                DropdownButton<int>(
+                  value: lock,
+                  items: [for (final m in const [0, 2, 5, 10, 15, 30, 60]) DropdownMenuItem(value: m, child: Text(m == 0 ? 'Never' : '$m min'))],
+                  onChanged: (v) => set(() => lock = v ?? 0),
+                ),
+              ]),
               if (s != null)
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
@@ -168,11 +220,18 @@ class _StaffScreenState extends State<StaffScreen> {
       ),
     );
     if (ok != true || !mounted) return;
+    final limits = StaffLimits(
+      maxDiscount: maxDisc.round(),
+      maxCredit: (int.tryParse(credit.text.trim()) ?? 0) * 100,
+      fromHour: from,
+      toHour: to,
+      lockMinutes: lock,
+    );
     try {
       if (s == null) {
-        await Staff.add(name.text, pin.text.trim(), role, perms);
+        await Staff.add(name.text, pin.text.trim(), role, perms, limits: limits);
       } else {
-        await Staff.update(s, name: name.text, role: role, perms: perms, pin: pin.text.trim(), active: active);
+        await Staff.update(s, name: name.text, role: role, perms: perms, pin: pin.text.trim(), active: active, limits: limits);
       }
       if (mounted) toast(context, 'Saved');
       await _refresh();
@@ -253,7 +312,9 @@ class _StaffScreenState extends State<StaffScreen> {
               title: Text('${s.name}${s.active ? '' : ' (inactive)'}', style: _j(14, FontWeight.w800, _ink)),
               subtitle: Text(
                 '${Staff.roles[s.role]?.$1 ?? s.role} · ${s.perms.length} of ${Staff.perms.length} permissions'
-                '${s.perms.contains('profit') ? '' : ' · no profit'}${s.perms.contains('dashboard') ? '' : ' · no dashboard'}',
+                '${s.perms.contains('profit') ? '' : ' · no profit'}${s.perms.contains('dashboard') ? '' : ' · no dashboard'}'
+                '${s.fromHour != null ? ' · ${s.fromHour}:00–${s.toHour}:00' : ''}${s.lockMinutes > 0 ? ' · locks ${s.lockMinutes}m' : ''}'
+                '\nToday ${today[s.name]?.$1 ?? 0} bills · ${Money.rs(today[s.name]?.$2 ?? 0)}   ·   Month ${month[s.name]?.$1 ?? 0} · ${Money.rs(month[s.name]?.$2 ?? 0)}',
                 style: _j(11.5, FontWeight.w500, _muted),
               ),
               trailing: IconButton(
@@ -277,16 +338,57 @@ class _StaffScreenState extends State<StaffScreen> {
 }
 
 /// "Who is working?" — shown on top of the app while staff mode waits for a PIN.
-class StaffGate extends StatelessWidget {
+class StaffGate extends StatefulWidget {
   final Widget child;
   const StaffGate({super.key, required this.child});
+  @override
+  State<StaffGate> createState() => _StaffGateState();
+}
+
+class _StaffGateState extends State<StaffGate> {
+  Timer? _idle;
+
+  @override
+  void initState() {
+    super.initState();
+    // auto-lock: each staff member's idle limit (checked every 30 s)
+    _idle = Timer.periodic(const Duration(seconds: 30), (_) => Staff.checkIdle());
+  }
+
+  @override
+  void dispose() {
+    _idle?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<bool>(
-      valueListenable: Staff.picking,
-      builder: (context, picking, _) => picking ? const _WhoIsWorking() : child,
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (_) => Staff.touch(),
+      child: ValueListenableBuilder<bool>(
+        valueListenable: Staff.picking,
+        builder: (context, picking, _) => picking ? const _WhoIsWorking() : widget.child,
+      ),
     );
+  }
+}
+
+/// A blocked action: the owner types their PIN once to allow it now.
+/// Returns the action's result, or null when cancelled.
+Future<T?> ownerOverride<T>(BuildContext context, Object error, Future<T> Function() action) async {
+  if (Staff.current.value == null || !'$error'.contains('permission')) {
+    toast(context, '$error', error: true);
+    return null;
+  }
+  toast(context, '$error');
+  final pin = await _askPin(context, 'Owner permission — allow once?', sub: 'Owner PIN');
+  if (pin == null || pin.isEmpty || !context.mounted) return null;
+  try {
+    return await Staff.withOwner(pin, action);
+  } catch (e) {
+    if (context.mounted) toast(context, '$e', error: true);
+    return null;
   }
 }
 
@@ -558,4 +660,10 @@ class StaffHome extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Asks the owner's PIN (for allowing one blocked action).
+Future<String?> askOwnerPin(BuildContext context, String why) async {
+  final p = await _askPin(context, 'Owner permission', sub: 'Owner PIN');
+  return p == null || p.isEmpty ? null : p;
 }

@@ -6,10 +6,12 @@
 /// Anything else is a question for Brain.ask.
 library;
 
+import '../cloud/cloud.dart';
 import 'books.dart';
 import 'imei_smart.dart';
 import 'money.dart';
 import 'quick.dart';
+import 'staff.dart';
 
 class CmdLine {
   final Rec product;
@@ -350,4 +352,81 @@ class AiActions {
     final number = '${(await Books.query('SELECT number FROM sales WHERE id = ?', [id])).first['number']}';
     return (id, number, t, paid);
   }
+}
+
+/// Hisab AI in the cloud (Claude on your server): any language, any wording.
+/// Turns the answer into the same commands as the phone's own engine, so the
+/// same cards confirm them. Returns null when the cloud AI is not reachable.
+class CloudAi {
+  static Future<bool> enabled() async => (await Books.settings())['ai_cloud'] != '0';
+
+  static Future<(String, List<Object>)?> ask(String text, List<(bool, String)> history) async {
+    if (!await enabled()) return null;
+    await Cloud.load();
+    if (Cloud.user == null || !await Vps.available() || !Vps.aiReady) return null;
+    final products = await Books.query(
+        'SELECT p.*, (SELECT IFNULL(SUM(qty), 0) FROM sale_items WHERE product_id = p.id) AS sold FROM products p ORDER BY sold DESC, p.name LIMIT 600');
+    final customers = Books.can('customers') || Books.can('sale') || Books.can('collect')
+        ? await Books.query('SELECT id, name, phone FROM customers ORDER BY id DESC LIMIT 800')
+        : const <Rec>[];
+    final s = await Books.settings();
+    final r = await Vps.ai({
+      'message': text,
+      'history': [for (final (mine, t) in history.take(6)) {'role': mine ? 'user' : 'assistant', 'text': t}],
+      'shop': s['business_name'] ?? '',
+      'today': ymd(DateTime.now()),
+      'allowed': [for (final p in Staff.perms.keys) if (Books.can(p)) p],
+      'products': [
+        for (final p in products)
+          {'id': p['id'], 'name': p['name'], 'variant': p['variant'], 'price': AiActions.listPrice(p) / 100, 'stock': p['stock']}
+      ],
+      'customers': [for (final c in customers) {'id': c['id'], 'name': c['name'], 'phone': c['phone']}],
+    });
+    final byId = {for (final p in products) asInt(p['id']): p};
+    final custById = {for (final c in customers) asInt(c['id']): c};
+    final out = <Object>[];
+    int paise(Object? rupees) => ((rupees as num?) ?? 0) * 100 ~/ 1;
+    for (final a in (r['actions'] as List? ?? const [])) {
+      final m = (a as Map).cast<String, dynamic>();
+      final i = ((m['input'] as Map?) ?? const {}).cast<String, dynamic>();
+      switch (m['tool']) {
+        case 'create_bill':
+          final lines = <CmdLine>[];
+          for (final it in (i['items'] as List? ?? const [])) {
+            final x = (it as Map).cast<String, dynamic>();
+            final p = byId[asInt(x['product_id'])];
+            if (p == null) continue;
+            final q = asInt(x['qty']);
+            lines.add(CmdLine(p, q < 1 ? 1 : q, x['unit_price'] == null ? null : ((x['unit_price'] as num) * 100).round()));
+          }
+          if (lines.isEmpty) continue;
+          final cid = i['customer_id'] == null ? null : custById[asInt(i['customer_id'])];
+          final pay = i['payment'] == 'credit' ? 'due' : '${i['payment'] ?? 'cash'}';
+          out.add(BillCommand(lines,
+              customer: cid,
+              newName: cid == null ? (i['new_customer_name'] as String?) : null,
+              newPhone: cid == null ? (i['new_customer_phone'] as String?)?.replaceAll(RegExp(r'\D'), '') : null,
+              pay: pay,
+              paidNow: i['advance'] == null ? null : paise(i['advance'])));
+        case 'receive_payment':
+          final c = i['customer_id'] == null ? null : custById[asInt(i['customer_id'])];
+          out.add(ReceiptCommand(c, i['customer_name'] as String?, paise(i['amount']), '${i['method'] ?? 'cash'}'));
+        case 'add_customer':
+          final phone = '${i['phone'] ?? ''}'.replaceAll(RegExp(r'\D'), '');
+          final existing = customers.where((c) => Books.phoneKey(c['phone']) == Books.phoneKey(phone)).firstOrNull;
+          out.add(CustomerCommand('${i['name'] ?? ''}', phone, existing));
+        case 'add_expense':
+          out.add(ExpenseCommand('${i['category'] ?? 'Other expenses'}', paise(i['amount']), '${i['method'] ?? 'cash'}', '${i['note'] ?? ''}'));
+        case 'ask_books':
+          out.add(AskBooks('${i['question'] ?? text}'));
+      }
+    }
+    return ('${r['text'] ?? ''}', out);
+  }
+}
+
+/// A question the cloud AI rephrased for the shop's report engine.
+class AskBooks {
+  final String question;
+  const AskBooks(this.question);
 }

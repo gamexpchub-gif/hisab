@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../cloud/cloud.dart';
 import '../core/ai_command.dart';
 import '../core/books.dart';
 import '../core/brain.dart';
@@ -81,27 +82,33 @@ class _AiAssistantState extends State<AiAssistant> {
     Widget card;
     String reply;
     try {
-      final products = await Books.query('SELECT p.*, c.name AS category FROM products p LEFT JOIN categories c ON c.id = p.category_id');
-      final customers = await Books.query('SELECT * FROM customers');
-      final cmd = AiCommands.parse(text, products, customers);
-      switch (cmd) {
-        case BillCommand c:
-          reply = 'Bill ready — check and save';
-          card = _BillCard(cmd: c, key: UniqueKey());
-        case ReceiptCommand r:
-          reply = r.customer == null ? 'Who paid?' : 'Money received — confirm';
-          card = _ReceiptCard(cmd: r, key: UniqueKey());
-        case ExpenseCommand x:
-          reply = 'Expense — confirm';
-          card = _ExpenseCard(cmd: x, key: UniqueKey());
-        case CustomerCommand c:
-          reply = c.existing != null ? 'This customer is already saved' : 'New customer — confirm';
-          card = _CustomerCard(cmd: c, key: UniqueKey());
-        case null:
-          final a = await Brain.ask(text);
-          await Brain.remember(text);
-          reply = a.text;
-          card = _AnswerCard(a, onAsk: _send);
+      // 1 · Claude on your server: any language, any wording
+      (String, List<Object>)? cloud;
+      String? cloudError;
+      try {
+        cloud = await CloudAi.ask(text, [for (final m in msgs.skip(1).take(6)) (m.mine, m.text)]);
+      } catch (e) {
+        cloudError = '$e';
+      }
+      if (cloud != null) {
+        final (said, actions) = cloud;
+        reply = said.isEmpty ? 'Done' : said;
+        final cards = <Widget>[];
+        for (final a in actions) {
+          cards.add(await _cardFor(a));
+        }
+        card = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          if (said.isNotEmpty) Padding(padding: const EdgeInsets.only(bottom: 8), child: _AnswerCard(Answer(said), via: 'Claude AI')),
+          for (final c in cards) Padding(padding: const EdgeInsets.only(bottom: 8), child: c),
+          if (said.isEmpty && cards.isEmpty) _AnswerCard(const Answer('I could not find what to do — try naming the product or customer'), via: 'Claude AI'),
+        ]);
+      } else {
+        // 2 · the phone's own engine (offline)
+        final products = await Books.query('SELECT p.*, c.name AS category FROM products p LEFT JOIN categories c ON c.id = p.category_id');
+        final customers = await Books.query('SELECT * FROM customers');
+        final cmd = AiCommands.parse(text, products, customers);
+        reply = switch (cmd) { BillCommand() => 'Bill ready — check and save', null => '', _ => 'Confirm' };
+        card = await _cardFor(cmd ?? AskBooks(text), offlineNote: cloudError);
       }
     } catch (e) {
       reply = 'Sorry, something went wrong';
@@ -112,6 +119,25 @@ class _AiAssistantState extends State<AiAssistant> {
       msgs.insert(1, _Msg(reply, card: card));
       thinking = false;
     });
+  }
+
+  /// The card for one command (bill, payment, customer, expense, question).
+  Future<Widget> _cardFor(Object cmd, {String? offlineNote}) async {
+    switch (cmd) {
+      case BillCommand c:
+        return _BillCard(cmd: c, key: UniqueKey());
+      case ReceiptCommand r:
+        return _ReceiptCard(cmd: r, key: UniqueKey());
+      case ExpenseCommand x:
+        return _ExpenseCard(cmd: x, key: UniqueKey());
+      case CustomerCommand c:
+        return _CustomerCard(cmd: c, key: UniqueKey());
+      case AskBooks q:
+        final a = await Brain.ask(q.question);
+        await Brain.remember(q.question);
+        return _AnswerCard(a, onAsk: _send, via: offlineNote == null ? null : 'Offline AI');
+    }
+    return _AnswerCard(const Answer('…'));
   }
 
   Future<void> _voice() async {
@@ -149,6 +175,7 @@ class _AiAssistantState extends State<AiAssistant> {
                 Text('Bills, customers, payments — or any question', style: _j(11.5, FontWeight.w600, const Color(0xCCFFFFFF))),
               ]),
             ),
+            const _AiMode(),
           ]),
           const SizedBox(height: 14),
           Container(
@@ -310,12 +337,22 @@ class _TypingState extends State<_Typing> with SingleTickerProviderStateMixin {
 class _AnswerCard extends StatelessWidget {
   final Answer a;
   final void Function(String)? onAsk;
-  const _AnswerCard(this.a, {this.onAsk});
+  final String? via; // "Claude AI" / "Offline AI"
+  const _AnswerCard(this.a, {this.onAsk, this.via});
   @override
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.all(14),
         decoration: _card(),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          if (via != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(children: [
+                Icon(via == 'Claude AI' ? Icons.cloud_done_rounded : Icons.phone_android_rounded, size: 13, color: _muted),
+                const SizedBox(width: 4),
+                Text(via!, style: _j(10.5, FontWeight.w800, _muted)),
+              ]),
+            ),
           Text(a.text, style: _j(15, FontWeight.w800, _ink)),
           if (a.detail != null) ...[const SizedBox(height: 4), Text(a.detail!, style: _j(12, FontWeight.w600, _muted))],
           if (a.rows.isNotEmpty) ...[
@@ -900,6 +937,57 @@ class _CustomerCardState extends State<_CustomerCard> {
           child: const Text('Save'),
         ),
       ]),
+    );
+  }
+}
+
+/// "Claude AI" / "Offline AI" chip: tap to turn the cloud AI on or off.
+class _AiMode extends StatefulWidget {
+  const _AiMode();
+  @override
+  State<_AiMode> createState() => _AiModeState();
+}
+
+class _AiModeState extends State<_AiMode> {
+  bool on = true, ready = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _check();
+  }
+
+  Future<void> _check() async {
+    final enabled = await CloudAi.enabled();
+    final up = await Vps.available();
+    if (mounted) {
+      setState(() {
+        on = enabled;
+        ready = up && Vps.aiReady;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final live = on && ready;
+    return GestureDetector(
+      onTap: () async {
+        await Books.setSetting('ai_cloud', on ? '0' : '1');
+        await _check();
+        if (context.mounted) {
+          toast(context, !on ? 'Offline AI — works without internet' : ready ? 'Claude AI on' : 'Claude AI is not set up on your server yet');
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+        decoration: BoxDecoration(color: live ? const Color(0xFFFFE08A) : const Color(0x26FFFFFF), borderRadius: BorderRadius.circular(12)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(live ? Icons.cloud_done_rounded : Icons.phone_android_rounded, size: 14, color: live ? const Color(0xFF3B1CC8) : Colors.white),
+          const SizedBox(width: 4),
+          Text(live ? 'Claude AI' : 'Offline', style: _j(11, FontWeight.w800, live ? const Color(0xFF3B1CC8) : Colors.white)),
+        ]),
+      ),
     );
   }
 }

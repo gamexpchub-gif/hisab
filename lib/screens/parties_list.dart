@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../core/books.dart';
+import '../core/staff.dart';
 import '../core/money.dart';
 import '../ui/contact.dart';
 import '../ui/photo.dart';
@@ -430,7 +431,7 @@ class _PartyCard extends StatelessWidget {
                     ],
                     Flexible(
                       child: Text(
-                        ageing?.lastActivity == null ? (phone ?? 'No activity') : 'Last · ${timeAgoDate(ageing!.lastActivity!)}',
+                        ageing?.lastActivity == null ? (phone == null ? 'No activity' : Staff.phone(phone)) : 'Last · ${timeAgoDate(ageing!.lastActivity!)}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: _j(11, FontWeight.w500, _muted),

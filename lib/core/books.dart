@@ -145,6 +145,9 @@ class Books {
     if (a != null && !a(perm)) throw AccountingError('$what needs the owner\'s permission');
   }
 
+  /// The person's limits: (max discount %, max credit per bill in paise); null = none.
+  static (int?, int?) Function()? limits;
+
   /// Is [perm] allowed for whoever is using the app?
   static bool can(String perm) => allow?.call(perm) ?? true;
 
@@ -237,6 +240,8 @@ class Books {
       final rows = <Rec>[];
       for (final i in valid) {
         final p = await _product(x, i.productId);
+        // selling below the list price is a staff permission
+        if (editId == null && i.rate < asInt(p['price'])) Books.need('price_edit', 'Selling ${p['name']} below its price');
         final amount = i.rate * i.qty;
         final gst = asInt(p['gst_bp']);
         final lineTax = Money.percent(amount, gst);
@@ -264,6 +269,17 @@ class Books {
       if (parts.any((e) => e.value < 0)) throw AccountingError('Split amounts cannot be negative');
       final paidAmt = parts.isNotEmpty ? parts.fold<int>(0, (a, e) => a + e.value) : (paid ?? (customerId == null ? total : 0));
       if (paidAmt < total) Books.need('credit', 'Selling on credit');
+      // the person's own limits (staff): discount % and credit per bill
+      if (_trusted == 0) {
+        final maxDisc = limits?.call().$1;
+        if (discount > 0 && maxDisc != null && discount * 100 > (subtotal) * maxDisc) {
+          throw AccountingError('Discount above $maxDisc% needs the owner\'s permission');
+        }
+        final maxCredit = limits?.call().$2;
+        if (maxCredit != null && maxCredit > 0 && total - paidAmt > maxCredit) {
+          throw AccountingError('Credit above ${Money.rs(maxCredit)} on one bill needs the owner\'s permission');
+        }
+      }
       if (paidAmt < 0 || paidAmt > total) throw AccountingError('Paid amount must be between 0 and the total');
       if (customerId == null && paidAmt != total) {
         throw AccountingError('Walk-in sales must be fully paid — select a customer for credit sales');
@@ -1482,7 +1498,21 @@ class Books {
   /// Every sale with what the Sales book searches and shows: customer name,
   /// phone, address and photo, item names, IMEI / serial numbers and the
   /// accounts that took the money.
-  static Future<List<Rec>> salesBook() => query(
+  static Future<List<Rec>> salesBook() async {
+    final all = await _salesBook();
+    final mine = ownBillsOf?.call();
+    if (mine == null) return all;
+    // a staff member without 'all_bills' sees only the bills they made
+    final refs = {
+      for (final r in await query("SELECT ref FROM audit_log WHERE kind = 'sale' AND staff = ? AND ref IS NOT NULL", [mine])) '${r['ref']}'
+    };
+    return [for (final r in all) if (refs.contains('${r['number']}')) r];
+  }
+
+  /// Whose bills only (staff without 'all_bills'); null = everyone's.
+  static String? Function()? ownBillsOf;
+
+  static Future<List<Rec>> _salesBook() => query(
       'SELECT s.*, c.name AS customer, c.phone AS phone, c.alt_phone AS alt_phone, c.address AS address, '
       'c.photo AS photo, '
       '(SELECT GROUP_CONCAT(i.name, \' · \') FROM sale_items i WHERE i.sale_id = s.id) AS items, '

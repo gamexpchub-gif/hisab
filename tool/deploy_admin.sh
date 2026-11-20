@@ -30,6 +30,12 @@ echo "→ Uploading the dashboard and the invoice page to $HOST …"
 tar -C web/admin -czf - . | ssh "$HOST" 'rm -rf /tmp/hisab-admin && mkdir -p /tmp/hisab-admin && tar -xzf - -C /tmp/hisab-admin'
 tar -C web/invoice -czf - . | ssh "$HOST" 'rm -rf /tmp/hisab-invoice && mkdir -p /tmp/hisab-invoice && tar -xzf - -C /tmp/hisab-invoice'
 ssh "$HOST" 'cat > /tmp/hisab_sync.py' < tool/vps/hisab_sync.py
+ssh "$HOST" 'cat > /tmp/hisab_ai.py' < tool/vps/hisab_ai.py
+# Hisab AI (Claude): pass your Anthropic API key once, it is kept on the server only:
+#   ANTHROPIC_API_KEY=sk-ant-... bash tool/deploy_admin.sh root@<vps-ip> <domain>
+if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+  printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_API_KEY" | ssh "$HOST" 'umask 077; cat > /tmp/hisab-sync.env'
+fi
 
 echo "→ Setting up nginx for https://$DOMAIN/hisab/dashboard/ …"
 ssh "$HOST" "DOMAIN='$DOMAIN' EMAIL='$EMAIL' bash -s" <<'REMOTE'
@@ -93,9 +99,23 @@ fi
 id hisab-sync >/dev/null 2>&1 || $SUDO useradd --system --no-create-home --shell /usr/sbin/nologin hisab-sync
 $SUDO mkdir -p /opt/hisab-sync /var/lib/hisab-sync
 $SUDO install -m 755 /tmp/hisab_sync.py /opt/hisab-sync/hisab_sync.py && rm -f /tmp/hisab_sync.py
+$SUDO install -m 644 /tmp/hisab_ai.py /opt/hisab-sync/hisab_ai.py && rm -f /tmp/hisab_ai.py
+# the AI needs the official Anthropic SDK, in its own virtual environment
+if [ ! -x /opt/hisab-sync/venv/bin/python ]; then
+  echo "  setting up the AI (python venv)…"
+  $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3-venv >/dev/null 2>&1 || true
+  $SUDO python3 -m venv /opt/hisab-sync/venv
+fi
+$SUDO /opt/hisab-sync/venv/bin/pip install -q --upgrade anthropic >/dev/null 2>&1 || echo "  ⚠ could not install the Anthropic SDK — the AI stays off, live sync still works"
+if [ -f /tmp/hisab-sync.env ]; then
+  $SUDO install -m 600 -o root -g root /tmp/hisab-sync.env /etc/hisab-sync.env && rm -f /tmp/hisab-sync.env
+  echo "  AI key saved on the server (/etc/hisab-sync.env)"
+fi
 $SUDO chown -R hisab-sync:hisab-sync /var/lib/hisab-sync
 $SUDO chmod 700 /var/lib/hisab-sync
-$SUDO tee /etc/systemd/system/hisab-sync.service >/dev/null <<'UNIT'
+PY=/opt/hisab-sync/venv/bin/python
+[ -x "$PY" ] || PY="$(command -v python3)"
+$SUDO tee /etc/systemd/system/hisab-sync.service >/dev/null <<UNIT
 [Unit]
 Description=Hisab AI live sync server
 After=network-online.target
@@ -106,7 +126,8 @@ User=hisab-sync
 Group=hisab-sync
 Environment=HISAB_DATA=/var/lib/hisab-sync
 Environment=HISAB_PORT=8787
-ExecStart=/usr/bin/env python3 /opt/hisab-sync/hisab_sync.py
+EnvironmentFile=-/etc/hisab-sync.env
+ExecStart=$PY /opt/hisab-sync/hisab_sync.py
 Restart=always
 RestartSec=3
 NoNewPrivileges=true
@@ -124,6 +145,7 @@ $SUDO systemctl restart hisab-sync
 sleep 1
 if curl -fsS -m 5 http://127.0.0.1:8787/health >/dev/null 2>&1; then
   echo "  live sync server running (127.0.0.1:8787)"
+  if curl -fsS -m 5 http://127.0.0.1:8787/health | grep -q '"ai": true'; then echo "  Hisab AI (Claude) is ON"; else echo "  Hisab AI is off — run again with ANTHROPIC_API_KEY=... to turn it on"; fi
 else
   echo "  ⚠ live sync server did not start — see: journalctl -u hisab-sync -n 50"
 fi
