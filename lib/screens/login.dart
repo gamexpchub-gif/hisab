@@ -144,22 +144,20 @@ class _LoginScreenState extends State<LoginScreen> {
         builder: (c) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
           icon: const Icon(Icons.cloud_download_rounded, color: Color(0xFF4318D2), size: 44),
-          title: const Text('Your books are in the cloud'),
+          title: const Text('Backup found'),
           content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('${stores.length} store${stores.length == 1 ? '' : 's'} · last saved ${when(b.created)}${b.live ? ' (live copy)' : ''}'),
+            Text('Saved ${when(b.created)}'),
             const SizedBox(height: 8),
             for (final x in stores.values)
               Padding(
                 padding: const EdgeInsets.only(bottom: 4),
-                child: Text(
-                    '• ${x.storeName.isNotEmpty ? x.storeName : (x.store == 'main' ? 'Main store' : 'Store')} — '
-                    '${x.sales} sales, ${x.products} products · ${when(x.created)}',
+                child: Text('• ${x.storeName.isNotEmpty ? x.storeName : (x.store == 'main' ? 'Main store' : 'Store')} · ${x.sales} sales',
                     style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
               ),
           ]),
           actions: [
             TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Start fresh')),
-            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Restore everything')),
+            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Restore')),
           ],
         ),
       );
@@ -172,7 +170,7 @@ class _LoginScreenState extends State<LoginScreen> {
           canPop: false,
           child: AlertDialog(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
-            title: const Text('Restoring your books'),
+            title: const Text('Restoring…'),
             content: ValueListenableBuilder<(String, double)>(
               valueListenable: step,
               builder: (_, v, __) => Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -188,12 +186,12 @@ class _LoginScreenState extends State<LoginScreen> {
         final n = await Backup.restoreAccount(status: (t, p) => step.value = (t, p));
         if (mounted) {
           Navigator.of(context, rootNavigator: true).pop();
-          toast(context, '$n store${n == 1 ? '' : 's'} restored — your books are back');
+          toast(context, '$n store${n == 1 ? '' : 's'} restored');
         }
       } catch (e) {
         if (mounted) {
           Navigator.of(context, rootNavigator: true).pop();
-          toast(context, 'Restore stopped: $e', error: true);
+          toast(context, 'Restore failed: $e', error: true);
         }
       }
     } catch (e) {
@@ -203,12 +201,12 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _forgot() async {
     if (email.text.trim().isEmpty) {
-      setState(() => error = 'Type your email first, then tap Forgot password');
+      setState(() => error = 'Type your email first');
       return;
     }
     try {
       await Cloud.resetPassword(email.text);
-      if (mounted) toast(context, 'Password reset link sent to ${email.text.trim()}');
+      if (mounted) toast(context, 'Reset link sent');
     } catch (e) {
       if (mounted) setState(() => error = '$e');
     }
@@ -239,8 +237,7 @@ class _LoginScreenState extends State<LoginScreen> {
         contentPadding: const EdgeInsets.symmetric(vertical: 16),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(18), borderSide: BorderSide.none),
         enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(18), borderSide: BorderSide.none),
-        focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(18), borderSide: const BorderSide(color: Color(0xFF8B6CF6), width: 1.6)),
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(18), borderSide: const BorderSide(color: Color(0xFF8B6CF6), width: 1.6)),
       );
 
   @override
@@ -265,8 +262,7 @@ class _LoginScreenState extends State<LoginScreen> {
               child: Container(
                 width: 280,
                 height: 280,
-                decoration: const BoxDecoration(
-                    shape: BoxShape.circle, gradient: RadialGradient(colors: [Color(0x40FFFFFF), Color(0x00FFFFFF)])),
+                decoration: const BoxDecoration(shape: BoxShape.circle, gradient: RadialGradient(colors: [Color(0x40FFFFFF), Color(0x00FFFFFF)])),
               ),
             ),
             SafeArea(
@@ -306,8 +302,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 4),
                 Center(
-                  child: Text('Smart shop accounting',
-                      maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(13, FontWeight.w600, const Color(0xDDFFFFFF))),
+                  child: Text('Smart shop accounting', maxLines: 1, overflow: TextOverflow.ellipsis, style: _j(13, FontWeight.w600, const Color(0xDDFFFFFF))),
                 ),
                 const SizedBox(height: 18),
                 Row(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -353,12 +348,9 @@ class _LoginScreenState extends State<LoginScreen> {
                                 alignment: Alignment.center,
                                 decoration: BoxDecoration(
                                   borderRadius: BorderRadius.circular(19),
-                                  gradient: register == t.$1
-                                      ? const LinearGradient(colors: [Color(0xFF6B35EE), Color(0xFF4318D2)])
-                                      : null,
+                                  gradient: register == t.$1 ? const LinearGradient(colors: [Color(0xFF6B35EE), Color(0xFF4318D2)]) : null,
                                 ),
-                                child: Text(t.$2,
-                                    style: _j(13.5, FontWeight.w800, register == t.$1 ? Colors.white : const Color(0xFF3A4155))),
+                                child: Text(t.$2, style: _j(13.5, FontWeight.w800, register == t.$1 ? Colors.white : const Color(0xFF3A4155))),
                               ),
                             ),
                           ),
@@ -370,7 +362,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         controller: name,
                         textCapitalization: TextCapitalization.words,
                         style: _j(15, FontWeight.w600, _ink),
-                        decoration: _deco('Your name / shop name', Icons.storefront_rounded),
+                        decoration: _deco('Shop name', Icons.storefront_rounded),
                       ),
                       const SizedBox(height: 12),
                     ],
@@ -379,7 +371,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       keyboardType: TextInputType.emailAddress,
                       autofillHints: const [AutofillHints.email],
                       style: _j(15, FontWeight.w600, _ink),
-                      decoration: _deco(register ? 'Email address' : 'Email or user ID', Icons.alternate_email_rounded),
+                      decoration: _deco(register ? 'Email' : 'Email or user ID', Icons.alternate_email_rounded),
                     ),
                     const SizedBox(height: 12),
                     TextField(
@@ -389,7 +381,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       style: _j(15, FontWeight.w600, _ink),
                       onSubmitted: (_) => _submit(),
                       decoration: _deco(
-                        register ? 'Create a password (6+ characters)' : 'Password',
+                        register ? 'Password (6+ letters)' : 'Password',
                         Icons.lock_outline_rounded,
                         suffix: IconButton(
                           icon: Icon(hide ? Icons.visibility_rounded : Icons.visibility_off_rounded, color: _muted),
@@ -440,8 +432,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             const Icon(Icons.settings_suggest_rounded, color: Color(0xFFB06A00), size: 20),
                             const SizedBox(width: 8),
                             Expanded(
-                              child: Text('Cloud not set up yet — tap to add your Firebase project',
-                                  style: _j(12, FontWeight.w700, const Color(0xFF8A5300))),
+                              child: Text('Set up cloud', style: _j(12, FontWeight.w700, const Color(0xFF8A5300))),
                             ),
                           ]),
                         ),
@@ -454,8 +445,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   Center(
                     child: TextButton(
                       onPressed: _offline,
-                      child: Text('Continue without account (offline)',
-                          style: _j(13.5, FontWeight.w700, const Color(0xE6FFFFFF))),
+                      child: Text('Use offline', style: _j(13.5, FontWeight.w700, const Color(0xE6FFFFFF))),
                     ),
                   ),
                 if (Cloud.configured)
@@ -519,13 +509,12 @@ class _CloudSetupSheetState extends State<CloudSetupSheet> {
           const SizedBox(height: 14),
           Text('Cloud setup', style: _j(20, FontWeight.w800, const Color(0xFF0B0F5E))),
           const SizedBox(height: 4),
-          Text('One time — your books are stored in your own Firebase project (free plan).',
-              style: _j(12.5, FontWeight.w500, _muted)),
+          Text('One time · your own Firebase (free)', style: _j(12.5, FontWeight.w500, _muted)),
           const SizedBox(height: 12),
           step('1', 'console.firebase.google.com → Add project'),
-          step('2', 'Authentication → Sign-in method → turn on Email/Password'),
-          step('3', 'Firestore Database → Create database, then Rules → allow each user only their own data'),
-          step('4', 'Project settings → copy the Web API key and Project ID below'),
+          step('2', 'Authentication → turn on Email/Password'),
+          step('3', 'Firestore → Create database'),
+          step('4', 'Project settings → copy API key + Project ID'),
           const SizedBox(height: 10),
           TextField(controller: apiKey, decoration: const InputDecoration(labelText: 'Web API key')),
           const SizedBox(height: 10),
@@ -537,13 +526,13 @@ class _CloudSetupSheetState extends State<CloudSetupSheet> {
             fontSize: 16,
             onTap: () async {
               if (apiKey.text.trim().length < 20 || project.text.trim().isEmpty) {
-                toast(context, 'Enter both the Web API key and the Project ID', error: true);
+                toast(context, 'Enter the API key and Project ID', error: true);
                 return;
               }
               await Cloud.configure(apiKey.text, project.text);
               if (!context.mounted) return;
               Navigator.of(context).pop();
-              toast(context, 'Cloud connected — now sign in or create your account');
+              toast(context, 'Cloud connected');
             },
           ),
         ]),

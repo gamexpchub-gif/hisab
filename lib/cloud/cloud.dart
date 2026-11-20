@@ -147,19 +147,19 @@ class Cloud {
   static String _friendly(String code) {
     final c = code.split(' ').first.split(':').first;
     return switch (c) {
-      'EMAIL_EXISTS' => 'An account with this email already exists — sign in instead',
+      'EMAIL_EXISTS' => 'Account exists — sign in',
       'EMAIL_NOT_FOUND' || 'INVALID_LOGIN_CREDENTIALS' || 'INVALID_PASSWORD' => 'Wrong email or password',
       'USER_DISABLED' => 'This account has been disabled',
-      'WEAK_PASSWORD' => 'Password must be at least 6 characters',
-      'INVALID_EMAIL' => 'Enter a valid email address',
+      'WEAK_PASSWORD' => 'Password: 6+ letters',
+      'INVALID_EMAIL' => 'Enter a valid email',
       'MISSING_PASSWORD' => 'Enter your password',
-      'TOO_MANY_ATTEMPTS_TRY_LATER' => 'Too many tries — please wait a few minutes',
-      'API_KEY_INVALID' || 'INVALID_API_KEY' => 'Cloud setup: the Web API key is wrong',
+      'TOO_MANY_ATTEMPTS_TRY_LATER' => 'Too many tries — wait a bit',
+      'API_KEY_INVALID' || 'INVALID_API_KEY' => 'Wrong API key',
       'CONFIGURATION_NOT_FOUND' || 'OPERATION_NOT_ALLOWED' =>
         'Turn on Email/Password sign-in in Firebase (Authentication → Sign-in method)',
-      'PERMISSION_DENIED' => 'Cloud refused access — check the Firestore rules',
-      'NOT_FOUND' => 'Cloud database not found — create Firestore in the Firebase project',
-      'TOKEN_EXPIRED' || 'INVALID_REFRESH_TOKEN' || 'USER_NOT_FOUND' => 'Session expired — please sign in again',
+      'PERMISSION_DENIED' => 'Access denied — check rules',
+      'NOT_FOUND' => 'Firestore not created',
+      'TOKEN_EXPIRED' || 'INVALID_REFRESH_TOKEN' || 'USER_NOT_FOUND' => 'Session expired — sign in',
       _ => 'Cloud error: $code',
     };
   }
