@@ -38,6 +38,11 @@ SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO="sudo"
 WEB=/var/www/hisab-admin
 SNIP=/etc/nginx/snippets/hisab-admin.conf
 STAMP=$(date +%Y%m%d%H%M%S)
+# backups live OUTSIDE /etc/nginx: nginx reads every file in sites-enabled,
+# so a copy left there would load the same site twice and break nginx
+BK=/root/hisab-nginx-backups/$STAMP
+$SUDO mkdir -p "$BK"
+bk() { echo "$BK/$(echo "$1" | tr '/' '_')"; }
 
 if ! command -v nginx >/dev/null 2>&1; then
   echo "  installing nginx…"
@@ -132,7 +137,7 @@ fi
 # new config passes "nginx -t", so a clash never takes the other sites down)
 $SUDO mkdir -p /etc/nginx/snippets
 SNIP_OLD=""
-if [ -f "$SNIP" ]; then SNIP_OLD="$SNIP.bak-$STAMP"; $SUDO cp "$SNIP" "$SNIP_OLD"; fi
+if [ -f "$SNIP" ]; then SNIP_OLD="$(bk "$SNIP")"; $SUDO cp "$SNIP" "$SNIP_OLD"; fi
 $SUDO tee "$SNIP" >/dev/null <<NGINX
 # Hisab AI web admin — managed by tool/deploy_admin.sh
 location = /hisab { return 301 /hisab/dashboard/; }
@@ -182,14 +187,18 @@ location ^~ /hisab/dashboard/ {
 NGINX
 
 # is the domain already served by nginx?
-EXISTING=$(grep -RlE "server_name[^;]*[[:space:]]$DOMAIN([[:space:];]|\$)" /etc/nginx/sites-enabled /etc/nginx/conf.d 2>/dev/null | sort -u || true)
+# copies an older version of this script left inside nginx's folders
+for F in /etc/nginx/sites-enabled/*.bak-[0-9]* /etc/nginx/conf.d/*.bak-[0-9]*; do
+  if [ -f "$F" ]; then $SUDO mv "$F" "$BK/"; echo "  moved an old backup out of nginx: $F"; fi
+done
+EXISTING=$(grep -RlE --exclude='*.bak*' "server_name[^;]*[[:space:]]$DOMAIN([[:space:];]|\$)" /etc/nginx/sites-enabled /etc/nginx/conf.d 2>/dev/null | sort -u || true)
 NEW_SITE=0
 if [ -n "$EXISTING" ]; then
   for F in $EXISTING; do
     REAL=$(readlink -f "$F")
     if ! grep -q "snippets/hisab-admin.conf" "$REAL"; then
-      echo "  adding /hisab/dashboard to $REAL (backup: $REAL.bak-$STAMP)"
-      $SUDO cp "$REAL" "$REAL.bak-$STAMP"
+      echo "  adding /hisab/dashboard to $REAL (backup: $(bk "$REAL"))"
+      $SUDO cp "$REAL" "$(bk "$REAL")"
       $SUDO sed -i -E "/server_name[^;]*[[:space:]]${DOMAIN//./\\.}([[:space:];]|\$)/a\\    include snippets/hisab-admin.conf;" "$REAL"
     else
       echo "  $REAL already includes the dashboard"
@@ -215,7 +224,7 @@ fi
 if ! $SUDO nginx -t 2>/tmp/nginx-test.log; then
   echo "  ✗ nginx config test failed — undoing changes:"
   cat /tmp/nginx-test.log
-  for F in $EXISTING; do REAL=$(readlink -f "$F"); [ -f "$REAL.bak-$STAMP" ] && $SUDO cp "$REAL.bak-$STAMP" "$REAL"; done
+  for F in $EXISTING; do REAL=$(readlink -f "$F"); [ -f "$(bk "$REAL")" ] && $SUDO cp "$(bk "$REAL")" "$REAL"; done
   [ "$NEW_SITE" = 1 ] && $SUDO rm -f /etc/nginx/sites-enabled/hisab-admin /etc/nginx/sites-available/hisab-admin /etc/nginx/conf.d/hisab-admin.conf
   if [ -n "$SNIP_OLD" ]; then $SUDO cp "$SNIP_OLD" "$SNIP"; else $SUDO rm -f "$SNIP"; fi
   if $SUDO nginx -t >/dev/null 2>&1; then
