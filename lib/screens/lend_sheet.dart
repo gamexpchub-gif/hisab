@@ -156,50 +156,17 @@ class _LendSheetState extends State<LendSheet> {
     super.dispose();
   }
 
-  /// Quick add: name + mobile; an existing one with the same name and number
-  /// is picked instead of making a copy.
+  /// Add a customer / supplier without leaving this sheet; it is selected.
   Future<void> _addParty() async {
-    final isC = partyType == 'customer';
-    final name = TextEditingController(text: RegExp(r'\d').hasMatch(q) ? '' : q);
-    final phone = TextEditingController(text: RegExp(r'^[\d\s+]+$').hasMatch(q) ? q : '');
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: Text(isC ? 'New customer' : 'New supplier'),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(controller: name, autofocus: true, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Name')),
-          const SizedBox(height: 8),
-          TextField(controller: phone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Mobile (optional)')),
-        ]),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Save')),
-        ],
-      ),
-    );
-    final n = name.text.trim(), ph = phone.text.replaceAll(RegExp(r'[^\d+]'), '');
-    name.dispose();
-    phone.dispose();
-    if (ok != true || !mounted) return;
-    if (n.isEmpty) {
-      toast(context, 'Enter the name', error: true);
-      return;
-    }
-    try {
-      final dup = await Books.findDuplicateParty(partyType, n, ph);
-      final id = dup != null ? asInt(dup['id']) : await Books.saveParty(partyType, {'name': n, 'phone': ph.isEmpty ? null : ph});
-      await _load();
-      if (!mounted) return;
-      final shown = dup != null ? '${dup['name']}' : n;
-      setState(() {
-        partyId = id;
-        q = shown; // the new one shows, selected
-        search.text = shown;
-      });
-      toast(context, dup != null ? '${dup['name']} is already added — selected' : '$n added');
-    } catch (e) {
-      if (mounted) toast(context, '$e', error: true);
-    }
+    final r = await quickAddParty(context, partyType, typed: q);
+    if (r == null || !mounted) return;
+    await _load();
+    if (!mounted) return;
+    setState(() {
+      partyId = r.$1;
+      q = r.$2; // the new one shows, selected
+      search.text = r.$2;
+    });
   }
 
   Rec? get _party {
@@ -290,6 +257,7 @@ class _LendSheetState extends State<LendSheet> {
                   Text(gave ? 'Cash given on credit — they will owe you' : 'Cash received — their due goes down', style: _j(11.5, FontWeight.w500, _muted)),
                 ]),
               ),
+              if (widget.partyId == null) AddCustomerButton(onTap: _addParty, tooltip: partyType == 'customer' ? 'Add customer' : 'Add supplier'),
             ]),
             const SizedBox(height: 14),
             _amountField(amount, _color),
@@ -321,54 +289,31 @@ class _LendSheetState extends State<LendSheet> {
                 ],
               ]),
               const SizedBox(height: 10),
-              Row(children: [
-                Expanded(
-                  child: Container(
-                    height: 44,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    decoration: _card(r: 22),
-                    child: Row(children: [
-                      const Icon(Icons.search_rounded, color: _muted, size: 20),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: TextField(
-                          controller: search,
-                          onChanged: (v) => setState(() => q = v.trim()),
-                          style: _j(13.5, FontWeight.w600, _ink),
-                          decoration: InputDecoration(
-                            isCollapsed: true,
-                            filled: false,
-                            border: InputBorder.none,
-                            enabledBorder: InputBorder.none,
-                            focusedBorder: InputBorder.none,
-                            hintText: 'Search name or phone',
-                            hintStyle: _j(13, FontWeight.w400, const Color(0xFF8A8FAD)),
-                          ),
-                        ),
+              Container(
+                height: 44,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: _card(r: 22),
+                child: Row(children: [
+                  const Icon(Icons.search_rounded, color: _muted, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: search,
+                      onChanged: (v) => setState(() => q = v.trim()),
+                      style: _j(13.5, FontWeight.w600, _ink),
+                      decoration: InputDecoration(
+                        isCollapsed: true,
+                        filled: false,
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        hintText: 'Search name or phone',
+                        hintStyle: _j(13, FontWeight.w400, const Color(0xFF8A8FAD)),
                       ),
-                    ]),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                // add a new customer / supplier without leaving this sheet
-                GestureDetector(
-                  onTap: _addParty,
-                  child: Container(
-                    height: 44,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(22),
-                      gradient: const LinearGradient(colors: [Color(0xFF6B35EE), Color(0xFF4318D2)]),
-                      boxShadow: const [BoxShadow(color: Color(0x554318D2), blurRadius: 14, offset: Offset(0, 6), spreadRadius: -6)],
                     ),
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      const Icon(Icons.person_add_alt_1_rounded, color: Colors.white, size: 18),
-                      const SizedBox(width: 5),
-                      Text('Add', style: _j(12.5, FontWeight.w800, Colors.white)),
-                    ]),
                   ),
-                ),
-              ]),
+                ]),
+              ),
               const SizedBox(height: 10),
               SizedBox(
                 height: 92,
@@ -691,5 +636,77 @@ class _DueSheetState extends State<DueSheet> {
         ),
       ),
     );
+  }
+}
+
+/// A small round "add customer" button for page and sheet headers. Without
+/// [onTap] it adds a customer (quick form) from anywhere.
+class AddCustomerButton extends StatelessWidget {
+  final VoidCallback? onTap;
+  final String tooltip;
+  const AddCustomerButton({super.key, this.onTap, this.tooltip = 'Add customer'});
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+        message: tooltip,
+        child: GestureDetector(
+          onTap: () {
+            HapticFeedback.selectionClick();
+            if (onTap != null) {
+              onTap!();
+            } else {
+              quickAddParty(context, 'customer');
+            }
+          },
+          child: Container(
+            width: 40,
+            height: 40,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(colors: [Color(0xFF6B35EE), Color(0xFF4318D2)]),
+              boxShadow: [BoxShadow(color: Color(0x554318D2), blurRadius: 12, offset: Offset(0, 5), spreadRadius: -5)],
+            ),
+            child: const Icon(Icons.person_add_alt_1_rounded, color: Colors.white, size: 19),
+          ),
+        ),
+      );
+}
+
+/// Quick add: name + mobile. An existing one with the same name and number is
+/// used instead of a copy. Returns (id, name), or null when cancelled.
+Future<(int, String)?> quickAddParty(BuildContext context, String type, {String typed = ''}) async {
+  final isC = type == 'customer';
+  final name = TextEditingController(text: RegExp(r'\d').hasMatch(typed) ? '' : typed);
+  final phone = TextEditingController(text: RegExp(r'^[\d\s+]+$').hasMatch(typed) ? typed : '');
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (c) => AlertDialog(
+      title: Text(isC ? 'New customer' : 'New supplier'),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        TextField(controller: name, autofocus: true, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Name')),
+        const SizedBox(height: 8),
+        TextField(controller: phone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Mobile (optional)')),
+      ]),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+        FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Save')),
+      ],
+    ),
+  );
+  final n = name.text.trim(), ph = phone.text.replaceAll(RegExp(r'[^\d+]'), '');
+  if (ok != true || !context.mounted) return null;
+  if (n.isEmpty) {
+    toast(context, 'Enter the name', error: true);
+    return null;
+  }
+  try {
+    final dup = await Books.findDuplicateParty(type, n, ph);
+    final id = dup != null ? asInt(dup['id']) : await Books.saveParty(type, {'name': n, 'phone': ph.isEmpty ? null : ph});
+    final shown = dup != null ? '${dup['name']}' : n;
+    if (context.mounted) toast(context, dup != null ? '$shown is already added' : '$shown added');
+    return (id, shown);
+  } catch (e) {
+    if (context.mounted) toast(context, '$e', error: true);
+    return null;
   }
 }

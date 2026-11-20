@@ -152,6 +152,7 @@ class _LedgersScreenState extends State<LedgersScreen> {
                       Text('Credit given & taken — who, when, why', style: _j(12, FontWeight.w600, const Color(0xFF323B60))),
                     ]),
                   ),
+                  const AddCustomerButton(),
                 ]),
                 const SizedBox(height: 14),
                 _hero(d.totals),
@@ -358,59 +359,30 @@ class _LedgersScreenState extends State<LedgersScreen> {
     }
     return [
       if (d.dues.isNotEmpty) ...[_duesStrip(d.dues), const SizedBox(height: 14)],
-      Row(children: [
-        Expanded(
-          child: Container(
-            height: 48,
-            decoration: _card(r: 24),
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            child: Row(children: [
-              const Icon(Icons.search_rounded, color: Color(0xFF2C3B8F)),
-              const SizedBox(width: 10),
-              Expanded(
-                child: TextField(
-                  onChanged: (v) => setState(() => q = v.trim()),
-                  style: _j(14, FontWeight.w600, _ink),
-                  decoration: InputDecoration(
-                    isCollapsed: true,
-                    filled: false,
-                    border: InputBorder.none,
-                    enabledBorder: InputBorder.none,
-                    focusedBorder: InputBorder.none,
-                    hintText: 'Search name, reason, product, invoice',
-                    hintStyle: _j(13.5, FontWeight.w400, const Color(0xFF8A8FAD)),
-                  ),
-                ),
+      Container(
+        height: 48,
+        decoration: _card(r: 24),
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        child: Row(children: [
+          const Icon(Icons.search_rounded, color: Color(0xFF2C3B8F)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: TextField(
+              onChanged: (v) => setState(() => q = v.trim()),
+              style: _j(14, FontWeight.w600, _ink),
+              decoration: InputDecoration(
+                isCollapsed: true,
+                filled: false,
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                hintText: 'Search name, reason, product, invoice',
+                hintStyle: _j(13.5, FontWeight.w400, const Color(0xFF8A8FAD)),
               ),
-            ]),
-          ),
-        ),
-        const SizedBox(width: 10),
-        // add a customer right here
-        Tooltip(
-          message: 'Add customer',
-          child: GestureDetector(
-            onTap: () {
-              HapticFeedback.selectionClick();
-              open(context, const PartyForm(type: 'customer'));
-            },
-            child: Container(
-              height: 48,
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(24),
-                gradient: const LinearGradient(colors: [Color(0xFF6B35EE), Color(0xFF4318D2)]),
-                boxShadow: const [BoxShadow(color: Color(0x664318D2), blurRadius: 16, offset: Offset(0, 6), spreadRadius: -6)],
-              ),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                const Icon(Icons.person_add_alt_1_rounded, color: Colors.white, size: 20),
-                const SizedBox(width: 6),
-                Text('Customer', style: _j(13, FontWeight.w800, Colors.white)),
-              ]),
             ),
           ),
-        ),
-      ]),
+        ]),
+      ),
       const SizedBox(height: 10),
       SingleChildScrollView(
         scrollDirection: Axis.horizontal,
