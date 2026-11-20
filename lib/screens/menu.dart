@@ -156,7 +156,7 @@ class _MenuScreenState extends State<MenuScreen> {
       ('Smart AI', [
         _Item('Smart Business AI', 'What to do today: dues, EMIs, stock, profit', Icons.auto_awesome_rounded,
             const [Color(0xFF7B3FF2), Color(0xFF1B1F6B)], () => go(const SmartAiScreen())),
-        _Item('AI Brain', 'Ask anything, sales forecast, mistake alerts, customer scores', Icons.psychology_rounded,
+        _Item('AI Brain', 'Type or say a bill — customer & bill ready · ask anything · forecast', Icons.psychology_rounded,
             const [Color(0xFFFFB84D), Color(0xFFE0245E)], () => go(const BrainScreen())),
         _Item('AI Autopilot', 'Reminders 3·7·15 days, follow-ups, re-order, cash close', Icons.smart_toy_rounded,
             const [Color(0xFF34D399), Color(0xFF0E7490)], () => go(const AutopilotScreen())),

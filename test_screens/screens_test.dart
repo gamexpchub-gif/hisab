@@ -33,6 +33,7 @@ import 'package:hisab/print/labels.dart';
 import 'package:hisab/core/export_book.dart';
 import 'package:hisab/screens/gst_export.dart';
 import 'package:hisab/screens/smart_ai.dart';
+import 'package:hisab/screens/brain.dart';
 import 'package:hisab/screens/daily_report_screen.dart';
 import 'package:hisab/screens/analytics.dart';
 import 'package:hisab/screens/loans.dart';
@@ -257,4 +258,37 @@ void main() {
       }
     });
   }
+
+  testWidgets('ai_assistant', (t) async {
+    t.view.physicalSize = const Size(1080, 2340);
+    t.view.devicePixelRatio = 2.75;
+    addTearDown(t.view.reset);
+    final key = GlobalKey();
+    await t.pumpWidget(RepaintBoundary(
+      key: key,
+      child: MaterialApp(debugShowCheckedModeBanner: false, theme: buildTheme(), home: const BrainScreen()),
+    ));
+    await t.pump(const Duration(milliseconds: 300));
+    await t.enterText(find.byType(TextField).first, 'Karim Uddin 9830099999 ke Redmi Note 13 Pro ekta 23 hajar ar AirPods Pro upi');
+    await t.tap(find.byIcon(Icons.arrow_upward_rounded));
+    for (var i = 0; i < 200; i++) {
+      await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 15)));
+      await t.pump(const Duration(milliseconds: 50));
+      if (i > 30 && find.text('Save bill').evaluate().isNotEmpty) break;
+    }
+    await t.pump(const Duration(seconds: 1));
+    final boundary = key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+    await t.runAsync(() async {
+      final image = await boundary.toImage(pixelRatio: 2.75);
+      final png = await image.toByteData(format: ui.ImageByteFormat.png);
+      File('screenshots/ai_assistant.png')
+        ..createSync(recursive: true)
+        ..writeAsBytesSync(png!.buffer.asUint8List());
+    });
+    await t.pumpWidget(const SizedBox());
+    for (var i = 0; i < 20; i++) {
+      await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await t.pump(const Duration(seconds: 1));
+    }
+  });
 }

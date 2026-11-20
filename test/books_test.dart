@@ -12,6 +12,7 @@ import 'package:hisab/core/insights.dart';
 import 'package:hisab/core/daily_report.dart';
 import 'package:hisab/core/analytics.dart';
 import 'package:hisab/core/autopilot.dart';
+import 'package:hisab/core/ai_command.dart';
 import 'package:hisab/core/brain.dart';
 import 'package:hisab/core/staff.dart';
 import 'package:hisab/core/plan.dart';
@@ -663,6 +664,37 @@ void main() {
     expect(await Books.findDuplicateParty('customer', 'RAHIM SHEIKH', '09830055555'), isNotNull);
     // suppliers are checked separately
     await Books.saveParty('supplier', {'name': 'Rahim Sheikh', 'phone': '9830055555'});
+  });
+
+  test('AI command: one sentence makes the customer and the bill', () async {
+    final sup = await Books.saveParty('supplier', {'name': 'AI Supplier'});
+    final p = await Books.saveProduct({'name': 'Vivo T3', 'brand': 'Vivo', 'gst_bp': 0, 'price': 1900000});
+    await Books.createPurchase(items: [ItemIn(p, 1, 1500000, 'AI-IMEI-1'), ItemIn(p, 1, 1500000, 'AI-IMEI-2')], supplierId: sup);
+    final cover = await Books.saveProduct({'name': 'Back Cover', 'gst_bp': 1800, 'price': 25000}, openingQty: 10, openingCost: 10000);
+    final products = await Books.query('SELECT * FROM products');
+    final customers = await Books.query('SELECT * FROM customers');
+
+    // new customer, phone with an IMEI, a cover with GST, 5000 advance, rest due
+    final cmd = AiCommands.parse('Karim Uddin 9830099999 ke Vivo T3 ekta 18 hajar ar back cover 295 advance 5000 baki', products, customers) as BillCommand;
+    expect(cmd.newName, 'Karim Uddin');
+    final (sale, number, total, paid) = await AiActions.saveBill(cmd, pay: 'due', paidNow: cmd.paidNow);
+    expect(number, startsWith('INV-'));
+    expect(total, 1800000 + 29500);
+    expect(paid, 500000);
+    final items = await Books.query('SELECT product_id, serial, rate FROM sale_items WHERE sale_id = ? ORDER BY id', [sale]);
+    expect(items.first['serial'], 'AI-IMEI-1');
+    expect(items.last['product_id'], cover);
+    expect(items.last['rate'], 25000); // 295 incl. 18% GST
+    final cid = asInt((await Books.query('SELECT customer_id FROM sales WHERE id = ?', [sale])).first['customer_id']);
+    expect((await Books.query('SELECT name, phone FROM customers WHERE id = ?', [cid])).first['name'], 'Karim Uddin');
+    expect((await Books.partyBalances('customer'))[cid], 1329500);
+
+    // the same customer again (by phone): no duplicate
+    final again = AiCommands.parse('9830099999 back cover 295 cash', products, await Books.query('SELECT * FROM customers')) as BillCommand;
+    expect(again.customer?['id'], cid);
+    await AiActions.saveBill(again, pay: 'cash');
+    expect((await Books.query("SELECT COUNT(*) AS c FROM customers WHERE name = 'Karim Uddin'")).first['c'], 1);
+    await expectBalanced();
   });
 
   test('Product purchase cost is kept with no opening stock', () async {

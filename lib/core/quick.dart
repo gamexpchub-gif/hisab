@@ -137,7 +137,7 @@ class VoiceOrder {
 /// "Vivo T3 ekta 18 hajar Rahim cash", "2 cover 299 and 1 charger 499 upi",
 /// "iphone 15 one piece 65000 customer Ankit baki".
 class VoiceBill {
-  static const _qtyWords = {
+  static const qtyWords = {
     'one': 1, 'ek': 1, 'ekta': 1, 'ekti': 1, 'single': 1, 'a': 1, 'ak': 1, 'akta': 1,
     'two': 2, 'dui': 2, 'duita': 2, 'duto': 2, 'do': 2, 'dho': 2,
     'three': 3, 'tin': 3, 'tinta': 3, 'teen': 3,
@@ -149,13 +149,13 @@ class VoiceBill {
     'nine': 9, 'noy': 9, 'nau': 9,
     'ten': 10, 'dosh': 10, 'das': 10,
   };
-  static const _pay = {
+  static const payWords = {
     'cash': 'cash', 'nagad': 'cash', 'nogod': 'cash', 'naqad': 'cash',
     'upi': 'upi', 'gpay': 'upi', 'phonepe': 'upi', 'paytm': 'upi', 'online': 'upi', 'google': 'upi',
     'card': 'card', 'debit': 'card', 'credit card': 'card',
     'baki': 'due', 'bakee': 'due', 'due': 'due', 'udhar': 'due', 'udhaar': 'due', 'credit': 'due', 'khata': 'due',
   };
-  static const _filler = {
+  static const fillerWords = {
     'ta', 'ti', 'to', 'te', 'pcs', 'piece', 'pieces', 'unit', 'units', 'qty', 'quantity', 'nos', 'no',
     'rupees', 'rupee', 'rs', 'taka', 'tk', 'inr', 'price', 'rate', 'dam', 'at', 'for', 'er', 'ke', 'customer',
     'name', 'naam', 'diye', 'dilam', 'bill', 'koro', 'kore', 'sell', 'sale', 'becho', 'bikri', 'payment', 'pay', 'in', 'by',
@@ -191,7 +191,7 @@ class VoiceBill {
     var text = normalise(spoken);
     // payment
     String? pay;
-    for (final e in _pay.entries) {
+    for (final e in payWords.entries) {
       if (RegExp('\\b${RegExp.escape(e.key)}\\b').hasMatch(text)) {
         pay = e.value;
         text = text.replaceAll(RegExp('\\b${RegExp.escape(e.key)}\\b'), ' ');
@@ -240,12 +240,12 @@ class VoiceBill {
       final tokens = part.split(' ');
       for (var i = 0; i < tokens.length; i++) {
         final w = tokens[i];
-        if (_qtyWords.containsKey(w) && qty == null && w != 'a' && w != 'do') {
-          qty = _qtyWords[w];
+        if (qtyWords.containsKey(w) && qty == null && w != 'a' && w != 'do') {
+          qty = qtyWords[w];
           continue;
         }
         if ((w == 'a' || w == 'do') && qty == null && i + 1 < tokens.length && !RegExp(r'^\d').hasMatch(tokens[i + 1])) {
-          qty = _qtyWords[w];
+          qty = qtyWords[w];
           continue;
         }
         final n = RegExp(r'^\d+(?:\.\d+)?$').hasMatch(w) ? double.parse(w) : null;
@@ -262,7 +262,7 @@ class VoiceBill {
           }
           continue;
         }
-        if (_filler.contains(w)) continue;
+        if (fillerWords.contains(w)) continue;
         rest.add(w);
       }
       final query = rest.join(' ').trim();
